@@ -85,17 +85,28 @@ export async function fetchUsdtAssets(): Promise<string[]> {
 }
 
 /** Preço e variação 24h. Todos os ids precisam estar listados: um símbolo inválido derruba o pedido inteiro. */
-export async function fetchTickers(ids: string[]): Promise<Record<string, CurrentPrice>> {
+/** Preço e variação 24h por par (ex.: "BTCUSDT", "USDTBRL"). Um par inválido derruba o pedido inteiro. */
+export async function fetchPairTickers(pairs: string[]): Promise<Record<string, CurrentPrice>> {
   const body = await get<{ symbol: string; lastPrice: string; priceChangePercent: string }[]>("/api/v3/ticker/24hr", {
-    symbols: JSON.stringify(ids.map((id) => id + QUOTE)),
+    symbols: JSON.stringify(pairs),
   });
   if (!Array.isArray(body)) throw new Error("Binance: resposta inesperada em ticker/24hr");
   const out: Record<string, CurrentPrice> = {};
   for (const t of body) {
     const usd = Number(t.lastPrice);
-    if (!t.symbol.endsWith(QUOTE) || !Number.isFinite(usd)) continue;
+    if (!Number.isFinite(usd)) continue;
     const change = Number(t.priceChangePercent);
-    out[t.symbol.slice(0, -QUOTE.length)] = { usd, change24h: Number.isFinite(change) ? change : null };
+    out[t.symbol] = { usd, change24h: Number.isFinite(change) ? change : null };
+  }
+  return out;
+}
+
+/** Preço e variação 24h em USDT por moeda. Todos os ids precisam estar listados. */
+export async function fetchTickers(ids: string[]): Promise<Record<string, CurrentPrice>> {
+  const byPair = await fetchPairTickers(ids.map((id) => id + QUOTE));
+  const out: Record<string, CurrentPrice> = {};
+  for (const [pair, price] of Object.entries(byPair)) {
+    if (pair.endsWith(QUOTE)) out[pair.slice(0, -QUOTE.length)] = price;
   }
   return out;
 }
@@ -106,9 +117,17 @@ export async function fetchTickers(ids: string[]): Promise<Record<string, Curren
  * e sem essa folga o começo da curva ficaria sem preço (pico em zero no primeiro ponto).
  */
 export async function fetchKlines(id: string, days: 30 | 365): Promise<PricePoint[]> {
-  const params = days === 30 ? { interval: "1h", limit: String(30 * 24 + 2) } : { interval: "1d", limit: String(365 + 2) };
-  const body = await get<unknown[][]>("/api/v3/klines", { symbol: id + QUOTE, ...params });
-  if (!Array.isArray(body)) throw new Error(`Binance: sem histórico para ${id}`);
+  return fetchPairKlines(id + QUOTE, days);
+}
+
+/** Velas de um par qualquer. 1000 dias usa o máximo de velas diárias que a Binance devolve num pedido. */
+export async function fetchPairKlines(pair: string, days: 30 | 365 | 1000): Promise<PricePoint[]> {
+  const params =
+    days === 30
+      ? { interval: "1h", limit: String(30 * 24 + 2) }
+      : { interval: "1d", limit: String(days === 365 ? 365 + 2 : 1000) };
+  const body = await get<unknown[][]>("/api/v3/klines", { symbol: pair, ...params });
+  if (!Array.isArray(body)) throw new Error(`Binance: sem histórico para ${pair}`);
   return body
     .map((k) => [Number(k[6]), Number(k[4])] as PricePoint)
     .filter(([t, p]) => Number.isFinite(t) && Number.isFinite(p));
