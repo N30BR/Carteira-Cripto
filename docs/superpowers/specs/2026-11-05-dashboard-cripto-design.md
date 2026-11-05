@@ -5,7 +5,7 @@
 
 ## 1. Objetivo
 
-Sistema web, rodando localmente (computador do dono ou rede local), em que poucas pessoas (família/amigos) fazem login com usuário e senha e acessam um dashboard da própria carteira de criptoativos, no estilo Ledger Live.
+Sistema web, hospedado na VPS do dono via Easypanel (Docker, HTTPS com domínio próprio), em que poucas pessoas (família/amigos) fazem login com usuário e senha e acessam um dashboard da própria carteira de criptoativos, no estilo Ledger Live.
 
 **Sucesso:** cada pessoa entra, cadastra suas moedas e vê na hora o saldo total, a distribuição por ativo e a curva de capital, com preços atualizados automaticamente.
 
@@ -15,7 +15,7 @@ Sistema web, rodando localmente (computador do dono ou rede local), em que pouca
 - Apenas criptoativos; o usuário informa manualmente a quantidade de cada ativo.
 - Preços via API pública da CoinGecko.
 - Gráfico de capital estimado: quantidades atuais × preços históricos.
-- Execução local / rede local.
+- Hospedagem na VPS via Easypanel (decidido após a aprovação inicial, que previa execução local).
 - Stack: Next.js (escolhida por ser a mais moderna e adequada ao visual desejado).
 
 ### Premissas (confirmadas implicitamente)
@@ -40,7 +40,8 @@ Sistema web, rodando localmente (computador do dono ou rede local), em que pouca
 | Gráficos | Recharts (área e donut) |
 | Banco | SQLite em arquivo (`data/app.db`) via Drizzle ORM + better-sqlite3 |
 | Senhas | argon2 (hash) |
-| Sessão | Cookie `httpOnly`, `sameSite=lax`, `secure` quando em HTTPS; sessão armazenada no banco |
+| Sessão | Cookie `httpOnly`, `sameSite=lax`, `secure` em produção (HTTPS do Easypanel); sessão armazenada no banco |
+| Deploy | Docker (Next.js `output: "standalone"`) no Easypanel, volume persistente em `/app/data` |
 | Preços | CoinGecko API pública (plano gratuito) com cache no servidor |
 | Testes | Vitest (unidade/integração), Playwright (ponta a ponta) |
 
@@ -126,6 +127,7 @@ Fluxo de dados do dashboard:
 - **Moeda sem preço:** fica fora do total e do donut, marcada na tabela.
 - **Validação de entrada:** quantidade deve ser número > 0; usuário único; senha mínima de 8 caracteres. Mensagens claras no formulário.
 - **Sessão expirada ou inválida:** redireciona para `/login`.
+- **Limite por IP:** além do bloqueio por usuário, no máximo 20 tentativas de login por IP a cada 15 minutos (contador em memória; IP lido do cabeçalho `x-forwarded-for` repassado pelo proxy do Easypanel). Excedido → mensagem "Muitas tentativas. Tente novamente em 15 minutos."
 - **Autorização:** toda leitura/escrita de `holdings` filtra pelo usuário da sessão no servidor; rotas e ações de admin verificam `is_admin`.
 - **CSRF:** mutações via Server Actions do Next.js (proteção de origem embutida).
 
@@ -135,8 +137,17 @@ Fluxo de dados do dashboard:
 - **Vitest — integração** com SQLite temporário: login (senha certa/errada, bloqueio após 5 falhas, desbloqueio após 15 min), expiração de sessão, isolamento entre usuários em `holdings`, regras do admin (não remover a si mesmo / último admin).
 - **Playwright — ponta a ponta** com CoinGecko simulada: login → adicionar ativo → ver dashboard com total, donut e tabela → trocar período do gráfico → sair.
 
-## 9. Execução
+## 9. Execução e deploy
 
+### Desenvolvimento
 1. `npm install`
 2. `npm run create-admin`
-3. `npm run build && npm start` — acessível em `http://localhost:3000` ou pelo IP da máquina na rede local.
+3. `npm run dev` → `http://localhost:3000`
+
+### Produção (Easypanel)
+- Serviço do tipo **App** apontando para o repositório Git, build pelo `Dockerfile` do projeto (Next.js `standalone`, Node LTS, porta 3000).
+- **Volume persistente** montado em `/app/data` (contém `app.db`). Sem ele, os dados se perdem a cada deploy.
+- Variáveis de ambiente: `DATABASE_PATH=/app/data/app.db`, `COOKIE_SECURE=true`.
+- Domínio com HTTPS configurado no Easypanel.
+- Primeiro admin: pelo console do serviço, `node scripts/create-admin.js` (versão compilada incluída na imagem).
+- Migrações do banco aplicadas automaticamente ao iniciar.

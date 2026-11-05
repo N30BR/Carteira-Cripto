@@ -6,7 +6,7 @@
 
 **Architecture:** Projeto Next.js único (App Router, Server Components + Server Actions). Lógica de domínio em módulos puros/testáveis em `src/lib/*` que recebem `db` e `now` como parâmetro; páginas em `src/app` só orquestram. SQLite via Drizzle; CoinGecko acessada apenas por `src/lib/prices`, com cache em tabela.
 
-**Tech Stack:** Next.js (App Router) + TypeScript, Tailwind CSS + shadcn/ui, Recharts, Drizzle ORM + better-sqlite3, @node-rs/argon2, Vitest, Playwright.
+**Tech Stack:** Next.js (App Router) + TypeScript, Tailwind CSS + shadcn/ui, Recharts, Drizzle ORM + better-sqlite3, @node-rs/argon2, Vitest, Playwright, Docker (Easypanel).
 
 **Spec:** `docs/superpowers/specs/2026-11-05-dashboard-cripto-design.md`
 
@@ -16,6 +16,8 @@
 - Senhas: hash argon2 (`@node-rs/argon2`, sem build nativo no Windows). Mínimo 8 caracteres.
 - Sessão: cookie `session`, `httpOnly`, `sameSite=lax`, `secure` só quando `process.env.COOKIE_SECURE === "true"`; id aleatório de 32 bytes (hex); validade 7 dias.
 - Bloqueio: 5 falhas consecutivas → bloqueado por 15 minutos.
+- Limite por IP: máx. 20 tentativas de login por IP a cada 15 minutos (em memória); IP = primeiro valor de `x-forwarded-for`, senão `"unknown"`.
+- Deploy: Easypanel via `Dockerfile` (Next.js `output: "standalone"`), volume em `/app/data`, env `DATABASE_PATH=/app/data/app.db` e `COOKIE_SECURE=true`.
 - Mensagem de erro de login: exatamente `Usuário ou senha inválidos`.
 - CoinGecko: base URL em `COINGECKO_BASE_URL` (padrão `https://api.coingecko.com/api/v3`).
 - Cache: preço atual 60 s, histórico 1 h, busca 24 h. Falha da API → usar último valor em cache mesmo expirado.
@@ -134,8 +136,8 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 ### Task 3: Login com bloqueio
 
 **Files:**
-- Create: `src/lib/auth/login.ts`, `src/lib/validation.ts` (só `normalizeUsername` e `validatePassword` nesta task)
-- Test: `tests/auth/login.test.ts`, `tests/validation.test.ts`
+- Create: `src/lib/auth/login.ts`, `src/lib/auth/ip-limit.ts`, `src/lib/validation.ts` (só `normalizeUsername` e `validatePassword` nesta task)
+- Test: `tests/auth/login.test.ts`, `tests/auth/ip-limit.test.ts`, `tests/validation.test.ts`
 
 **Interfaces:**
 - Consumes: `verifyPassword`, `createSession`.
@@ -146,7 +148,10 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
   - `attemptLogin(db: Db, username: string, password: string, now?: Date): Promise<{ ok: true; sessionId: string; expiresAt: Date } | { ok: false; reason: "invalid" | "locked" }>`
     - usuário inexistente → `invalid`; `lockedUntil > now` → `locked` (sem checar senha); senha errada → incrementa `failedAttempts`, ao chegar em 5 define `lockedUntil = now + 15min` e zera contador; sucesso → zera `failedAttempts` e `lockedUntil`, cria sessão.
 
+  - Em `src/lib/auth/ip-limit.ts`: `IP_MAX_ATTEMPTS = 20`, `IP_WINDOW_MS = 15 * 60 * 1000`, `checkIpLimit(ip: string, now?: Date): boolean` (registra a tentativa e retorna `false` se passou de 20 na janela), `resetIpLimits(): void` (para testes). Mapa em memória; entradas fora da janela são descartadas.
+
 - [ ] **Step 1: Testes que falham:**
+  - `checkIpLimit("1.1.1.1")` 20x → `true`; 21ª → `false`; outro IP → `true`; após `now` + 15 min + 1 ms → `true` (em `tests/auth/ip-limit.test.ts`).
   - login correto → `ok: true`; login com `" PEDRO "` para usuário `pedro` → `ok: true`.
   - senha errada → `{ ok: false, reason: "invalid" }`; usuário inexistente → `invalid`.
   - 5 erros seguidos → 6ª tentativa **com senha certa** → `locked`; mesma tentativa com `now` + 15 min + 1 ms → `ok: true`.
@@ -269,7 +274,7 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 - Produces:
   - `getCurrentUser(): Promise<{ id; username; isAdmin; sessionId } | null>` (lê cookie `session`)
   - `requireUser()` → usuário ou `redirect("/login")`; `requireAdmin()` → usuário admin ou `redirect("/")`.
-  - `loginAction(prev, formData)` → em sucesso grava cookie e `redirect("/")`; erro → `{ error: "Usuário ou senha inválidos" }` ou `{ error: "Muitas tentativas. Tente novamente em 15 minutos." }`.
+  - `loginAction(prev, formData)` → chama `checkIpLimit(ip)` antes de `attemptLogin` (IP de `headers().get("x-forwarded-for")`); excedido → `{ error: "Muitas tentativas. Tente novamente em 15 minutos." }`. Em sucesso grava cookie e `redirect("/")`; erro → `{ error: "Usuário ou senha inválidos" }` ou `{ error: "Muitas tentativas. Tente novamente em 15 minutos." }`.
   - `logoutAction()` → apaga sessão e cookie, `redirect("/login")`.
 
 - [ ] **Step 1:** Implementar. Login: card centralizado, campos `Usuário`/`Senha`, botão `Entrar`, erro via `useActionState`. `/login` com sessão válida → `redirect("/")`. Header: logo, links Dashboard / Ativos / Admin (só admin), menu do usuário (Trocar senha, Sair).
@@ -344,5 +349,25 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 - [ ] **Step 2:** Teste `flow.spec.ts`: login errado → vê `Usuário ou senha inválidos`; login certo → dashboard vazio com `Adicione seu primeiro ativo`; `/ativos` → adicionar Bitcoin `0,5`; dashboard → saldo `US$ 30.000,00`, tabela com `BTC` e `100,00%`; clicar `7D` → URL contém `periodo=7D`; Sair → `/login`.
 - [ ] **Step 3:** `npx playwright install chromium` e `npm run test:e2e` → PASS.
 - [ ] **Step 4:** `npm test` → PASS (tudo).
-- [ ] **Step 5:** Adicionar `README.md` com os 3 comandos da spec §9 e como acessar pela rede local (`npm start -- -H 0.0.0.0`).
-- [ ] **Step 6: Commit** `test: fluxo ponta a ponta com CoinGecko simulada`
+- [ ] **Step 5: Commit** `test: fluxo ponta a ponta com CoinGecko simulada`
+
+---
+
+### Task 13: Docker e deploy no Easypanel
+
+**Files:**
+- Create: `Dockerfile`, `.dockerignore`, `README.md`
+- Modify: `next.config.ts` (`output: "standalone"`), `package.json` (script `build:scripts`)
+
+**Interfaces:**
+- Consumes: `createDb` (aplica migrações de `drizzle/` ao abrir), `scripts/create-admin.ts`.
+
+- [ ] **Step 1:** `npm i -D esbuild`; script `"build:scripts": "esbuild scripts/create-admin.ts --bundle --platform=node --external:better-sqlite3 --external:@node-rs/argon2 --outfile=dist-scripts/create-admin.js"`.
+- [ ] **Step 2:** `Dockerfile` multi-stage com `node:22-bookworm-slim`: estágio `deps` (`npm ci`), `build` (`npm run build && npm run build:scripts`), `runner` copiando `.next/standalone`, `.next/static`, `public`, `drizzle/` e `dist-scripts/create-admin.js` → `/app/scripts/create-admin.js`; `ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 DATABASE_PATH=/app/data/app.db`; `RUN mkdir -p /app/data`; usuário não-root `node` dono de `/app/data`; `CMD ["node","server.js"]`. Caminho de migrações em `createDb` resolvido a partir de `process.cwd()` para funcionar no container. `.dockerignore`: `node_modules`, `.next`, `data`, `.git`, `e2e`, `tests`.
+- [ ] **Step 3: Verificação** (se o Docker estiver instalado localmente; senão, verificar no primeiro deploy do Easypanel):
+  `docker build -t cripto-dash .` → sucesso;
+  `docker run -d --name cd -p 3000:3000 -v cd-data:/app/data cripto-dash`;
+  `docker exec -it cd node scripts/create-admin.js` → `Administrador criado`;
+  login em `http://localhost:3000` funciona; `docker restart cd` → login continua funcionando (dados persistiram).
+- [ ] **Step 4:** `README.md`: desenvolvimento (spec §9) e passo a passo do Easypanel — criar App a partir do repositório Git, build por Dockerfile, montar volume em `/app/data`, definir `COOKIE_SECURE=true`, configurar domínio/HTTPS, criar admin pelo console com `node scripts/create-admin.js`.
+- [ ] **Step 5: Commit** `feat: Dockerfile e guia de deploy no Easypanel`
