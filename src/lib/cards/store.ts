@@ -167,7 +167,13 @@ export const NO_ACCOUNT = "Sem conta";
  * Parcelas da pessoa com fatura entre os meses indicados (inclusive), com os dados da compra.
  * Compra sem conta (não deveria existir) continua aparecendo, como "Sem conta" (id 0).
  */
-export function listInstallments(db: Db, userId: number, fromMonth: string, toMonth: string): InstallmentRow[] {
+export function listInstallments(
+  db: Db,
+  userId: number,
+  fromMonth: string,
+  toMonth: string,
+  opts: { unpaidOnly?: boolean } = {},
+): InstallmentRow[] {
   const rows = db
     .select({
       installmentId: cardInstallments.id,
@@ -194,7 +200,13 @@ export function listInstallments(db: Db, userId: number, fromMonth: string, toMo
     .innerJoin(cardExpenses, eq(cardExpenses.id, cardInstallments.expenseId))
     .leftJoin(cardAccounts, eq(cardAccounts.id, cardExpenses.accountId))
     .leftJoin(cardCategories, eq(cardCategories.id, cardExpenses.categoryId))
-    .where(and(eq(cardExpenses.userId, userId), between(cardInstallments.invoiceMonth, fromMonth, toMonth)))
+    .where(
+      and(
+        eq(cardExpenses.userId, userId),
+        between(cardInstallments.invoiceMonth, fromMonth, toMonth),
+        opts.unpaidOnly ? eq(cardInstallments.paid, false) : undefined,
+      ),
+    )
     .orderBy(asc(cardInstallments.invoiceMonth), asc(cardExpenses.description), asc(cardInstallments.number))
     .all();
   return rows.map((r) => ({ ...r, accountId: r.accountId ?? 0, accountName: r.accountName ?? NO_ACCOUNT })) as InstallmentRow[];

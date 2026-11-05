@@ -8,11 +8,18 @@ const lastDay = (month: string) => {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 };
 
-/** Data (AAAA-MM-DD) em que vence a fatura do mês "AAAA-MM", no próprio mês. Dia maior que o mês → último dia; sem dia → dia 1. */
-export function dueDate(invoiceMonth: string, dueDay: number | null): string {
-  const day = Math.min(dueDay ?? 1, lastDay(invoiceMonth));
-  return `${invoiceMonth}-${String(day).padStart(2, "0")}`;
+/**
+ * Data (AAAA-MM-DD) em que vence a fatura do mês "AAAA-MM": no próprio mês, no dia do vencimento.
+ * Se o vencimento é antes do fechamento (ex.: fecha 25, vence 5), vence no mês seguinte.
+ * Dia maior que o mês → último dia; sem dia → dia 1.
+ */
+export function dueDate(invoiceMonth: string, dueDay: number | null, closingDay: number | null = null): string {
+  const month = dueDay !== null && closingDay !== null && dueDay < closingDay ? addMonths(invoiceMonth, 1) : invoiceMonth;
+  const day = Math.min(dueDay ?? 1, lastDay(month));
+  return `${month}-${String(day).padStart(2, "0")}`;
 }
+
+export type CardDays = { dueDay: number | null; closingDay: number | null };
 
 /** Fatura (AAAA-MM) de uma compra feita em `purchaseDate`: a partir do dia de fechamento, vai para o mês seguinte. */
 export function invoiceMonthFor(purchaseDate: string, closingDay: number | null): string {
@@ -25,13 +32,14 @@ export function invoiceMonthFor(purchaseDate: string, closingDay: number | null)
 /** Soma das parcelas cujas faturas vencem entre `from` e `to` (datas inclusivas). */
 export function invoicesDueBetween(
   rows: { accountId: number; invoiceMonth: string; amountCents: number }[],
-  dueDays: Record<number, number | null>,
+  days: Record<number, CardDays>,
   from: string,
   to: string,
 ): number {
   let sum = 0;
   for (const r of rows) {
-    const d = dueDate(r.invoiceMonth, dueDays[r.accountId] ?? null);
+    const c = days[r.accountId];
+    const d = dueDate(r.invoiceMonth, c?.dueDay ?? null, c?.closingDay ?? null);
     if (d >= from && d <= to) sum += r.amountCents;
   }
   return sum;

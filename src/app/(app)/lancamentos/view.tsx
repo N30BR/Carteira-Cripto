@@ -274,7 +274,14 @@ export function LaunchesView({
                       <TableCell className="text-center">
                         {monthLabel(r.invoiceMonth)}
                         <span className="block text-[11px] text-muted-foreground">
-                          vence {dateBr(dueDate(r.invoiceMonth, accounts.find((a) => a.id === r.accountId)?.dueDay ?? null))}
+                          vence{" "}
+                          {dateBr(
+                            dueDate(
+                              r.invoiceMonth,
+                              accounts.find((a) => a.id === r.accountId)?.dueDay ?? null,
+                              accounts.find((a) => a.id === r.accountId)?.closingDay ?? null,
+                            ),
+                          )}
                         </span>
                       </TableCell>
                       <TableCell className="text-center">

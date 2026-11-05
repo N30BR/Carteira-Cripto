@@ -23,7 +23,7 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/lancame
   ensureDefaultAccounts(db, user.id);
   const [from, to] = monthRange(month);
   // O que falta pagar de cada compra até a última parcela (inclusive parcelas de meses anteriores não pagas).
-  const open = openPurchases(listInstallments(db, user.id, "2000-01", "2099-12"), month);
+  const open = openPurchases(listInstallments(db, user.id, "2000-01", "2099-12", { unpaidOnly: true }), month);
 
   return (
     <div className="flex flex-col gap-6">

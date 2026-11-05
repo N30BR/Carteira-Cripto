@@ -104,7 +104,7 @@ export type OpenPurchase = {
 /**
  * Compras com parcelas ainda não pagas, até a última parcela. Uma parcela só sai da conta quando é
  * marcada como paga: se a de outubro não foi paga, ainda faltam outubro, novembro e dezembro.
- * `rows` precisa ter todas as parcelas das compras (não só as do mês).
+ * Basta passar as parcelas não pagas (pagas e última parcela saem dos dados da compra).
  */
 export function openPurchases(rows: InstallmentRow[], month: string): OpenPurchase[] {
   const byExpense = new Map<number, InstallmentRow[]>();
@@ -121,11 +121,11 @@ export function openPurchases(rows: InstallmentRow[], month: string): OpenPurcha
       accountId: first.accountId,
       accountName: first.accountName,
       installments: first.installments,
-      paidCount: list.filter((r) => r.paid).length,
+      paidCount: first.installments - open.length,
       remainingCount: open.length,
       remainingCents: open.reduce((s, r) => s + r.amountCents, 0),
       nextMonth: open.reduce((m, r) => (r.invoiceMonth < m ? r.invoiceMonth : m), open[0].invoiceMonth),
-      lastMonth: list.reduce((m, r) => (r.invoiceMonth > m ? r.invoiceMonth : m), list[0].invoiceMonth),
+      lastMonth: addMonths(first.firstInvoice, first.installments - 1),
       overdueCount: overdue.length,
       overdueCents: overdue.reduce((s, r) => s + r.amountCents, 0),
     });

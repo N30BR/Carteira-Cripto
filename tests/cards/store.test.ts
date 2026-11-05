@@ -111,6 +111,14 @@ describe("compras e parcelas", () => {
     expect(all.every((r) => r.amountCents === 35000)).toBe(true);
   });
 
+  test("busca só as parcelas não pagas (o que falta até a última parcela)", () => {
+    const { db, a } = setup();
+    createExpense(db, a, base());
+    const open = listInstallments(db, a, "2000-01", "2099-12", { unpaidOnly: true });
+    expect(open.map((r) => r.number)).toEqual([6, 7, 8, 9, 10, 11, 12]);
+    expect(open.every((r) => !r.paid)).toBe(true);
+  });
+
   test("marcar parcela paga/pendente", () => {
     const { db, a } = setup();
     createExpense(db, a, base());

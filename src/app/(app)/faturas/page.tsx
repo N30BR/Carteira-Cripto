@@ -105,7 +105,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
   const proj = projection(rows, win.invoiceMonths.at(-1)!, 6);
   // Em aberto até a última parcela: tudo que não foi marcado como pago, inclusive de meses anteriores.
   const open = openPurchases(
-    listInstallments(getDb(), user.id, "2000-01", "2099-12").map((r) => ({ ...r, amountCents: convert(r.amountCents) })),
+    listInstallments(getDb(), user.id, "2000-01", "2099-12", { unpaidOnly: true }).map((r) => ({ ...r, amountCents: convert(r.amountCents) })),
     month,
   );
   const openTotal = open.reduce((x, o) => x + o.remainingCents, 0);

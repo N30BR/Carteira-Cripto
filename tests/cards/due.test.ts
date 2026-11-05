@@ -15,6 +15,12 @@ describe("data de vencimento", () => {
     expect(dueDate("2028-02", 30)).toBe("2028-02-29");
   });
 
+  test("vencimento antes do fechamento (fecha 25, vence 5): vence no mês seguinte", () => {
+    expect(dueDate("2026-11", 5, 25)).toBe("2026-12-05");
+    expect(dueDate("2026-11", 18, 11)).toBe("2026-11-18");
+    expect(dueDate("2026-11", 11, 11)).toBe("2026-11-11");
+  });
+
   test("sem vencimento informado: dia 1 do mês da fatura", () => {
     expect(dueDate("2026-11", null)).toBe("2026-11-01");
   });
@@ -36,7 +42,7 @@ describe("data de vencimento", () => {
       { accountId: 1, invoiceMonth: "2026-12", amountCents: 4000 }, // vence 10/12
       { accountId: 9, invoiceMonth: "2026-11", amountCents: 8000 }, // conta sem vencimento: 01/11
     ];
-    const days = { 1: 10, 2: 25 };
+    const days = { 1: { dueDay: 10, closingDay: 3 }, 2: { dueDay: 25, closingDay: 18 } };
     expect(invoicesDueBetween(rows, days, "2026-11-01", "2026-11-30")).toBe(1000 + 2000 + 8000);
     expect(invoicesDueBetween(rows, days, "2026-11-01", "2026-11-07")).toBe(8000);
     expect(invoicesDueBetween(rows, days, "2026-12-01", "2026-12-31")).toBe(4000);
