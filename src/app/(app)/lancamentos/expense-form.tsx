@@ -1,14 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Info, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatMoney } from "@/lib/currency";
+import type { CardAccount } from "@/lib/cards/accounts";
 import type { Category, Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
 import { monthLabel } from "@/lib/cards/months";
-import type { Side } from "@/lib/cards/store";
 import { safeAction } from "@/lib/safe-action";
 import { cn } from "@/lib/utils";
 import { brlToCents } from "@/lib/validation";
@@ -53,6 +54,8 @@ function Toggle<T extends string>({
 export function ExpenseFormFields({
   initial,
   categories,
+  accounts,
+  accountsButton,
   editing,
   submitLabel,
   onSubmit,
@@ -60,6 +63,9 @@ export function ExpenseFormFields({
 }: {
   initial: ExpenseForm;
   categories: Category[];
+  accounts: CardAccount[];
+  /** Botão "+ Adicionar" (gerenciar contas), ao lado da escolha da conta. */
+  accountsButton?: React.ReactNode;
   editing?: boolean;
   submitLabel: string;
   onSubmit: (f: ExpenseForm) => Promise<Result>;
@@ -85,8 +91,8 @@ export function ExpenseFormFields({
       const r = await safeAction(() => onSubmit(f));
       if (r.ok) {
         setError(undefined);
-        // Novo lançamento: limpa o formulário, mas mantém mês, cartão e tipo para o próximo.
-        if (!editing) setF({ ...initial, refMonth: f.refMonth, card: f.card, nature: f.nature });
+        // Novo lançamento: limpa o formulário, mas mantém o mês e a conta para o próximo.
+        if (!editing) setF({ ...initial, refMonth: f.refMonth, accountId: f.accountId });
         onDone?.();
       } else setError(r.error);
     });
@@ -94,7 +100,7 @@ export function ExpenseFormFields({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_auto_auto_1fr_1.2fr_auto] lg:items-end">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.6fr_0.8fr_auto_1.1fr_minmax(250px,1.6fr)_auto] lg:items-end">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-desc">Descrição do custo *</Label>
           <Input id="exp-desc" placeholder="Ex.: Assinatura Netflix" value={f.description} onChange={(e) => set("description", e.target.value)} maxLength={80} />
@@ -104,7 +110,12 @@ export function ExpenseFormFields({
           <Input id="exp-amount" inputMode="decimal" placeholder="0,00" value={f.amount} onChange={(e) => set("amount", e.target.value)} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="exp-current">Parcelas</Label>
+          <Label htmlFor="exp-current" className="gap-1">
+            Parcelas
+            <span title="Parcela atual / total de parcelas. Ex.: 3 / 12 = terceira de doze. As parcelas anteriores entram como pagas.">
+              <Info className="size-3.5 text-muted-foreground" />
+            </span>
+          </Label>
           <div className="flex items-center gap-1">
             <Input
               id="exp-current"
@@ -129,17 +140,6 @@ export function ExpenseFormFields({
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Tipo *</span>
-          <Toggle label="Tipo" value={f.nature} onChange={(v: Side) => set("nature", v)} options={[{ value: "PF", label: "PF" }, { value: "PJ", label: "PJ" }]} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="exp-card">Cartão *</Label>
-          <select id="exp-card" className={selectClass} value={f.card} onChange={(e) => set("card", e.target.value as Side)}>
-            <option value="PF">Cartão PF</option>
-            <option value="PJ">Cartão PJ</option>
-          </select>
-        </div>
-        <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-cat">Categoria</Label>
           <select
             id="exp-cat"
@@ -155,8 +155,26 @@ export function ExpenseFormFields({
             ))}
           </select>
         </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="exp-account">Cartão / Conta *</Label>
+          <div className="flex gap-2">
+            <select
+              id="exp-account"
+              className={selectClass}
+              value={f.accountId}
+              onChange={(e) => set("accountId", Number(e.target.value))}
+            >
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            {accountsButton}
+          </div>
+        </div>
         <Button type="submit" disabled={pending} className="h-9">
-          + {submitLabel}
+          <Plus /> {submitLabel}
         </Button>
       </div>
 

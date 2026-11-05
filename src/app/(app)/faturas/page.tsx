@@ -2,7 +2,8 @@ import Link from "next/link";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
 import { addMonths, monthLabel, monthShort, parseMonth } from "@/lib/cards/months";
-import { hasExpenses, listInstallments, type Side } from "@/lib/cards/store";
+import { listCardAccounts, type CardAccount } from "@/lib/cards/accounts";
+import { hasExpenses, listInstallments } from "@/lib/cards/store";
 import { cardSummary, monthTotals, monthlySeries, projection, topCategories } from "@/lib/cards/summary";
 import { formatMoney } from "@/lib/currency";
 import { cn } from "@/lib/utils";
@@ -10,7 +11,8 @@ import { appTimeZone, todayIn } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CARD_COLOR, NATURE_COLOR } from "@/components/cards/colors";
+import { NATURE_COLOR } from "@/components/cards/colors";
+import { accountColor } from "@/components/finance/ui";
 import { CategoryPie, InvoiceBars, NaturePie } from "@/components/cards/invoice-charts";
 import { MonthPicker } from "@/components/month-picker";
 
@@ -43,6 +45,8 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
   const user = await requireUser();
   const month = parseMonth((await searchParams).mes) ?? todayIn(appTimeZone()).slice(0, 7);
   const rows = listInstallments(getDb(), user.id, addMonths(month, -11), "2099-12");
+  const accounts = listCardAccounts(getDb(), user.id);
+  const kindLabel = (a: CardAccount) => (a.kind === "PF" ? "Pessoa Física (PF)" : "Pessoa Jurídica (PJ)");
 
   const header = (
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -81,9 +85,9 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
   const series12 = monthlySeries(rows, last12);
   const proj = projection(rows, month, 6);
 
-  const cardSection = (card: Side) => {
-    const s = cardSummary(monthRows, card);
-    const color = CARD_COLOR[card];
+  const cardSection = (account: CardAccount, index: number) => {
+    const s = cardSummary(monthRows, account.id);
+    const color = accountColor(index);
     return (
       <Card>
         <CardContent className="flex flex-col gap-4">
@@ -92,14 +96,14 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
               <span className="w-1 rounded-full" style={{ background: color }} />
               <div>
                 <p className="text-xs font-semibold tracking-widest uppercase" style={{ color }}>
-                  Cartão {card}
+                  {account.name}
                 </p>
-                <p className="text-lg font-semibold">{card === "PF" ? "Pessoa Física (PF)" : "Pessoa Jurídica (PJ)"}</p>
+                <p className="text-lg font-semibold">{kindLabel(account)}</p>
               </div>
             </div>
             <div className="text-right">
               <p className="text-xs tracking-widest text-muted-foreground uppercase">Fatura atual</p>
-              <p className="text-xl font-semibold tabular-nums" data-testid={`card-${card}-total`}>
+              <p className="text-xl font-semibold tabular-nums" data-testid={`account-total-${index}`}>
                 {brl(s.total)}
               </p>
             </div>
@@ -127,7 +131,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
             </TableHeader>
             <TableBody>
               {last6.map((m) => {
-                const mr = rows.filter((r) => r.invoiceMonth === m && r.card === card);
+                const mr = rows.filter((r) => r.invoiceMonth === m && r.accountId === account.id);
                 const total = mr.reduce((x, r) => x + r.amountCents, 0);
                 return (
                   <TableRow key={m} style={m === month ? { backgroundColor: `${color}1f` } : undefined}>
@@ -148,10 +152,11 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
     <div className="flex flex-col gap-6">
       {header}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Indicator title="Fatura consolidada" value={totals.total} hint="PF + PJ • mês" color="#4C66DD" testId="invoice-total" />
-        <Indicator title="Cartão PF" value={totals.cardPF} hint="Cartão pessoa física" color={CARD_COLOR.PF} />
-        <Indicator title="Cartão PJ" value={totals.cardPJ} hint="Cartão pessoa jurídica" color={CARD_COLOR.PJ} />
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
+        <Indicator title="Fatura consolidada" value={totals.total} hint="todas as contas • mês" color="#4C66DD" testId="invoice-total" />
+        {accounts.map((a, i) => (
+          <Indicator key={a.id} title={a.name} value={totals.byAccount[a.id] ?? 0} hint={kindLabel(a)} color={accountColor(i)} />
+        ))}
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         <Indicator title="Despesas PF" value={totals.pf} hint="pela natureza" color={NATURE_COLOR.PF} />
@@ -163,10 +168,10 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
         <Card>
           <CardHeader>
             <CardTitle>Evolução mensal das faturas</CardTitle>
-            <p className="text-sm text-muted-foreground">Comparação dos dois cartões de crédito</p>
+            <p className="text-sm text-muted-foreground">Comparação entre os cartões / contas</p>
           </CardHeader>
           <CardContent>
-            <InvoiceBars data={monthlySeries(rows, last6)} />
+            <InvoiceBars data={monthlySeries(rows, last6)} accounts={accounts.map((a, i) => ({ id: a.id, name: a.name, color: accountColor(i) }))} />
           </CardContent>
         </Card>
         <Card>
@@ -183,8 +188,9 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {cardSection("PF")}
-        {cardSection("PJ")}
+        {accounts.map((a, i) => (
+          <div key={a.id}>{cardSection(a, i)}</div>
+        ))}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.8fr]">
@@ -210,8 +216,11 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
               <TableHeader>
                 <TableRow>
                   <TableHead>Mês</TableHead>
-                  <TableHead className="text-center">Cartão PF</TableHead>
-                  <TableHead className="text-center">Cartão PJ</TableHead>
+                  {accounts.map((a) => (
+                    <TableHead key={a.id} className="text-center">
+                      {a.name}
+                    </TableHead>
+                  ))}
                   <TableHead className="text-center">Total</TableHead>
                 </TableRow>
               </TableHeader>
@@ -219,8 +228,11 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
                 {proj.months.map((p) => (
                   <TableRow key={p.month}>
                     <TableCell className="font-medium">{monthShort(p.month)}</TableCell>
-                    <TableCell className="text-center tabular-nums">{brl(p.cardPF)}</TableCell>
-                    <TableCell className="text-center tabular-nums">{brl(p.cardPJ)}</TableCell>
+                    {accounts.map((a) => (
+                      <TableCell key={a.id} className="text-center tabular-nums">
+                        {brl(p.byAccount[a.id] ?? 0)}
+                      </TableCell>
+                    ))}
                     <TableCell className="text-center font-semibold tabular-nums">{brl(p.total)}</TableCell>
                   </TableRow>
                 ))}
@@ -234,7 +246,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
         <CardHeader>
           <CardTitle>Consolidado mensal</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Cartão PF + Cartão PJ = Total = Despesas PF + Despesas PJ (duas classificações dos mesmos gastos)
+            Soma das contas = Total = Despesas PF + Despesas PJ (duas classificações dos mesmos gastos)
           </p>
         </CardHeader>
         <CardContent>
@@ -242,8 +254,11 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
             <TableHeader>
               <TableRow>
                 <TableHead>Mês</TableHead>
-                <TableHead className="text-center">Cartão PF</TableHead>
-                <TableHead className="text-center">Cartão PJ</TableHead>
+                {accounts.map((a) => (
+                  <TableHead key={a.id} className="text-center">
+                    {a.name}
+                  </TableHead>
+                ))}
                 <TableHead className="text-center">Despesas PF</TableHead>
                 <TableHead className="text-center">Despesas PJ</TableHead>
                 <TableHead className="text-center">Total</TableHead>
@@ -253,8 +268,11 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
               {series12.map((m) => (
                 <TableRow key={m.month} className={m.month === month ? "bg-muted/50 font-semibold" : undefined}>
                   <TableCell>{monthLabel(m.month)}</TableCell>
-                  <TableCell className="text-center tabular-nums">{brl(m.cardPF)}</TableCell>
-                  <TableCell className="text-center tabular-nums">{brl(m.cardPJ)}</TableCell>
+                  {accounts.map((a) => (
+                    <TableCell key={a.id} className="text-center tabular-nums">
+                      {brl(m.byAccount[a.id] ?? 0)}
+                    </TableCell>
+                  ))}
                   <TableCell className="text-center tabular-nums">{brl(m.pf)}</TableCell>
                   <TableCell className="text-center tabular-nums">{brl(m.pj)}</TableCell>
                   <TableCell className="text-center font-semibold tabular-nums">{brl(m.total)}</TableCell>

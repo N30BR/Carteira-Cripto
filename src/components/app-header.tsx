@@ -9,6 +9,8 @@ export function AppHeader({ user }: { user: SessionUser }) {
     { href: "/", label: "Cripto" },
     { href: "/fiduciario", label: "R$", title: "Dashboard fiduciário" },
     { href: "/faturas", label: "Faturas" },
+    { href: "/transacoes", label: "Transações" },
+    { href: "/resumo", label: "Resumo" },
     { href: "/lancamentos", label: "Lançamentos" },
     { href: "/pendencias", label: "Pendências" },
     { href: "/ativos", label: "Ativos" },

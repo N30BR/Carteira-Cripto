@@ -14,6 +14,8 @@ const row = (o: Partial<InstallmentRow>): InstallmentRow => ({
   description: "x",
   nature: "PF",
   card: "PF",
+  accountId: 1,
+  accountName: "Cartão PF",
   categoryId: 1,
   categoryName: "Alimentação",
   notes: "",
@@ -25,24 +27,24 @@ const row = (o: Partial<InstallmentRow>): InstallmentRow => ({
 
 const rows = [
   row({ amountCents: 25000, nature: "PJ", card: "PF", categoryName: "Gasolina", paid: true }),
-  row({ amountCents: 30000, nature: "PJ", card: "PJ", categoryName: "Equipamentos", number: 3, installments: 12, expenseId: 900 }),
+  row({ amountCents: 30000, nature: "PJ", card: "PJ", accountId: 2, accountName: "Cartão PJ", categoryName: "Equipamentos", number: 3, installments: 12, expenseId: 900 }),
   row({ amountCents: 3990, nature: "PF", card: "PF", categoryName: "Assinaturas", paid: true }),
-  row({ amountCents: 48275, nature: "PF", card: "PJ", categoryName: null, categoryId: null }),
-  row({ invoiceMonth: "2026-10", amountCents: 10000, card: "PJ" }),
-  row({ invoiceMonth: "2026-12", amountCents: 30000, nature: "PJ", card: "PJ", number: 4, installments: 12, expenseId: 900 }),
-  row({ invoiceMonth: "2027-01", amountCents: 30000, nature: "PJ", card: "PJ", number: 5, installments: 12, expenseId: 900, paid: true }),
+  row({ amountCents: 48275, nature: "PF", card: "PJ", accountId: 2, accountName: "Cartão PJ", categoryName: null, categoryId: null }),
+  row({ invoiceMonth: "2026-10", amountCents: 10000, card: "PJ", accountId: 2, accountName: "Cartão PJ" }),
+  row({ invoiceMonth: "2026-12", amountCents: 30000, nature: "PJ", card: "PJ", accountId: 2, accountName: "Cartão PJ", number: 4, installments: 12, expenseId: 900 }),
+  row({ invoiceMonth: "2027-01", amountCents: 30000, nature: "PJ", card: "PJ", accountId: 2, accountName: "Cartão PJ", number: 5, installments: 12, expenseId: 900, paid: true }),
 ];
 
 describe("totais do mês", () => {
   test("cartões e naturezas fecham com o total, sem somar entre si", () => {
     const t = monthTotals(rows.filter((r) => r.invoiceMonth === "2026-11"));
-    expect(t).toEqual({ total: 107265, pf: 52265, pj: 55000, cardPF: 28990, cardPJ: 78275, paid: 28990, pending: 78275, count: 4 });
-    expect(t.cardPF + t.cardPJ).toBe(t.total);
+    expect(t).toEqual({ total: 107265, pf: 52265, pj: 55000, byAccount: { 1: 28990, 2: 78275 }, paid: 28990, pending: 78275, count: 4 });
+    expect(t.byAccount[1] + t.byAccount[2]).toBe(t.total);
     expect(t.pf + t.pj).toBe(t.total);
   });
 
-  test("resumo de um cartão separa a natureza e o pago/pendente", () => {
-    expect(cardSummary(rows.filter((r) => r.invoiceMonth === "2026-11"), "PF")).toEqual({
+  test("resumo de uma conta separa a natureza e o pago/pendente", () => {
+    expect(cardSummary(rows.filter((r) => r.invoiceMonth === "2026-11"), 1)).toEqual({
       total: 28990,
       pf: 3990,
       pj: 25000,
@@ -56,7 +58,7 @@ describe("séries e categorias", () => {
   test("série mensal inclui meses sem gastos", () => {
     const s = monthlySeries(rows, ["2026-09", "2026-10", "2026-11"]);
     expect(s.map((m) => m.total)).toEqual([0, 10000, 107265]);
-    expect(s[2]).toMatchObject({ month: "2026-11", cardPF: 28990, cardPJ: 78275, pf: 52265, pj: 55000 });
+    expect(s[2]).toMatchObject({ month: "2026-11", byAccount: { 1: 28990, 2: 78275 }, pf: 52265, pj: 55000 });
   });
 
   test("categorias por valor, com 'Sem categoria' e filtro de natureza", () => {
@@ -76,9 +78,9 @@ describe("projeção", () => {
   test("próximos meses, total pendente futuro e compras parceladas ativas", () => {
     const p = projection(rows, "2026-11", 3);
     expect(p.months).toEqual([
-      { month: "2026-12", cardPF: 0, cardPJ: 30000, total: 30000 },
-      { month: "2027-01", cardPF: 0, cardPJ: 30000, total: 30000 },
-      { month: "2027-02", cardPF: 0, cardPJ: 0, total: 0 },
+      { month: "2026-12", byAccount: { 2: 30000 }, total: 30000 },
+      { month: "2027-01", byAccount: { 2: 30000 }, total: 30000 },
+      { month: "2027-02", byAccount: {}, total: 0 },
     ]);
     expect(p.pendingFuture).toBe(30000);
     expect(p.activePurchases).toBe(1);

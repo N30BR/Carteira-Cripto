@@ -80,28 +80,67 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.goto("/");
   await expect(page.getByTestId("total")).toHaveText("R$ 150.000,00");
 
-  // Lançamentos: compra de R$ 1.200,00 em 3× no Cartão PJ, natureza PF
+  // Lançamentos: compra de R$ 1.200,00 em 3× no Cartão PJ
   await page.getByRole("link", { name: "Lançamentos" }).click();
   await expect(page.getByRole("link", { name: "Lançamentos" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Lançamento de Faturas" })).toBeVisible();
   await page.getByLabel("Descrição do custo *").fill("Cadeira");
-  await page.getByLabel("Valor (R$) *").fill("1.200,00");
+  await page.locator("#exp-amount").fill("1.200,00");
   await page.getByLabel("Total de parcelas", { exact: true }).fill("3");
   await page.getByRole("radio", { name: "o total" }).click();
-  await page.selectOption("#exp-card", "PJ");
-  await page.getByRole("button", { name: "+ Adicionar" }).click();
+  await page.selectOption("#exp-account", { label: "Cartão PJ" });
+  await page.getByRole("button", { name: "Lançar Fatura" }).click();
   const cadeira = page.getByRole("row", { name: /Cadeira/ });
   await expect(cadeira).toContainText("R$ 400,00");
-  await expect(cadeira).toContainText("1/3");
+  await expect(cadeira).toContainText("1 / 3");
+  await expect(cadeira).toContainText("Cartão PJ");
   await expect(page.getByTestId("month-total")).toHaveText("Total: R$ 400,00");
   await cadeira.getByRole("button", { name: "Pendente" }).click();
   await expect(page.getByRole("row", { name: /Cadeira/ }).getByRole("button", { name: "Pago" })).toBeVisible();
 
+  // Contas: cadastrar uma terceira conta pelo "+ Adicionar"
+  await page.getByRole("button", { name: "Gerenciar contas" }).click();
+  await page.getByLabel("Nova conta", { exact: true }).fill("Nubank");
+  await page.getByRole("button", { name: "Criar" }).click();
+  await expect(page.getByLabel("Nome da conta Nubank")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#exp-account option")).toHaveText(["Cartão PF", "Cartão PJ", "Nubank"]);
+
+  // Lançamento de Transações: uma entrada e uma saída
+  const tx = async (kind: "in" | "out", description: string, amount: string) => {
+    await page.selectOption("#tx-kind", kind);
+    await page.locator("#tx-desc").fill(description);
+    await page.locator("#tx-amount").fill(amount);
+    await page.getByRole("button", { name: "Lançar Transação" }).click();
+    await expect(page.getByRole("table", { name: "Transações" }).getByRole("row", { name: new RegExp(description) })).toBeVisible();
+  };
+  await tx("in", "Recebimento de serviço", "2.500,00");
+  await tx("out", "Pagamento de fornecedor", "780");
+  const txTable = page.getByRole("table", { name: "Transações" });
+  await expect(txTable.getByRole("row", { name: /Recebimento/ })).toContainText("+ R$ 2.500,00");
+  await expect(txTable.getByRole("row", { name: /Pagamento/ })).toContainText("- R$ 780,00");
+
   // Faturas: o mesmo gasto aparece no Cartão PJ; os próximos 2 meses ficam na projeção
   await page.getByRole("link", { name: "Faturas" }).click();
   await expect(page.getByTestId("invoice-total")).toHaveText("R$ 400,00");
-  await expect(page.getByTestId("card-PJ-total")).toHaveText("R$ 400,00");
-  await expect(page.getByTestId("card-PF-total")).toHaveText("R$ 0,00");
+  await expect(page.getByTestId("account-total-1")).toHaveText("R$ 400,00");
+  await expect(page.getByTestId("account-total-0")).toHaveText("R$ 0,00");
   await expect(page.getByText("1 compra parcelada ativa")).toBeVisible();
+
+  // Transações: indicadores do mês
+  await page.getByRole("link", { name: "Transações" }).click();
+  await expect(page.getByTestId("tx-inflow")).toHaveText("+ R$ 2.500,00");
+  await expect(page.getByTestId("tx-outflow")).toHaveText("- R$ 780,00");
+  await expect(page.getByTestId("tx-balance")).toHaveText("+ R$ 1.720,00");
+  await expect(page.getByRole("button", { name: "Saídas (1)" })).toBeVisible();
+
+  // Resumo: cripto 150.000 + reais 5.000 + entradas 2.500 − faturas 400 − saídas 780
+  await page.getByRole("link", { name: "Resumo" }).click();
+  await expect(page.getByTestId("sum-crypto").first()).toHaveText("+ R$ 150.000,00");
+  await expect(page.getByTestId("sum-fiat").first()).toHaveText("+ R$ 5.000,00");
+  await expect(page.getByTestId("sum-invoices").first()).toHaveText("- R$ 400,00");
+  await expect(page.getByTestId("sum-result")).toHaveText("+ R$ 156.320,00");
+  await expect(page.getByText("Consolidação estimada (sem conciliação)")).toBeVisible();
 
   // Pendências: tarefa com checklist, progresso, concluir e nota rápida que vira tarefa
   await page.getByRole("link", { name: "Pendências" }).click();

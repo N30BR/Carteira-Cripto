@@ -1,5 +1,4 @@
 // Cores das telas de cartões (tema escuro).
-export const CARD_COLOR = { PF: "#28A38C", PJ: "#9470E7" } as const;
 export const NATURE_COLOR = { PF: "#4C66DD", PJ: "#22C55E" } as const;
 
 const CATEGORY_HUES = ["#4ADE80", "#A78BFA", "#60A5FA", "#FB923C", "#F87171", "#FACC15", "#F472B6", "#38BDF8", "#2DD4BF", "#818CF8", "#E879F9", "#FDBA74", "#A3E635"];

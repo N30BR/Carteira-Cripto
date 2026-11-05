@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { testDb } from "../helpers/db";
 import { users } from "@/db/schema";
 import { createCategory, listCategories } from "@/lib/cards/categories";
+import { ensureDefaultAccounts, listCardAccounts } from "@/lib/cards/accounts";
 import { listInstallments } from "@/lib/cards/store";
 import { resetFiatLimits } from "@/lib/fiat/limit";
 
@@ -11,12 +12,15 @@ vi.mock("@/lib/auth/current", () => ({ requireUser: async () => ({ id: state.use
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import {
+  createCardAccountAction,
   createCategoryAction,
+  deleteCardAccountAction,
   deleteCategoryAction,
   deleteExpenseAction,
   renameCategoryAction,
   saveExpenseAction,
   toggleInstallmentAction,
+  updateCardAccountAction,
   type ExpenseForm,
 } from "@/app/(app)/lancamentos/actions";
 
@@ -31,8 +35,7 @@ const form = (o: Partial<ExpenseForm> = {}): ExpenseForm => ({
   total: 12,
   refMonth: "2025-05",
   purchaseDate: "2024-11-20",
-  nature: "PJ",
-  card: "PF",
+  accountId: 2,
   categoryId: null,
   currentPaid: false,
   notes: "",
@@ -47,6 +50,9 @@ beforeEach(() => {
     db.insert(users).values({ username, passwordHash: "x", isAdmin: false, createdAt: new Date() }).returning().all()[0].id;
   state.userId = mk("ana");
   other = mk("bia");
+  // Contas: ana = 1 (Cartão PF) e 2 (Cartão PJ); bia = 3 e 4.
+  ensureDefaultAccounts(db, state.userId);
+  ensureDefaultAccounts(db, other);
 });
 
 const mine = () => listInstallments(state.db as Db, state.userId, "2000-01", "2099-12");
@@ -60,15 +66,15 @@ describe("lançamentos", () => {
     expect(rows.find((r) => r.number === 6)).toMatchObject({ invoiceMonth: "2025-05", paid: false });
   });
 
-  test("valida descrição, valor, parcelas, tipo, cartão, mês e data", async () => {
+  test("valida descrição, valor, parcelas, conta, mês e data", async () => {
     expect((await saveExpenseAction(null, form({ description: "  " }))).ok).toBe(false);
     expect((await saveExpenseAction(null, form({ description: "a​b" }))).ok).toBe(false);
     expect(await saveExpenseAction(null, form({ amount: "abc" }))).toEqual({ ok: false, error: "Valor inválido" });
     expect(await saveExpenseAction(null, form({ amount: "0" }))).toEqual({ ok: false, error: "Informe um valor maior que zero" });
     expect(await saveExpenseAction(null, form({ amount: "-5" }))).toEqual({ ok: false, error: "Informe um valor maior que zero" });
     expect((await saveExpenseAction(null, form({ current: 13 }))).ok).toBe(false);
-    expect((await saveExpenseAction(null, form({ nature: "XX" as "PF" }))).ok).toBe(false);
-    expect((await saveExpenseAction(null, form({ card: "PX" as "PF" }))).ok).toBe(false);
+    expect(await saveExpenseAction(null, form({ accountId: "2" as unknown as number }))).toEqual({ ok: false, error: "Escolha o cartão / conta" });
+    expect(await saveExpenseAction(null, form({ accountId: 3 }))).toEqual({ ok: false, error: "Conta inválida" });
     expect((await saveExpenseAction(null, form({ refMonth: "2025-13" }))).ok).toBe(false);
     expect((await saveExpenseAction(null, form({ purchaseDate: "2999-01-01" }))).ok).toBe(false);
     expect((await saveExpenseAction(null, form({ notes: "x".repeat(501) }))).ok).toBe(false);
@@ -88,7 +94,7 @@ describe("lançamentos", () => {
 
   test("não mexe em compras, parcelas ou categorias de outra pessoa; ids inválidos recusados", async () => {
     state.userId = other;
-    await saveExpenseAction(null, form());
+    await saveExpenseAction(null, form({ accountId: 3 }));
     createCategory(state.db as Db, other, "Dela");
     const hers = mine()[0];
     const herCat = listCategories(state.db as Db, other)[0].id;
@@ -103,6 +109,23 @@ describe("lançamentos", () => {
     expect(await deleteExpenseAction("1" as unknown as number)).toEqual(nf);
     expect(await toggleInstallmentAction(1.5, true)).toEqual(nf);
     expect(await toggleInstallmentAction(hers.installmentId, "sim" as unknown as boolean)).toEqual(nf);
+  });
+
+  test("contas: criar, renomear com tipo, até 4, sem excluir conta com lançamentos nem mexer na de outra pessoa", async () => {
+    expect(await createCardAccountAction("  Nubank ", "PF")).toEqual({ ok: true });
+    expect((await createCardAccountAction("Inter", "XX" as "PF")).ok).toBe(false);
+    expect((await createCardAccountAction("a‮b", "PF")).ok).toBe(false);
+    expect(await createCardAccountAction("Inter PJ", "PJ")).toEqual({ ok: true });
+    expect(await createCardAccountAction("Quinta", "PF")).toEqual({ ok: false, error: "Limite de 4 contas atingido" });
+    const nubank = listCardAccounts(state.db as Db, state.userId).find((a) => a.name === "Nubank")!;
+    expect(await updateCardAccountAction(nubank.id, "Nubank Roxo", "PJ")).toEqual({ ok: true });
+    expect(listCardAccounts(state.db as Db, state.userId).find((a) => a.id === nubank.id)).toEqual({ id: nubank.id, name: "Nubank Roxo", kind: "PJ" });
+    await saveExpenseAction(null, form({ accountId: nubank.id }));
+    expect(mine()[0]).toMatchObject({ nature: "PJ", accountName: "Nubank Roxo" });
+    expect((await deleteCardAccountAction(nubank.id)).ok).toBe(false);
+    expect(await updateCardAccountAction(3, "Hack", "PF")).toEqual({ ok: false, error: "Conta não encontrada" });
+    expect(await deleteCardAccountAction(3)).toEqual({ ok: false, error: "Conta não encontrada" });
+    expect(await deleteCardAccountAction(1.5)).toEqual({ ok: false, error: "Conta não encontrada" });
   });
 
   test("categorias: criar e renomear com validação de nome", async () => {

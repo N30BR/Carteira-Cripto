@@ -86,6 +86,15 @@ export function todayIn(timeZone: string, now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
+/** Data AAAA-MM-DD que existe no calendário, entre `min` e `max` (inclusive). */
+export function parseIsoDate(raw: string, min: string, max: string): ParsedQuantity {
+  const s = raw.trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const d = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  if (!m || !d || d.toISOString().slice(0, 10) !== s || s < min || s > max) return { ok: false, error: "Data inválida" };
+  return { ok: true, value: s };
+}
+
 /** Data do saldo: vazio = hoje; formato AAAA-MM-DD válido, entre 2000-01-01 e hoje. */
 export function parseBalanceDate(raw: string, today: string): ParsedQuantity {
   const s = raw.trim();

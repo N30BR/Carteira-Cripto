@@ -19,12 +19,18 @@ import {
   updateExpense,
   type ExpenseInput,
 } from "@/lib/cards/store";
+import { ensureDefaultAccounts } from "@/lib/cards/accounts";
 
 function setup() {
   const db = testDb();
   const mk = (username: string) =>
     db.insert(users).values({ username, passwordHash: "x", isAdmin: false, createdAt: new Date() }).returning().all()[0].id;
-  return { db, a: mk("ana"), b: mk("bia") };
+  const a = mk("ana");
+  const b = mk("bia");
+  // Contas: ana = 1 (Cartão PF) e 2 (Cartão PJ); bia = 3 e 4.
+  ensureDefaultAccounts(db, a);
+  ensureDefaultAccounts(db, b);
+  return { db, a, b };
 }
 
 const base = (over: Partial<ExpenseInput> = {}): ExpenseInput => ({
@@ -33,8 +39,7 @@ const base = (over: Partial<ExpenseInput> = {}): ExpenseInput => ({
   installments: 12,
   firstInvoice: "2024-12",
   purchaseDate: "2024-11-20",
-  nature: "PJ",
-  card: "PF",
+  accountId: 2,
   categoryId: null,
   notes: "",
   paidNumbers: [1, 2, 3, 4, 5],
@@ -89,7 +94,7 @@ describe("compras e parcelas", () => {
     expect(createExpense(db, a, base())).toEqual({ ok: true });
     const may = listInstallments(db, a, "2025-05", "2025-05");
     expect(may).toHaveLength(1);
-    expect(may[0]).toMatchObject({ number: 6, installments: 12, amountCents: 35000, paid: false, nature: "PJ", card: "PF" });
+    expect(may[0]).toMatchObject({ number: 6, installments: 12, amountCents: 35000, paid: false, nature: "PJ", accountName: "Cartão PJ" });
     const all = listInstallments(db, a, "2000-01", "2099-12");
     expect(all.filter((r) => r.paid).map((r) => r.number)).toEqual([1, 2, 3, 4, 5]);
     expect(all.reduce((s, r) => s + r.amountCents, 0)).toBe(420000);
@@ -137,7 +142,9 @@ describe("compras e parcelas", () => {
     expect(renameCategory(db, b, catA, "X")).toEqual({ ok: false, error: "Categoria não encontrada" });
     expect(deleteCategory(db, b, catA)).toEqual({ ok: false, error: "Categoria não encontrada" });
     // B não pode usar a categoria de A
-    expect(createExpense(db, b, base({ categoryId: catA }))).toEqual({ ok: false, error: "Categoria inválida" });
+    expect(createExpense(db, b, base({ accountId: 3, categoryId: catA }))).toEqual({ ok: false, error: "Categoria inválida" });
+    // nem a conta de A
+    expect(createExpense(db, b, base())).toEqual({ ok: false, error: "Conta inválida" });
     expect(listInstallments(db, a, "2025-05", "2025-05")[0].paid).toBe(false);
   });
 

@@ -86,6 +86,25 @@ export const cardCategories = sqliteTable(
   (t) => [uniqueIndex("card_categories_user_name").on(t.userId, t.name)],
 );
 
+/**
+ * Cartões/contas das faturas (até 4 por pessoa). O id é estável: renomear não mexe nos lançamentos.
+ * O tipo (PF/PJ) da conta vira a natureza das compras lançadas nela.
+ */
+export const cardAccounts = sqliteTable(
+  "card_accounts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** PF ou PJ */
+    kind: text("kind").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("card_accounts_user_name").on(t.userId, t.name)],
+);
+
 /** Compra de origem (à vista ou parcelada). */
 export const cardExpenses = sqliteTable(
   "card_expenses",
@@ -103,13 +122,19 @@ export const cardExpenses = sqliteTable(
   purchaseDate: text("purchase_date").notNull(),
   /** Natureza da despesa: PF ou PJ */
   nature: text("nature").notNull(),
-  /** Cartão usado: PF ou PJ */
+  /** Cartão usado: PF ou PJ (histórico; a conta de verdade é accountId) */
   card: text("card").notNull(),
+  /** Conta/cartão da compra. Conta com lançamentos não pode ser excluída. */
+  accountId: integer("account_id").references(() => cardAccounts.id),
   categoryId: integer("category_id").references(() => cardCategories.id, { onDelete: "set null" }),
   notes: text("notes").notNull().default(""),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
-  (t) => [index("card_expenses_user").on(t.userId), index("card_expenses_category").on(t.categoryId)],
+  (t) => [
+    index("card_expenses_user").on(t.userId),
+    index("card_expenses_category").on(t.categoryId),
+    index("card_expenses_account").on(t.accountId),
+  ],
 );
 
 export const cardInstallments = sqliteTable(
@@ -238,4 +263,24 @@ export const quickNotes = sqliteTable(
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [index("quick_notes_user").on(t.userId)],
+);
+
+/** Entradas e saídas avulsas (receitas, pagamentos, transferências), separadas das faturas. */
+export const transactions = sqliteTable(
+  "transactions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** AAAA-MM-DD */
+    date: text("date").notNull(),
+    /** "in" (entrada) ou "out" (saída); o sinal vem daqui, o valor é sempre positivo */
+    kind: text("kind").notNull(),
+    description: text("description").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("transactions_user_date").on(t.userId, t.date)],
 );

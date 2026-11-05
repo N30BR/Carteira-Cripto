@@ -3,10 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
+import { createCardAccount, deleteCardAccount, updateCardAccount, type Side } from "@/lib/cards/accounts";
 import { createCategory, deleteCategory, renameCategory, type Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
 import { parseMonth } from "@/lib/cards/months";
-import { createExpense, deleteExpense, setInstallmentPaid, updateExpense, type Side } from "@/lib/cards/store";
+import { createExpense, deleteExpense, setInstallmentPaid, updateExpense } from "@/lib/cards/store";
 import { allowFiatChange } from "@/lib/fiat/limit";
 import { appTimeZone, brlToCents, cleanNotes, parseBalanceDate, todayIn, validateLabel } from "@/lib/validation";
 
@@ -18,8 +19,8 @@ export type ExpenseForm = {
   total: number;
   refMonth: string;
   purchaseDate: string;
-  nature: Side;
-  card: Side;
+  /** Conta/cartão (id); o tipo PF/PJ vem da conta. */
+  accountId: number;
   categoryId: number | null;
   currentPaid: boolean;
   notes: string;
@@ -27,6 +28,7 @@ export type ExpenseForm = {
 
 const NOT_FOUND: Result = { ok: false, error: "Lançamento não encontrado" };
 const CAT_NOT_FOUND: Result = { ok: false, error: "Categoria não encontrada" };
+const ACCOUNT_NOT_FOUND: Result = { ok: false, error: "Conta não encontrada" };
 const TOO_MANY: Result = { ok: false, error: "Muitas alterações seguidas. Aguarde um minuto." };
 
 const isSide = (v: unknown): v is Side => v === "PF" || v === "PJ";
@@ -34,6 +36,7 @@ const isSide = (v: unknown): v is Side => v === "PF" || v === "PJ";
 function refresh() {
   revalidatePath("/lancamentos");
   revalidatePath("/faturas");
+  revalidatePath("/resumo");
 }
 
 /** Cria (id null) ou edita uma compra. Tudo que vem do navegador é validado aqui. */
@@ -48,8 +51,7 @@ export async function saveExpenseAction(id: number | null, f: ExpenseForm): Prom
   const cents = brlToCents(String(f.amount ?? ""));
   if (!cents.ok) return cents;
   if (f.mode !== "parcela" && f.mode !== "total") return { ok: false, error: "Escolha se o valor é da parcela ou o total" };
-  if (!isSide(f.nature)) return { ok: false, error: "Escolha PF ou PJ" };
-  if (!isSide(f.card)) return { ok: false, error: "Escolha o cartão" };
+  if (!Number.isInteger(f.accountId)) return { ok: false, error: "Escolha o cartão / conta" };
   const refMonth = parseMonth(f.refMonth);
   if (!refMonth) return { ok: false, error: "Mês de referência inválido" };
   const date = parseBalanceDate(String(f.purchaseDate ?? ""), todayIn(appTimeZone()));
@@ -74,8 +76,7 @@ export async function saveExpenseAction(id: number | null, f: ExpenseForm): Prom
     installments: plan.installments,
     firstInvoice: plan.firstInvoice,
     purchaseDate: date.value,
-    nature: f.nature,
-    card: f.card,
+    accountId: f.accountId,
     categoryId: f.categoryId,
     notes: notes.value,
     paidNumbers: plan.paidNumbers,
@@ -129,6 +130,38 @@ export async function deleteCategoryAction(id: number): Promise<Result> {
   if (!Number.isInteger(id)) return CAT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = deleteCategory(getDb(), user.id, id);
+  refresh();
+  return r;
+}
+
+export async function createCardAccountAction(rawName: string, kind: Side): Promise<Result> {
+  const user = await requireUser();
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  if (!isSide(kind)) return { ok: false, error: "Escolha PF ou PJ" };
+  const name = validateLabel(String(rawName ?? ""), 30, "um nome");
+  if (!name.ok) return name;
+  const r = createCardAccount(getDb(), user.id, { name: name.value, kind });
+  refresh();
+  return r;
+}
+
+export async function updateCardAccountAction(id: number, rawName: string, kind: Side): Promise<Result> {
+  const user = await requireUser();
+  if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  if (!isSide(kind)) return { ok: false, error: "Escolha PF ou PJ" };
+  const name = validateLabel(String(rawName ?? ""), 30, "um nome");
+  if (!name.ok) return name;
+  const r = updateCardAccount(getDb(), user.id, id, { name: name.value, kind });
+  refresh();
+  return r;
+}
+
+export async function deleteCardAccountAction(id: number): Promise<Result> {
+  const user = await requireUser();
+  if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  const r = deleteCardAccount(getDb(), user.id, id);
   refresh();
   return r;
 }

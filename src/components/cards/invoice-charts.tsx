@@ -8,7 +8,7 @@ import { monthShort } from "@/lib/cards/months";
 import type { Side } from "@/lib/cards/store";
 import { NO_CATEGORY } from "@/lib/cards/summary";
 import { cn } from "@/lib/utils";
-import { CARD_COLOR, NATURE_COLOR, categoryColor } from "./colors";
+import { NATURE_COLOR, categoryColor } from "./colors";
 
 const brl = (cents: number) => formatMoney(cents / 100, "BRL");
 const compact = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
@@ -37,10 +37,21 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
   );
 }
 
-/** Barras mensais por cartão (verde = Cartão PF, roxo = Cartão PJ), com seletor de cartão. */
-export function InvoiceBars({ data }: { data: { month: string; cardPF: number; cardPJ: number }[] }) {
-  const [show, setShow] = useState<"ALL" | Side>("ALL");
-  const rows = data.map((d) => ({ label: monthShort(d.month).slice(0, 3), month: d.month, PF: d.cardPF, PJ: d.cardPJ }));
+/** Barras mensais por conta (uma cor por conta), com seletor de conta. */
+export function InvoiceBars({
+  data,
+  accounts,
+}: {
+  data: { month: string; byAccount: Record<number, number> }[];
+  accounts: { id: number; name: string; color: string }[];
+}) {
+  const [show, setShow] = useState<string>("ALL");
+  const rows = data.map((d) => ({
+    label: monthShort(d.month).slice(0, 3),
+    month: d.month,
+    ...Object.fromEntries(accounts.map((a) => [`a${a.id}`, d.byAccount[a.id] ?? 0])),
+  }));
+  const shown = show === "ALL" ? accounts : accounts.filter((a) => String(a.id) === show);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
@@ -48,11 +59,7 @@ export function InvoiceBars({ data }: { data: { month: string; cardPF: number; c
           label="Cartões no gráfico"
           value={show}
           onChange={setShow}
-          options={[
-            { value: "ALL", label: "Ambos" },
-            { value: "PF", label: "Cartão PF" },
-            { value: "PJ", label: "Cartão PJ" },
-          ]}
+          options={[{ value: "ALL", label: "Todos" }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))]}
         />
       </div>
       <div className="h-64 w-full" data-testid="invoice-bars">
@@ -71,11 +78,12 @@ export function InvoiceBars({ data }: { data: { month: string; cardPF: number; c
               cursor={{ fill: "var(--muted)", opacity: 0.4 }}
               contentStyle={tooltipStyle}
               labelFormatter={(_, p) => (p?.[0] ? monthShort((p[0].payload as { month: string }).month) : "")}
-              formatter={(v, name) => [brl(Number(v)), `Cartão ${String(name)}`]}
+              formatter={(v, name) => [brl(Number(v)), String(name)]}
             />
-            <Legend formatter={(v) => `Cartão ${v}`} />
-            {show !== "PJ" && <Bar dataKey="PF" fill={CARD_COLOR.PF} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
-            {show !== "PF" && <Bar dataKey="PJ" fill={CARD_COLOR.PJ} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+            <Legend />
+            {shown.map((a) => (
+              <Bar key={a.id} dataKey={`a${a.id}`} name={a.name} fill={a.color} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            ))}
           </BarChart>
         </ResponsiveContainer>
       </div>
