@@ -97,10 +97,15 @@ export function parseBalanceDate(raw: string, today: string): ParsedQuantity {
   return { ok: true, value: s };
 }
 
+// Caracteres de controle e de formatação invisíveis (zero-width, inversão de direção, BOM).
+// A junção de emoji (U+200D, ex.: 👨‍👩‍👧) é permitida; o seletor de variação (U+FE0F) nem é desta classe.
+const FORBIDDEN = /[\p{Cc}]|(?!\u200D)\p{Cf}/u;
+const FORBIDDEN_NOTES = /[^\P{Cc}\n]|(?!\u200D)\p{Cf}/gu;
+
 /** Texto curto (descrição, nome): NFC, sem caracteres invisíveis/de controle, de 1 a `max` caracteres. */
 export function validateLabel(raw: string, max: number, what: string): ParsedQuantity {
   const s = raw.normalize("NFC").trim();
-  if (/[\p{Cc}\p{Cf}]/u.test(s)) return { ok: false, error: "O texto tem caracteres não permitidos" };
+  if (FORBIDDEN.test(s)) return { ok: false, error: "O texto tem caracteres não permitidos" };
   return s.length >= 1 && s.length <= max
     ? { ok: true, value: s }
     : { ok: false, error: `Informe ${what} de 1 a ${max} caracteres` };
@@ -111,7 +116,7 @@ export function cleanNotes(raw: string, max: number): ParsedQuantity {
   const s = raw
     .normalize("NFC")
     .replace(/\r\n?/g, "\n")
-    .replace(/[\p{Cf}]|[^\P{Cc}\n]/gu, "")
+    .replace(FORBIDDEN_NOTES, "")
     .trim();
   return s.length <= max ? { ok: true, value: s } : { ok: false, error: `As observações podem ter até ${max} caracteres` };
 }

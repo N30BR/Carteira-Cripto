@@ -71,6 +71,7 @@ export function TaskDetails({ task, groups, today }: { task: TaskView | null; gr
     state.map((i) => (i.id === change.id ? { ...i, done: change.done } : i)),
   );
   const [description, setDescription] = useState(task?.description ?? "");
+  const [dueDraft, setDueDraft] = useState(task?.dueDate ?? "");
   const [newItem, setNewItem] = useState("");
   const [newNote, setNewNote] = useState("");
 
@@ -159,11 +160,31 @@ export function TaskDetails({ task, groups, today }: { task: TaskView | null; gr
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="d-due">Prazo</Label>
-            <Input id="d-due" type="date" className="[color-scheme:dark]" value={task.dueDate ?? ""} onChange={(e) => update({ dueDate: e.target.value || null })} />
+            <Input
+              id="d-due"
+              type="date"
+              min="2000-01-01"
+              max="2099-12-31"
+              className="[color-scheme:dark]"
+              value={dueDraft}
+              onChange={(e) => setDueDraft(e.target.value)}
+              onBlur={() => {
+                const v = dueDraft || null;
+                if (v === task.dueDate) return;
+                if (v && v.slice(0, 4) < "2000") return setDueDraft(task.dueDate ?? "");
+                update({ dueDate: v });
+              }}
+            />
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="d-time">Horário</Label>
-            <Input id="d-time" type="time" className="[color-scheme:dark]" value={task.dueTime ?? ""} onChange={(e) => update({ dueTime: e.target.value || null })} />
+            <Input
+              id="d-time"
+              type="time"
+              className="[color-scheme:dark]"
+              defaultValue={task.dueTime ?? ""}
+              onBlur={(e) => (e.target.value || null) !== task.dueTime && update({ dueTime: e.target.value || null })}
+            />
           </div>
         </div>
         {task.dueDate && (

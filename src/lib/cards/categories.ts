@@ -1,6 +1,6 @@
 import { and, asc, count, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { cardCategories, cardExpenses } from "@/db/schema";
+import { cardCategories, cardExpenses, users } from "@/db/schema";
 
 export const MAX_CATEGORIES = 50;
 export const DEFAULT_CATEGORIES = [
@@ -34,16 +34,22 @@ export function listCategories(db: Db, userId: number): Category[] {
     .all();
 }
 
-/** Na primeira visita (sem categorias e sem compras), cria as categorias padrão. */
+/** Cria as categorias padrão uma única vez por pessoa (se ela apagar todas, não voltam). */
 export function ensureDefaultCategories(db: Db, userId: number): void {
+  const user = db.select({ seeded: users.cardDefaultsSeeded }).from(users).where(eq(users.id, userId)).get();
+  if (!user || user.seeded) return;
   const [{ cats }] = db.select({ cats: count() }).from(cardCategories).where(eq(cardCategories.userId, userId)).all();
-  if (cats > 0) return;
   const [{ exps }] = db.select({ exps: count() }).from(cardExpenses).where(eq(cardExpenses.userId, userId)).all();
-  if (exps > 0) return;
-  const now = new Date();
-  db.insert(cardCategories)
-    .values(DEFAULT_CATEGORIES.map((name) => ({ userId, name, createdAt: now })))
-    .run();
+  db.transaction((tx) => {
+    // Quem já tinha categorias ou compras (antes desta marcação existir) não recebe as padrão de novo.
+    if (cats === 0 && exps === 0) {
+      const now = new Date();
+      tx.insert(cardCategories)
+        .values(DEFAULT_CATEGORIES.map((name) => ({ userId, name, createdAt: now })))
+        .run();
+    }
+    tx.update(users).set({ cardDefaultsSeeded: true }).where(eq(users.id, userId)).run();
+  });
 }
 
 export function ownsCategory(db: Db, userId: number, id: number): boolean {

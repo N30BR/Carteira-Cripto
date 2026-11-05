@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
 import { addMonths, monthLabel, monthShort, parseMonth } from "@/lib/cards/months";
-import { listInstallments, type Side } from "@/lib/cards/store";
+import { hasExpenses, listInstallments, type Side } from "@/lib/cards/store";
 import { cardSummary, monthTotals, monthlySeries, projection, topCategories } from "@/lib/cards/summary";
 import { formatMoney } from "@/lib/currency";
 import { cn } from "@/lib/utils";
@@ -55,7 +55,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
     </div>
   );
 
-  if (!rows.length) {
+  if (!hasExpenses(getDb(), user.id)) {
     return (
       <div className="flex flex-col gap-6">
         {header}

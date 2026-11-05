@@ -46,6 +46,9 @@ export function planFromForm(input: {
   if (!Number.isSafeInteger(totalCents) || totalCents < total) {
     return { ok: false, error: "Valor muito baixo para esse número de parcelas" };
   }
+  const firstInvoice = addMonths(refMonth, -(current - 1));
+  if (firstInvoice < "2000-01") return { ok: false, error: "A primeira parcela seria antes de janeiro de 2000" };
+  if (addMonths(firstInvoice, total - 1) > "2099-12") return { ok: false, error: "As parcelas passariam de dezembro de 2099" };
   const paidNumbers = Array.from({ length: currentPaid ? current : current - 1 }, (_, i) => i + 1);
-  return { ok: true, totalCents, installments: total, firstInvoice: addMonths(refMonth, -(current - 1)), paidNumbers };
+  return { ok: true, totalCents, installments: total, firstInvoice, paidNumbers };
 }

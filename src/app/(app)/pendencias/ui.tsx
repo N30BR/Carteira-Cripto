@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { Briefcase, Folder, GraduationCap, Home, Rocket, Star, Wallet } from "lucide-react";
 import { toast } from "sonner";
+import { safeAction } from "@/lib/safe-action";
 import { normalize } from "@/lib/todos/logic";
 import type { Group } from "@/lib/todos/store";
 import { cn } from "@/lib/utils";
@@ -18,7 +19,7 @@ export function useRun() {
   const run = (fn: () => Promise<ActionResult>, success?: string, after?: () => void, optimistic?: () => void) =>
     start(async () => {
       optimistic?.();
-      const r = await fn();
+      const r = await safeAction(fn);
       if (r.ok) {
         if (success) toast.success(success);
         after?.();

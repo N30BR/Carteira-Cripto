@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -8,6 +8,9 @@ export const users = sqliteTable("users", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   failedAttempts: integer("failed_attempts").notNull().default(0),
   lockedUntil: integer("locked_until", { mode: "timestamp_ms" }),
+  /** As categorias padrão já foram criadas uma vez (não recriar se a pessoa apagar todas). */
+  todoDefaultsSeeded: integer("todo_defaults_seeded", { mode: "boolean" }).notNull().default(false),
+  cardDefaultsSeeded: integer("card_defaults_seeded", { mode: "boolean" }).notNull().default(false),
 });
 
 export const sessions = sqliteTable("sessions", {
@@ -84,7 +87,9 @@ export const cardCategories = sqliteTable(
 );
 
 /** Compra de origem (à vista ou parcelada). */
-export const cardExpenses = sqliteTable("card_expenses", {
+export const cardExpenses = sqliteTable(
+  "card_expenses",
+  {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
     .notNull()
@@ -103,7 +108,9 @@ export const cardExpenses = sqliteTable("card_expenses", {
   categoryId: integer("category_id").references(() => cardCategories.id, { onDelete: "set null" }),
   notes: text("notes").notNull().default(""),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-});
+  },
+  (t) => [index("card_expenses_user").on(t.userId), index("card_expenses_category").on(t.categoryId)],
+);
 
 export const cardInstallments = sqliteTable(
   "card_installments",
@@ -118,7 +125,10 @@ export const cardInstallments = sqliteTable(
     amountCents: integer("amount_cents").notNull(),
     paid: integer("paid", { mode: "boolean" }).notNull().default(false),
   },
-  (t) => [uniqueIndex("card_installments_expense_number").on(t.expenseId, t.number)],
+  (t) => [
+    uniqueIndex("card_installments_expense_number").on(t.expenseId, t.number),
+    index("card_installments_month").on(t.invoiceMonth),
+  ],
 );
 
 /** Categorias e projetos das pendências. */
@@ -137,7 +147,9 @@ export const todoGroups = sqliteTable(
   (t) => [uniqueIndex("todo_groups_user_kind_name").on(t.userId, t.kind, t.name)],
 );
 
-export const todoTasks = sqliteTable("todo_tasks", {
+export const todoTasks = sqliteTable(
+  "todo_tasks",
+  {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
     .notNull()
@@ -156,9 +168,17 @@ export const todoTasks = sqliteTable("todo_tasks", {
   status: text("status").notNull().default("pending"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+  },
+  (t) => [
+    index("todo_tasks_user").on(t.userId),
+    index("todo_tasks_category").on(t.categoryId),
+    index("todo_tasks_project").on(t.projectId),
+  ],
+);
 
-export const todoChecklist = sqliteTable("todo_checklist", {
+export const todoChecklist = sqliteTable(
+  "todo_checklist",
+  {
   id: integer("id").primaryKey({ autoIncrement: true }),
   taskId: integer("task_id")
     .notNull()
@@ -166,19 +186,27 @@ export const todoChecklist = sqliteTable("todo_checklist", {
   text: text("text").notNull(),
   done: integer("done", { mode: "boolean" }).notNull().default(false),
   position: integer("position").notNull(),
-});
+  },
+  (t) => [index("todo_checklist_task").on(t.taskId, t.position)],
+);
 
-export const todoNotes = sqliteTable("todo_notes", {
+export const todoNotes = sqliteTable(
+  "todo_notes",
+  {
   id: integer("id").primaryKey({ autoIncrement: true }),
   taskId: integer("task_id")
     .notNull()
     .references(() => todoTasks.id, { onDelete: "cascade" }),
   text: text("text").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-});
+  },
+  (t) => [index("todo_notes_task").on(t.taskId)],
+);
 
 /** Compromissos (reuniões, consultas, prazos) independentes das tarefas. */
-export const todoEvents = sqliteTable("todo_events", {
+export const todoEvents = sqliteTable(
+  "todo_events",
+  {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
     .notNull()
@@ -193,9 +221,13 @@ export const todoEvents = sqliteTable("todo_events", {
   /** scheduled | done | canceled */
   status: text("status").notNull().default("scheduled"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-});
+  },
+  (t) => [index("todo_events_user").on(t.userId), index("todo_events_category").on(t.categoryId)],
+);
 
-export const quickNotes = sqliteTable("quick_notes", {
+export const quickNotes = sqliteTable(
+  "quick_notes",
+  {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
     .notNull()
@@ -204,4 +236,6 @@ export const quickNotes = sqliteTable("quick_notes", {
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+  },
+  (t) => [index("quick_notes_user").on(t.userId)],
+);

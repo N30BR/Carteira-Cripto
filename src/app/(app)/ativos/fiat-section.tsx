@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatMoney } from "@/lib/currency";
 import type { FiatAccount, Result } from "@/lib/fiat/accounts";
+import { safeAction } from "@/lib/safe-action";
 import { createAccountAction, deleteAccountAction, renameAccountAction, setBalanceAction } from "./fiat-actions";
 
 function formatDate(d: string): string {
@@ -66,7 +67,7 @@ function FormDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     start(async () => {
-      const r = await onSubmit(values);
+      const r = await safeAction(() => onSubmit(values));
       if (r.ok) {
         change(false);
         toast.success("Salvo");
@@ -124,7 +125,7 @@ export function FiatSection({ accounts, today }: { accounts: FiatAccount[]; toda
   function remove(a: FiatAccount) {
     if (!confirm(`Remover a conta "${a.name}"? O histórico de saldos dela também será apagado.`)) return;
     start(async () => {
-      const r = await deleteAccountAction(a.id);
+      const r = await safeAction(() => deleteAccountAction(a.id));
       if (r.ok) toast.success(`${a.name} removida`);
       else toast.error(r.error);
     });

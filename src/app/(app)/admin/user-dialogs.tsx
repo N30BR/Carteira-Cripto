@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Result } from "@/lib/admin/users";
+import { safeAction } from "@/lib/safe-action";
 import { createUserAction, deleteUserAction, resetPasswordAction, unlockUserAction } from "./actions";
 
 function useResultForm(action: (fd: FormData) => Promise<Result>, success: string) {
@@ -27,7 +28,7 @@ function useResultForm(action: (fd: FormData) => Promise<Result>, success: strin
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     start(async () => {
-      const r = await action(fd);
+      const r = await safeAction(() => action(fd));
       if (r.ok) {
         setOpen(false);
         setError(undefined);
@@ -112,7 +113,7 @@ export function UnlockButton({ userId }: { userId: number }) {
       disabled={pending}
       onClick={() =>
         start(async () => {
-          const r = await unlockUserAction(userId);
+          const r = await safeAction(() => unlockUserAction(userId));
           if (r.ok) toast.success("Conta desbloqueada");
           else toast.error(r.error);
         })
@@ -133,7 +134,7 @@ export function DeleteUserButton({ userId, username }: { userId: number; usernam
       onClick={() => {
         if (!confirm(`Remover ${username}? A carteira dessa pessoa também será apagada.`)) return;
         start(async () => {
-          const r = await deleteUserAction(userId);
+          const r = await safeAction(() => deleteUserAction(userId));
           if (r.ok) toast.success("Usuário removido");
           else toast.error(r.error);
         });

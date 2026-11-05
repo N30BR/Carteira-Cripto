@@ -1,13 +1,14 @@
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { quickNotes, todoChecklist, todoEvents, todoGroups, todoNotes, todoTasks } from "@/db/schema";
+import { quickNotes, todoChecklist, todoEvents, todoGroups, todoNotes, todoTasks, users } from "@/db/schema";
 import { statusAfterChecklist, type EventView, type TaskStatus, type TaskView } from "./logic";
 
 export type Result = { ok: true } | { ok: false; error: string };
 export type GroupKind = "category" | "project";
 export type Group = { id: number; name: string; kind: GroupKind };
 
-export const LIMITS = { groups: 100, tasks: 2000, items: 50, notes: 50, events: 2000, quickNotes: 500 };
+/** Limites por pessoa. `textChars` segura o tamanho total da página (tudo é enviado a cada visita). */
+export const LIMITS = { groups: 100, tasks: 1000, items: 30, notes: 20, events: 1000, quickNotes: 300, textChars: 2_000_000 };
 export const DEFAULT_GROUPS = ["Profissional", "Estudos", "Financeiro", "Casa"];
 
 const err = (error: string): Result => ({ ok: false, error });
@@ -20,6 +21,47 @@ const EVENT_NF = err("Compromisso não encontrado");
 const countWhere = (db: Db, table: typeof todoTasks | typeof todoEvents | typeof quickNotes | typeof todoGroups, userId: number) =>
   db.select({ n: count() }).from(table).where(eq(table.userId, userId)).all()[0].n;
 
+const TEXT_FULL_MSG = "Limite de texto das pendências atingido. Apague tarefas ou notas antigas.";
+const TEXT_FULL = err(TEXT_FULL_MSG);
+
+/** Total de caracteres guardados pela pessoa nas pendências. */
+function textUsed(db: Db, userId: number): number {
+  const one = (q: { n: number | null } | undefined) => Number(q?.n ?? 0);
+  const tasks = db
+    .select({ n: sql<number>`sum(length(${todoTasks.title}) + length(${todoTasks.description}))` })
+    .from(todoTasks)
+    .where(eq(todoTasks.userId, userId))
+    .get();
+  const items = db
+    .select({ n: sql<number>`sum(length(${todoChecklist.text}))` })
+    .from(todoChecklist)
+    .innerJoin(todoTasks, eq(todoTasks.id, todoChecklist.taskId))
+    .where(eq(todoTasks.userId, userId))
+    .get();
+  const notes = db
+    .select({ n: sql<number>`sum(length(${todoNotes.text}))` })
+    .from(todoNotes)
+    .innerJoin(todoTasks, eq(todoTasks.id, todoNotes.taskId))
+    .where(eq(todoTasks.userId, userId))
+    .get();
+  const events = db
+    .select({ n: sql<number>`sum(length(${todoEvents.title}) + length(${todoEvents.description}))` })
+    .from(todoEvents)
+    .where(eq(todoEvents.userId, userId))
+    .get();
+  const quick = db
+    .select({ n: sql<number>`sum(length(${quickNotes.text}))` })
+    .from(quickNotes)
+    .where(eq(quickNotes.userId, userId))
+    .get();
+  return one(tasks) + one(items) + one(notes) + one(events) + one(quick);
+}
+
+/** Cabe mais `added` caracteres (pode ser negativo, numa edição que encurta)? */
+function fits(db: Db, userId: number, added: number): boolean {
+  return added <= 0 || textUsed(db, userId) + added <= LIMITS.textChars;
+}
+
 // ---------- grupos (categorias e projetos) ----------
 
 export function listGroups(db: Db, userId: number): Group[] {
@@ -31,13 +73,20 @@ export function listGroups(db: Db, userId: number): Group[] {
     .all() as Group[];
 }
 
-/** Na primeira visita (sem grupos e sem tarefas), cria as 4 categorias padrão. */
+/** Cria as 4 categorias padrão uma única vez por pessoa (se ela apagar todas, não voltam). */
 export function ensureDefaultGroups(db: Db, userId: number): void {
-  if (countWhere(db, todoGroups, userId) > 0 || countWhere(db, todoTasks, userId) > 0) return;
-  const now = new Date();
-  db.insert(todoGroups)
-    .values(DEFAULT_GROUPS.map((name) => ({ userId, name, kind: "category", createdAt: now })))
-    .run();
+  const user = db.select({ seeded: users.todoDefaultsSeeded }).from(users).where(eq(users.id, userId)).get();
+  if (!user || user.seeded) return;
+  const fresh = countWhere(db, todoGroups, userId) === 0 && countWhere(db, todoTasks, userId) === 0;
+  db.transaction((tx) => {
+    if (fresh) {
+      const now = new Date();
+      tx.insert(todoGroups)
+        .values(DEFAULT_GROUPS.map((name) => ({ userId, name, kind: "category", createdAt: now })))
+        .run();
+    }
+    tx.update(users).set({ todoDefaultsSeeded: true }).where(eq(users.id, userId)).run();
+  });
 }
 
 function getGroup(db: Db, userId: number, id: number) {
@@ -72,11 +121,18 @@ export function updateGroup(db: Db, userId: number, id: number, g: { name: strin
   db.transaction((tx) => {
     tx.update(todoGroups).set({ name: g.name, kind: g.kind }).where(eq(todoGroups.id, id)).run();
     if (current.kind !== g.kind) {
-      const [from, to] = current.kind === "category" ? ["categoryId", "projectId"] : ["projectId", "categoryId"];
-      const fromCol = from === "categoryId" ? todoTasks.categoryId : todoTasks.projectId;
+      const toCategory = g.kind === "category";
+      const fromCol = toCategory ? todoTasks.projectId : todoTasks.categoryId;
+      const toCol = toCategory ? todoTasks.categoryId : todoTasks.projectId;
+      const scope = and(eq(todoTasks.userId, userId), eq(fromCol, id));
+      // Só ocupa o campo do novo tipo onde ele está vazio: não troca a categoria/projeto que a tarefa já tem.
       tx.update(todoTasks)
-        .set({ [from]: null, [to]: id })
-        .where(and(eq(todoTasks.userId, userId), eq(fromCol, id)))
+        .set(toCategory ? { categoryId: id } : { projectId: id })
+        .where(and(scope, isNull(toCol)))
+        .run();
+      tx.update(todoTasks)
+        .set(toCategory ? { projectId: null } : { categoryId: null })
+        .where(scope)
         .run();
       if (current.kind === "category") {
         tx.update(todoEvents).set({ categoryId: null }).where(eq(todoEvents.categoryId, id)).run();
@@ -135,6 +191,10 @@ export function listTasks(db: Db, userId: number): TaskView[] {
   const ids = tasks.map((t) => t.id);
   const items = db.select().from(todoChecklist).where(inArray(todoChecklist.taskId, ids)).orderBy(asc(todoChecklist.position), asc(todoChecklist.id)).all();
   const notes = db.select().from(todoNotes).where(inArray(todoNotes.taskId, ids)).orderBy(asc(todoNotes.id)).all();
+  const itemsBy = new Map<number, typeof items>();
+  for (const i of items) (itemsBy.get(i.taskId) ?? itemsBy.set(i.taskId, []).get(i.taskId)!).push(i);
+  const notesBy = new Map<number, typeof notes>();
+  for (const n of notes) (notesBy.get(n.taskId) ?? notesBy.set(n.taskId, []).get(n.taskId)!).push(n);
   return tasks.map((t) => ({
     id: t.id,
     title: t.title,
@@ -147,8 +207,8 @@ export function listTasks(db: Db, userId: number): TaskView[] {
     status: t.status as TaskStatus,
     createdAt: t.createdAt.getTime(),
     updatedAt: t.updatedAt.getTime(),
-    checklist: items.filter((i) => i.taskId === t.id).map((i) => ({ id: i.id, text: i.text, done: i.done, position: i.position })),
-    notes: notes.filter((n) => n.taskId === t.id).map((n) => ({ id: n.id, text: n.text })),
+    checklist: (itemsBy.get(t.id) ?? []).map((i) => ({ id: i.id, text: i.text, done: i.done, position: i.position })),
+    notes: (notesBy.get(t.id) ?? []).map((n) => ({ id: n.id, text: n.text })),
   }));
 }
 
@@ -166,6 +226,8 @@ export function createTask(db: Db, userId: number, t: TaskInput): { ok: true; id
   if (countWhere(db, todoTasks, userId) >= LIMITS.tasks) return { ok: false, error: `Limite de ${LIMITS.tasks} tarefas atingido` };
   const items = (t.checklist ?? []).slice(0, LIMITS.items);
   const notes = (t.notes ?? []).slice(0, LIMITS.notes);
+  const added = t.title.length + (t.description ?? "").length + [...items, ...notes].reduce((s, x) => s + x.length, 0);
+  if (!fits(db, userId, added)) return { ok: false, error: TEXT_FULL_MSG };
   const now = new Date();
   let id = 0;
   db.transaction((tx) => {
@@ -204,19 +266,30 @@ function setAllItems(db: Db, taskId: number, done: boolean) {
 }
 
 export function updateTask(db: Db, userId: number, id: number, patch: TaskPatch): Result {
-  if (!getTask(db, userId, id)) return TASK_NF;
+  const current = getTask(db, userId, id);
+  if (!current) return TASK_NF;
   const g = checkGroups(db, userId, patch.categoryId, patch.projectId);
   if (!g.ok) return g;
+  const added =
+    (patch.title !== undefined ? patch.title.length - current.title.length : 0) +
+    (patch.description !== undefined ? patch.description.length - current.description.length : 0);
+  if (!fits(db, userId, added)) return TEXT_FULL;
   db.transaction((tx) => {
     touch(tx as unknown as Db, id, patch);
+    // Escolher "Concluída" conclui também o checklist; "Pendente"/"Em andamento" não mexem nos itens.
     if (patch.status === "done") setAllItems(tx as unknown as Db, id, true);
-    if (patch.status === "pending") setAllItems(tx as unknown as Db, id, false);
   });
   return { ok: true };
 }
 
+/** Checkbox principal: concluir marca todos os itens; reabrir desmarca todos (como pedido). */
 export function setTaskDone(db: Db, userId: number, id: number, done: boolean): Result {
-  return updateTask(db, userId, id, { status: done ? "done" : "pending" });
+  if (!getTask(db, userId, id)) return TASK_NF;
+  db.transaction((tx) => {
+    touch(tx as unknown as Db, id, { status: done ? "done" : "pending" });
+    setAllItems(tx as unknown as Db, id, done);
+  });
+  return { ok: true };
 }
 
 export function deleteTask(db: Db, userId: number, id: number): Result {
@@ -247,6 +320,7 @@ export function addItem(db: Db, userId: number, taskId: number, text: string): R
   if (!getTask(db, userId, taskId)) return TASK_NF;
   const items = db.select({ position: todoChecklist.position }).from(todoChecklist).where(eq(todoChecklist.taskId, taskId)).all();
   if (items.length >= LIMITS.items) return err(`Limite de ${LIMITS.items} itens atingido`);
+  if (!fits(db, userId, text.length)) return TEXT_FULL;
   const position = items.reduce((m, i) => Math.max(m, i.position + 1), 0);
   db.transaction((tx) => {
     tx.insert(todoChecklist).values({ taskId, text, position, done: false }).run();
@@ -258,6 +332,7 @@ export function addItem(db: Db, userId: number, taskId: number, text: string): R
 export function updateItem(db: Db, userId: number, itemId: number, text: string): Result {
   const item = getItem(db, userId, itemId);
   if (!item) return ITEM_NF;
+  if (!fits(db, userId, text.length)) return TEXT_FULL;
   db.update(todoChecklist).set({ text }).where(eq(todoChecklist.id, itemId)).run();
   touch(db, item.taskId);
   return { ok: true };
@@ -319,6 +394,7 @@ export function addNote(db: Db, userId: number, taskId: number, text: string): R
   if (!getTask(db, userId, taskId)) return TASK_NF;
   const [{ n }] = db.select({ n: count() }).from(todoNotes).where(eq(todoNotes.taskId, taskId)).all();
   if (n >= LIMITS.notes) return err(`Limite de ${LIMITS.notes} notas atingido`);
+  if (!fits(db, userId, text.length)) return TEXT_FULL;
   db.insert(todoNotes).values({ taskId, text, createdAt: new Date() }).run();
   touch(db, taskId);
   return { ok: true };
@@ -327,6 +403,7 @@ export function addNote(db: Db, userId: number, taskId: number, text: string): R
 export function updateNote(db: Db, userId: number, noteId: number, text: string): Result {
   const note = getNote(db, userId, noteId);
   if (!note) return NOTE_NF;
+  if (!fits(db, userId, text.length)) return TEXT_FULL;
   db.update(todoNotes).set({ text }).where(eq(todoNotes.id, noteId)).run();
   touch(db, note.taskId);
   return { ok: true };
@@ -373,6 +450,7 @@ export function createEvent(db: Db, userId: number, e: EventInput): Result {
   const g = checkGroups(db, userId, e.categoryId, null);
   if (!g.ok) return g;
   if (countWhere(db, todoEvents, userId) >= LIMITS.events) return err(`Limite de ${LIMITS.events} compromissos atingido`);
+  if (!fits(db, userId, e.title.length + e.description.length)) return TEXT_FULL;
   db.insert(todoEvents).values({ userId, ...e, createdAt: new Date() }).run();
   return { ok: true };
 }
@@ -381,6 +459,7 @@ export function updateEvent(db: Db, userId: number, id: number, e: EventInput): 
   if (!ownsEvent(db, userId, id)) return EVENT_NF;
   const g = checkGroups(db, userId, e.categoryId, null);
   if (!g.ok) return g;
+  if (!fits(db, userId, e.title.length + e.description.length)) return TEXT_FULL;
   db.update(todoEvents).set(e).where(eq(todoEvents.id, id)).run();
   return { ok: true };
 }
@@ -415,6 +494,7 @@ function ownsQuickNote(db: Db, userId: number, id: number) {
 
 export function createQuickNote(db: Db, userId: number, text: string): Result {
   if (countWhere(db, quickNotes, userId) >= LIMITS.quickNotes) return err(`Limite de ${LIMITS.quickNotes} notas atingido`);
+  if (!fits(db, userId, text.length)) return TEXT_FULL;
   const now = new Date();
   db.insert(quickNotes).values({ userId, text, pinned: false, createdAt: now, updatedAt: now }).run();
   return { ok: true };
@@ -422,6 +502,7 @@ export function createQuickNote(db: Db, userId: number, text: string): Result {
 
 export function updateQuickNote(db: Db, userId: number, id: number, text: string): Result {
   if (!ownsQuickNote(db, userId, id)) return NOTE_NF;
+  if (!fits(db, userId, text.length)) return TEXT_FULL;
   db.update(quickNotes).set({ text, updatedAt: new Date() }).where(eq(quickNotes.id, id)).run();
   return { ok: true };
 }

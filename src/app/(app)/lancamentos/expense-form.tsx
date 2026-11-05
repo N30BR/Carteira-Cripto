@@ -9,6 +9,7 @@ import type { Category, Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
 import { monthLabel } from "@/lib/cards/months";
 import type { Side } from "@/lib/cards/store";
+import { safeAction } from "@/lib/safe-action";
 import { cn } from "@/lib/utils";
 import { brlToCents } from "@/lib/validation";
 import type { ExpenseForm } from "./actions";
@@ -81,7 +82,7 @@ export function ExpenseFormFields({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     start(async () => {
-      const r = await onSubmit(f);
+      const r = await safeAction(() => onSubmit(f));
       if (r.ok) {
         setError(undefined);
         // Novo lançamento: limpa o formulário, mas mantém mês, cartão e tipo para o próximo.

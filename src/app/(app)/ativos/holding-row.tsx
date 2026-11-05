@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { formatQty, quantityToInput } from "@/lib/format";
 import type { Holding } from "@/lib/holdings/holdings";
+import { safeAction } from "@/lib/safe-action";
 import { deleteHoldingAction, updateHoldingAction } from "./actions";
 
 export function HoldingRow({ h }: { h: Holding }) {
@@ -18,7 +19,7 @@ export function HoldingRow({ h }: { h: Holding }) {
   function save(e: React.FormEvent) {
     e.preventDefault();
     start(async () => {
-      const r = await updateHoldingAction(h.id, value);
+      const r = await safeAction(() => updateHoldingAction(h.id, value));
       if (r.ok) {
         setEditing(false);
         setError(undefined);
@@ -30,7 +31,7 @@ export function HoldingRow({ h }: { h: Holding }) {
   function remove() {
     if (!confirm(`Remover ${h.name} da carteira?`)) return;
     start(async () => {
-      const r = await deleteHoldingAction(h.id);
+      const r = await safeAction(() => deleteHoldingAction(h.id));
       if (r.ok) toast.success(`${h.name} removido`);
       else toast.error(r.error);
     });

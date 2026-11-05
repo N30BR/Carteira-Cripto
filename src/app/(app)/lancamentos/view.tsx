@@ -13,6 +13,7 @@ import type { Category } from "@/lib/cards/categories";
 import { monthLabel } from "@/lib/cards/months";
 import type { InstallmentRow, Side } from "@/lib/cards/store";
 import { NO_CATEGORY, monthTotals } from "@/lib/cards/summary";
+import { safeAction, type ActionResult } from "@/lib/safe-action";
 import { cn } from "@/lib/utils";
 import {
   createCategoryAction,
@@ -109,7 +110,7 @@ export function LaunchesView({
 
   function toggle(r: InstallmentRow) {
     start(async () => {
-      const res = await toggleInstallmentAction(r.installmentId, !r.paid);
+      const res = await safeAction(() => toggleInstallmentAction(r.installmentId, !r.paid));
       if (!res.ok) toast.error(res.error);
     });
   }
@@ -118,7 +119,7 @@ export function LaunchesView({
     const what = r.installments > 1 ? `"${r.description}" e todas as ${r.installments} parcelas` : `"${r.description}"`;
     if (!confirm(`Excluir ${what}? Essa ação não pode ser desfeita.`)) return;
     start(async () => {
-      const res = await deleteExpenseAction(r.expenseId);
+      const res = await safeAction(() => deleteExpenseAction(r.expenseId));
       if (res.ok) toast.success("Lançamento excluído");
       else toast.error(res.error);
     });
@@ -321,9 +322,9 @@ function CategoriesDialog({ categories }: { categories: Category[] }) {
   const [names, setNames] = useState<Record<number, string>>({});
   const [pending, start] = useTransition();
 
-  const run = (fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) =>
+  const run = (fn: () => Promise<ActionResult>, ok: string) =>
     start(async () => {
-      const r = await fn();
+      const r = await safeAction(fn);
       if (r.ok) toast.success(ok);
       else toast.error(r.error);
     });

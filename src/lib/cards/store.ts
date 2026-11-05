@@ -109,6 +109,11 @@ export function updateExpense(db: Db, userId: number, id: number, e: ExpenseInpu
   return { ok: true };
 }
 
+/** A pessoa já lançou alguma compra (de qualquer época)? */
+export function hasExpenses(db: Db, userId: number): boolean {
+  return !!db.select({ id: cardExpenses.id }).from(cardExpenses).where(eq(cardExpenses.userId, userId)).limit(1).get();
+}
+
 export function deleteExpense(db: Db, userId: number, id: number): Result {
   if (!ownsExpense(db, userId, id)) return NOT_FOUND;
   db.delete(cardExpenses).where(eq(cardExpenses.id, id)).run();

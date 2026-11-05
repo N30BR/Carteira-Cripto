@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatQty, quantityToInput } from "@/lib/format";
+import { safeAction } from "@/lib/safe-action";
 import { cn } from "@/lib/utils";
 import { addHoldingAction } from "./actions";
 
@@ -79,7 +80,7 @@ export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
     e.preventDefault();
     if (!coin) return;
     start(async () => {
-      const r = await addHoldingAction(coin.id, quantity);
+      const r = await safeAction(() => addHoldingAction(coin.id, quantity));
       if (r.ok) {
         toast.success(owned[coin.id] ? `${coin.name} atualizado` : `${coin.name} adicionado`);
         reset(false);
