@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { testDb } from "../helpers/db";
-import { fetchMarketChart } from "@/lib/prices/coingecko";
+import { fetchMarketChart, resetCoinGeckoState } from "@/lib/prices/coingecko";
 import { getCurrentPrices, getHistory, searchCoins } from "@/lib/prices";
 
 type Handler = (url: URL, init?: RequestInit) => Promise<Response> | Response;
@@ -13,6 +13,7 @@ function stubFetch(handler: Handler) {
 }
 
 beforeEach(() => {
+  resetCoinGeckoState();
   vi.stubEnv("COINGECKO_BASE_URL", "https://cg.test/api/v3");
   vi.stubEnv("COINGECKO_API_KEY", "");
 });
@@ -127,5 +128,44 @@ describe("searchCoins", () => {
     expect(new URL(String(fn.mock.calls[0][0])).searchParams.get("query")).toBe("bit");
     expect(r).toHaveLength(10);
     expect(r[0]).toEqual({ id: "c0", symbol: "C0", name: "Coin 0", thumb: "t" });
+  });
+});
+
+describe("resiliência", () => {
+  test("depois de uma falha, pausa a API por 60 s em vez de repetir tudo", async () => {
+    const fn = stubFetch(() => json({}, 500));
+    const db = testDb();
+    await getCurrentPrices(db, ["bitcoin"]);
+    await getHistory(db, ["bitcoin", "solana"], "30D");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("toda requisição tem timeout", async () => {
+    const fn = stubFetch(() => json({}));
+    await getCurrentPrices(testDb(), ["bitcoin"]);
+    expect(fn.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("adicionar uma moeda não perde o preço antigo das outras quando a API falha", async () => {
+    const db = testDb();
+    const t0 = new Date("2026-01-01T00:00:00Z");
+    stubFetch(() => json({ bitcoin: { usd: 100, usd_24h_change: 1 } }));
+    await getCurrentPrices(db, ["bitcoin"], t0);
+    resetCoinGeckoState();
+    stubFetch(() => json({}, 500));
+    const r = await getCurrentPrices(db, ["bitcoin", "solana"], new Date(t0.getTime() + 120_000));
+    expect(r.prices).toEqual({ bitcoin: { usd: 100, change24h: 1 } });
+    expect(r.stale).toBe(true);
+    expect(r.fetchedAt).toEqual(t0);
+  });
+
+  test("só busca na API as moedas sem preço válido no cache", async () => {
+    const db = testDb();
+    const fn = stubFetch((url) =>
+      json(Object.fromEntries((url.searchParams.get("ids") ?? "").split(",").map((id) => [id, { usd: 1 }]))),
+    );
+    await getCurrentPrices(db, ["bitcoin"]);
+    await getCurrentPrices(db, ["bitcoin", "solana"]);
+    expect(new URL(String(fn.mock.calls[1][0])).searchParams.get("ids")).toBe("solana");
   });
 });

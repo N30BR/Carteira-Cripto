@@ -37,6 +37,12 @@ describe("computePortfolio", () => {
     expect(last).toMatchObject({ symbol: "nada", price: null, value: null, share: null });
   });
 
+  test("nenhuma moeda com preço: total indisponível (null), não zero", () => {
+    const p = computePortfolio([H("bitcoin", "btc", "1")], {});
+    expect(p.total).toBeNull();
+    expect(p.change24hPct).toBeNull();
+  });
+
   test("carteira vazia", () => {
     expect(computePortfolio([], {})).toEqual({ rows: [], total: 0, change24hUsd: 0, change24hPct: null });
   });

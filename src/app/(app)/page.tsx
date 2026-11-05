@@ -39,7 +39,9 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
 
   const now = new Date();
   const ids = holdings.map((h) => h.coinId);
-  const [current, hist] = await Promise.all([getCurrentPrices(db, ids, now), getHistory(db, ids, period, now)]);
+  const current = await getCurrentPrices(db, ids, now);
+  // Histórico só das moedas com preço: as outras nem entram na curva.
+  const hist = await getHistory(db, ids.filter((id) => current.prices[id]), period, now);
   const portfolio = computePortfolio(holdings, current.prices);
   const curve = buildCurve(holdings, hist.history, current.prices, period, now);
 
@@ -53,7 +55,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
 
   return (
     <div className="flex flex-col gap-6">
-      <StaleBanner since={staleSince} now={now} />
+      <StaleBanner since={staleSince} now={now} unavailable={portfolio.total === null} />
 
       <Card>
         <CardContent className="flex flex-col gap-6">

@@ -2,9 +2,18 @@ import type { CurrentPrice, PricePoint } from "@/lib/portfolio/calc";
 
 const MAX_CONCURRENT = 2;
 const RETRY_DELAY_MS = 2000;
+const TIMEOUT_MS = 8000;
+const PAUSE_AFTER_FAILURE_MS = 60_000;
 
 let active = 0;
 const waiting: (() => void)[] = [];
+// Depois de uma falha, não chama a API por um tempo: evita travar o dashboard
+// repetindo requisições que vão falhar de novo (limite atingido ou API fora do ar).
+let pausedUntil = 0;
+
+export function resetCoinGeckoState(): void {
+  pausedUntil = 0;
+}
 
 async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   if (active >= MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
@@ -25,17 +34,25 @@ async function get<T>(path: string, params: Record<string, string>): Promise<T> 
   const headers: Record<string, string> = { accept: "application/json" };
   if (process.env.COINGECKO_API_KEY) headers["x-cg-demo-api-key"] = process.env.COINGECKO_API_KEY;
 
+  const request = () => fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+
   return withSlot(async () => {
-    let res = await fetch(url, { headers, cache: "no-store" });
-    if (res.status === 429) {
-      await sleep(RETRY_DELAY_MS);
-      res = await fetch(url, { headers, cache: "no-store" });
+    if (Date.now() < pausedUntil) throw new Error("CoinGecko em pausa depois de uma falha");
+    try {
+      let res = await request();
+      if (res.status === 429) {
+        await sleep(RETRY_DELAY_MS);
+        res = await request();
+      }
+      if (!res.ok) throw new Error(`CoinGecko ${res.status} em ${path}`);
+      const body = await res.json();
+      // A CoinGecko às vezes responde 200 com o erro no corpo (ex.: limite atingido).
+      if (body?.status?.error_code) throw new Error(`CoinGecko ${body.status.error_code} em ${path}`);
+      return body as T;
+    } catch (e) {
+      pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS;
+      throw e;
     }
-    if (!res.ok) throw new Error(`CoinGecko ${res.status} em ${path}`);
-    const body = await res.json();
-    // A CoinGecko às vezes responde 200 com o erro no corpo (ex.: limite atingido).
-    if (body?.status?.error_code) throw new Error(`CoinGecko ${body.status.error_code} em ${path}`);
-    return body as T;
   });
 }
 

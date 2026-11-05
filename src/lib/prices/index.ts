@@ -1,7 +1,7 @@
 import type { Db } from "@/db/client";
 import { PERIODS, type CurrentPrice, type Period, type PricePoint } from "@/lib/portfolio/calc";
 import { normalizeSearch } from "@/lib/validation";
-import { cached, pruneExpired } from "./cache";
+import { cached, pruneExpired, readCache, writeCache } from "./cache";
 import { fetchMarketChart, fetchSearch, fetchSimplePrices, type CoinSearchResult } from "./coingecko";
 
 export type { CoinSearchResult };
@@ -15,10 +15,33 @@ export async function getCurrentPrices(
   ids: string[],
   now = new Date(),
 ): Promise<{ prices: Record<string, CurrentPrice>; fetchedAt: Date | null; stale: boolean }> {
-  if (!ids.length) return { prices: {}, fetchedAt: null, stale: false };
-  const sorted = [...new Set(ids)].sort();
-  const r = await cached(db, `price:${sorted.join(",")}`, PRICE_TTL, () => fetchSimplePrices(sorted), now);
-  return r ? { prices: r.data, fetchedAt: r.fetchedAt, stale: r.stale } : { prices: {}, fetchedAt: null, stale: false };
+  const unique = [...new Set(ids)].sort();
+  // Cache por moeda: adicionar uma moeda nova não descarta o preço guardado das outras.
+  const hits = new Map(unique.map((id) => [id, readCache<CurrentPrice>(db, `price:${id}`, now)]));
+  const toFetch = unique.filter((id) => !hits.get(id) || hits.get(id)!.stale);
+
+  if (toFetch.length) {
+    try {
+      const fresh = await fetchSimplePrices(toFetch);
+      for (const [id, price] of Object.entries(fresh)) {
+        writeCache(db, `price:${id}`, price, PRICE_TTL, now);
+        hits.set(id, { data: price, fetchedAt: now, stale: false });
+      }
+    } catch {
+      // Sem resposta: segue com o que houver no cache (marcado como antigo).
+    }
+  }
+
+  const prices: Record<string, CurrentPrice> = {};
+  let fetchedAt: Date | null = null;
+  let stale = false;
+  for (const [id, hit] of hits) {
+    if (!hit) continue;
+    prices[id] = hit.data;
+    stale ||= hit.stale;
+    if (!fetchedAt || hit.fetchedAt < fetchedAt) fetchedAt = hit.fetchedAt;
+  }
+  return { prices, fetchedAt, stale };
 }
 
 export async function getHistory(

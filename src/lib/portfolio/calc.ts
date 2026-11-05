@@ -12,7 +12,8 @@ export type PortfolioRow = Holding & {
 
 export type Portfolio = {
   rows: PortfolioRow[];
-  total: number;
+  /** null quando há ativos mas nenhum tem preço (mostrar "—", não US$ 0,00). */
+  total: number | null;
   change24hUsd: number;
   change24hPct: number | null;
 };
@@ -36,6 +37,8 @@ export function computePortfolio(holdings: Holding[], prices: Record<string, Cur
   }
   rows.sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
 
+  const anyPrice = rows.some((r) => r.price !== null);
+  if (rows.length && !anyPrice) return { rows, total: null, change24hUsd: 0, change24hPct: null };
   const base = total - delta;
   return { rows, total, change24hUsd: delta, change24hPct: rows.length && base > 0 ? delta / base : null };
 }

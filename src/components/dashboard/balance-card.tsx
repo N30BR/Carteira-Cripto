@@ -6,7 +6,7 @@ export function BalanceCard({
   change24hUsd,
   change24hPct,
 }: {
-  total: number;
+  total: number | null;
   change24hUsd: number;
   change24hPct: number | null;
 }) {
@@ -15,7 +15,7 @@ export function BalanceCard({
     <div className="flex flex-col gap-1">
       <span className="text-sm text-muted-foreground">Saldo total</span>
       <span className="text-4xl font-semibold tracking-tight tabular-nums" data-testid="total">
-        {formatUsd(total)}
+        {total === null ? "—" : formatUsd(total)}
       </span>
       <span className="text-sm tabular-nums" style={{ color: change24hPct === null ? undefined : up ? UP : DOWN }}>
         {change24hPct === null ? (
