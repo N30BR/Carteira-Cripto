@@ -6,11 +6,11 @@ import { adjustChange, pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { listHoldings } from "@/lib/holdings/holdings";
 import { getCurrentPrices, getHistory } from "@/lib/prices";
-import { PERIODS, buildCurve, computePortfolio, parsePeriod, periodChanges } from "@/lib/portfolio/calc";
+import { PERIODS, buildCurve, computePortfolio, parsePeriod, periodChanges, totalChange } from "@/lib/portfolio/calc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AllocationDonut } from "@/components/dashboard/allocation-donut";
-import { BalanceCard } from "@/components/dashboard/balance-card";
+import { BalanceCard, type BalanceChange } from "@/components/dashboard/balance-card";
 import { CapitalChart } from "@/components/dashboard/capital-chart";
 import { CurrencyMenu } from "@/components/dashboard/currency-menu";
 import { HoldingsTable } from "@/components/dashboard/holdings-table";
@@ -87,6 +87,20 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   const changeAbs = total !== null && pastTotal !== null ? total - pastTotal : 0;
   const changePct = portfolio.change24hPct !== null && pastTotal && pastTotal > 0 ? (changeAbs / pastTotal) * 100 : null;
 
+  // 3M e 6M do saldo total: mesmas moedas, preço de agora × preço de então, cada um pela cotação da sua época.
+  const longChange = (label: string, days: number, fPast: number): BalanceChange => {
+    const c = totalChange(holdings, current.prices, hist365.history, days, now);
+    if (!c) return { label, abs: 0, pct: null };
+    const nowRef = c.now * f;
+    const pastRef = c.past * fPast;
+    return { label, abs: nowRef - pastRef, pct: pastRef > 0 ? (nowRef / pastRef - 1) * 100 : null };
+  };
+  const balanceChanges: BalanceChange[] = [
+    { label: "1D", abs: changeAbs, pct: changePct },
+    longChange("3M", 90, fAgo(90)),
+    longChange("6M", 182, f182),
+  ];
+
   const curve = buildCurve(holdings, hist.history, current.prices, period, now);
   const points = view.convertPoints(curve.points);
 
@@ -113,9 +127,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
           <div className="flex flex-wrap items-end justify-between gap-4">
             <BalanceCard
               total={total}
-              changeAbs={changeAbs}
-              changePct={changePct}
-              changeLabel="24h"
+              changes={balanceChanges}
               currency={view.currency}
             />
             <div className="flex items-center gap-2">

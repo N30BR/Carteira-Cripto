@@ -218,7 +218,7 @@ export function LaunchesView({
                     {r.description}
                   </TableCell>
                   <TableCell className="text-center">
-                    <Tag color={categoryColor(r.categoryName)}>{r.categoryName ?? NO_CATEGORY}</Tag>
+                    <Tag color={categoryColor(r.categoryId)}>{r.categoryName ?? NO_CATEGORY}</Tag>
                   </TableCell>
                   <TableCell className="text-center">
                     <Tag color={NATURE_COLOR[r.nature]}>{r.nature}</Tag>
@@ -358,7 +358,7 @@ function CategoriesDialog({ categories }: { categories: Category[] }) {
         <ul className="flex max-h-80 flex-col gap-2 overflow-auto">
           {categories.map((c) => (
             <li key={c.id} className="flex items-center gap-2">
-              <span className="size-2.5 shrink-0 rounded-full" style={{ background: categoryColor(c.name) }} />
+              <span className="size-2.5 shrink-0 rounded-full" style={{ background: categoryColor(c.id) }} />
               <Input
                 aria-label={`Nome da categoria ${c.name}`}
                 value={names[c.id] ?? c.name}

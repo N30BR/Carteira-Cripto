@@ -15,11 +15,13 @@ export function AppHeader({ user }: { user: SessionUser }) {
   ];
   return (
     <header className="border-b border-border/60">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-2 md:h-14 md:flex-nowrap md:py-0">
         <Link href="/" aria-label="Início" className="shrink-0">
           <Logo />
         </Link>
-        <NavLinks items={links} />
+        <div className="order-last w-full md:order-none md:w-auto md:min-w-0">
+          <NavLinks items={links} />
+        </div>
         <div className="ml-auto shrink-0">
           <UserMenu username={user.username} />
         </div>

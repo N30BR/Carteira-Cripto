@@ -175,7 +175,9 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
             <p className="text-sm text-muted-foreground">Composição de despesas • {monthLabel(month)}</p>
           </CardHeader>
           <CardContent>
-            <CategoryPie items={monthRows.map((r) => ({ nature: r.nature, category: r.categoryName, cents: r.amountCents }))} />
+            <CategoryPie
+              items={monthRows.map((r) => ({ nature: r.nature, categoryId: r.categoryId, category: r.categoryName, cents: r.amountCents }))}
+            />
           </CardContent>
         </Card>
       </div>

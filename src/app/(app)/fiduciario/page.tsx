@@ -85,9 +85,7 @@ export default async function FiatDashboardPage({ searchParams }: PageProps<"/fi
           <div className="flex flex-wrap items-end justify-between gap-4">
             <BalanceCard
               total={total}
-              changeAbs={changeAbs}
-              changePct={changePct}
-              changeLabel="no mês"
+              changes={[{ label: "no mês", abs: changeAbs, pct: changePct }]}
               currency={view.currency}
             />
             <div className="flex items-center gap-2">

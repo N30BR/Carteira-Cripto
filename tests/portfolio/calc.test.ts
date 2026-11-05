@@ -151,3 +151,27 @@ describe("variação por período", () => {
     expect(r.SEM).toEqual({ change7d: null, change1m: null, change6m: null, change1y: null });
   });
 });
+
+import { totalChange } from "@/lib/portfolio/calc";
+
+describe("variação do saldo total", () => {
+  const DAY = 86_400_000;
+  const now = new Date("2026-06-01T00:00:00Z");
+  const t = (d: number) => now.getTime() - d * DAY;
+
+  test("compara as mesmas moedas: valor de agora contra o valor de N dias atrás", () => {
+    const holdings = [H("BTC", "BTC", "1"), H("SOL", "SOL", "10", 2), H("NOVA", "NOVA", "5", 3)];
+    const current = { BTC: { usd: 100, change24h: 0 }, SOL: { usd: 20, change24h: 0 }, NOVA: { usd: 1, change24h: 0 } };
+    const history = { BTC: [[t(100), 80]] as PricePoint[], SOL: [[t(100), 10]] as PricePoint[], NOVA: [[t(10), 1]] as PricePoint[] };
+    // NOVA não tinha preço 90 dias atrás: fica fora da comparação.
+    const r = totalChange(holdings, current, history, 90, now)!;
+    expect(r.past).toBe(180);
+    expect(r.now).toBe(300);
+    expect(r.abs).toBe(120);
+    expect(r.pct).toBeCloseTo((300 / 180 - 1) * 100, 10);
+  });
+
+  test("sem nenhum preço antigo: indisponível", () => {
+    expect(totalChange([H("BTC", "BTC", "1")], { BTC: { usd: 1, change24h: 0 } }, {}, 90, now)).toBeNull();
+  });
+});

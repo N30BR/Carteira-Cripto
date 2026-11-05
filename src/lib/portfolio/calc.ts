@@ -146,3 +146,33 @@ export function periodChanges(
   }
   return out;
 }
+
+/**
+ * Variação do saldo total em `days` dias, comparando só as moedas que já tinham preço naquela data
+ * (quantidades atuais × preço de então contra × preço de agora). null sem nenhum preço antigo.
+ */
+export function totalChange(
+  holdings: Holding[],
+  current: Record<string, CurrentPrice>,
+  history: Record<string, PricePoint[]>,
+  days: number,
+  now = new Date(),
+): { now: number; past: number; abs: number; pct: number | null } | null {
+  const target = now.getTime() - days * DAY_MS;
+  let nowSum = 0;
+  let pastSum = 0;
+  let any = false;
+  for (const h of holdings) {
+    const price = current[h.coinId]?.usd;
+    if (price === undefined) continue;
+    let past: PricePoint | null = null;
+    for (const p of history[h.coinId] ?? []) if (p[0] <= target && (!past || p[0] >= past[0])) past = p;
+    if (!past) continue;
+    any = true;
+    const qty = Number(h.quantity);
+    nowSum += qty * price;
+    pastSum += qty * past[1];
+  }
+  if (!any) return null;
+  return { now: nowSum, past: pastSum, abs: nowSum - pastSum, pct: pastSum > 0 ? (nowSum / pastSum - 1) * 100 : null };
+}

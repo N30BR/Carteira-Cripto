@@ -90,7 +90,7 @@ function PieWithLegend({ slices, total, empty }: { slices: Slice[]; total: numbe
     return <div className="grid h-48 place-items-center rounded-xl border border-dashed text-sm text-muted-foreground">{empty}</div>;
   }
   return (
-    <div className="flex flex-col items-center gap-4 sm:flex-row">
+    <div className="flex flex-col items-center gap-4">
       <div className="size-44 shrink-0">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -109,11 +109,13 @@ function PieWithLegend({ slices, total, empty }: { slices: Slice[]; total: numbe
       </div>
       <ul className="flex w-full flex-col gap-2 text-sm">
         {slices.map((s) => (
-          <li key={s.name} className="flex items-center gap-2">
-            <span className="size-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
-            <span className="truncate">{s.name}</span>
-            <span className="ml-auto tabular-nums text-muted-foreground">{brl(s.cents)}</span>
-            <span className="w-14 text-right font-semibold tabular-nums">{formatPct(s.cents / total)}</span>
+          <li key={s.name} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-2">
+            <span className="size-2.5 rounded-sm" style={{ background: s.color }} />
+            <span className="min-w-0 truncate" title={s.name}>
+              {s.name}
+            </span>
+            <span className="tabular-nums whitespace-nowrap text-muted-foreground">{brl(s.cents)}</span>
+            <span className="w-16 text-right font-semibold tabular-nums">{formatPct(s.cents / total)}</span>
           </li>
         ))}
       </ul>
@@ -122,17 +124,22 @@ function PieWithLegend({ slices, total, empty }: { slices: Slice[]; total: numbe
 }
 
 /** Pizza por categoria do mês, com filtro PF/PJ; mostra as 7 maiores e junta o resto em "Outras". */
-export function CategoryPie({ items }: { items: { nature: Side; category: string | null; cents: number }[] }) {
+export function CategoryPie({
+  items,
+}: {
+  items: { nature: Side; categoryId: number | null; category: string | null; cents: number }[];
+}) {
   const [nature, setNature] = useState<"ALL" | Side>("ALL");
-  const sums = new Map<string, number>();
+  const sums = new Map<string, { cents: number; id: number | null }>();
   for (const i of items) {
     if (nature !== "ALL" && i.nature !== nature) continue;
     const name = i.category ?? NO_CATEGORY;
-    sums.set(name, (sums.get(name) ?? 0) + i.cents);
+    const prev = sums.get(name);
+    sums.set(name, { cents: (prev?.cents ?? 0) + i.cents, id: i.categoryId });
   }
-  const sorted = [...sums.entries()].sort((a, b) => b[1] - a[1]);
-  const top = sorted.slice(0, 7).map(([name, cents]) => ({ name, cents, color: categoryColor(name) }));
-  const rest = sorted.slice(7).reduce((s, [, c]) => s + c, 0);
+  const sorted = [...sums.entries()].sort((a, b) => b[1].cents - a[1].cents);
+  const top = sorted.slice(0, 7).map(([name, v]) => ({ name, cents: v.cents, color: categoryColor(v.id) }));
+  const rest = sorted.slice(7).reduce((s, [, v]) => s + v.cents, 0);
   const slices = rest > 0 ? [...top, { name: "Outras", cents: rest, color: "#64748B" }] : top;
   const total = slices.reduce((s, x) => s + x.cents, 0);
   return (
