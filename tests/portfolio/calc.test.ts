@@ -50,15 +50,18 @@ describe("computePortfolio", () => {
 
 describe("periods", () => {
   test("parsePeriod aceita os três e cai em 30D", () => {
-    expect(parsePeriod("7D")).toBe("7D");
+    expect(parsePeriod("1S")).toBe("1S");
+    expect(parsePeriod("1M")).toBe("1M");
+    expect(parsePeriod("7D")).toBe("1S");
+    expect(parsePeriod("30D")).toBe("1M");
     expect(parsePeriod("1A")).toBe("1A");
-    expect(parsePeriod("Tudo")).toBe("30D");
-    expect(parsePeriod(undefined)).toBe("30D");
+    expect(parsePeriod("Tudo")).toBe("1M");
+    expect(parsePeriod(undefined)).toBe("1M");
   });
 
   test("passos e fontes", () => {
-    expect(PERIODS["7D"]).toEqual({ days: 7, stepMs: HOUR, sourceDays: 30 });
-    expect(PERIODS["30D"]).toEqual({ days: 30, stepMs: 4 * HOUR, sourceDays: 30 });
+    expect(PERIODS["1S"]).toEqual({ days: 7, stepMs: HOUR, sourceDays: 30 });
+    expect(PERIODS["1M"]).toEqual({ days: 30, stepMs: 4 * HOUR, sourceDays: 30 });
     expect(PERIODS["1A"]).toEqual({ days: 365, stepMs: 24 * HOUR, sourceDays: 365 });
   });
 });
@@ -75,13 +78,13 @@ describe("buildCurve", () => {
   test("último ponto é agora e igual ao total do card", () => {
     const holdings = [H("bitcoin", "btc", "0.5")];
     const current = { bitcoin: { usd: 70000, change24h: 0 } };
-    const { points } = buildCurve(holdings, { bitcoin: series(start31, () => 60000) }, current, "30D", now);
+    const { points } = buildCurve(holdings, { bitcoin: series(start31, () => 60000) }, current, "1M", now);
     const last = points[points.length - 1];
     expect(last).toEqual({ t: now.getTime(), value: 35000 });
   });
 
   test("passo do 30D é 4 h e o início é alinhado", () => {
-    const { points } = buildCurve([H("bitcoin", "btc", "1")], { bitcoin: series(start31, () => 1) }, { bitcoin: { usd: 1, change24h: 0 } }, "30D", now);
+    const { points } = buildCurve([H("bitcoin", "btc", "1")], { bitcoin: series(start31, () => 1) }, { bitcoin: { usd: 1, change24h: 0 } }, "1M", now);
     expect(points[1].t - points[0].t).toBe(4 * HOUR);
     expect(points[0].t % (4 * HOUR)).toBe(0);
     expect(points[0].t).toBeGreaterThanOrEqual(now.getTime() - 30 * 24 * HOUR);
@@ -92,7 +95,7 @@ describe("buildCurve", () => {
     const holdings = [H("bitcoin", "btc", "1"), H("nova", "nova", "2", 2)];
     const history = { bitcoin: series(start31, () => 100), nova: series(mid, () => 10) };
     const current = { bitcoin: { usd: 100, change24h: 0 }, nova: { usd: 10, change24h: 0 } };
-    const { points } = buildCurve(holdings, history, current, "30D", now);
+    const { points } = buildCurve(holdings, history, current, "1M", now);
     expect(points[0].value).toBe(100);
     const after = points.find((p) => p.t >= mid)!;
     expect(after.value).toBe(120);
@@ -101,7 +104,7 @@ describe("buildCurve", () => {
   test("moeda com preço mas sem histórico vai para missingHistory; sem preço é ignorada", () => {
     const holdings = [H("bitcoin", "btc", "1"), H("semhist", "sh", "1", 2), H("sempreco", "sp", "1", 3)];
     const current = { bitcoin: { usd: 1, change24h: 0 }, semhist: { usd: 5, change24h: 0 } };
-    const r = buildCurve(holdings, { bitcoin: series(start31, () => 1) }, current, "7D", now);
+    const r = buildCurve(holdings, { bitcoin: series(start31, () => 1) }, current, "1S", now);
     expect(r.missingHistory).toEqual(["SH"]);
     expect(r.points[r.points.length - 1].value).toBe(6);
   });
@@ -112,7 +115,7 @@ describe("buildCurve", () => {
   });
 
   test("sem moedas com preço não há pontos", () => {
-    expect(buildCurve([H("bitcoin", "btc", "1")], {}, {}, "7D", now)).toEqual({ points: [], missingHistory: [] });
+    expect(buildCurve([H("bitcoin", "btc", "1")], {}, {}, "1S", now)).toEqual({ points: [], missingHistory: [] });
   });
 });
 
@@ -144,6 +147,7 @@ describe("variação por período", () => {
     expect(r.BTC.change7d).toBeCloseTo(25, 10);
     expect(r.BTC.change1m).toBeCloseTo(100, 10);
     expect(r.BTC.change1y).toBeCloseTo(150, 10);
-    expect(r.SEM).toEqual({ change7d: null, change1m: null, change1y: null });
+    expect(r.BTC.change6m).toBeCloseTo(150, 10);
+    expect(r.SEM).toEqual({ change7d: null, change1m: null, change6m: null, change1y: null });
   });
 });

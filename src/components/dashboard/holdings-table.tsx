@@ -11,7 +11,17 @@ import { DOWN, UP } from "./palette";
 
 export type HoldingsTableRow = PortfolioRow & PeriodChanges;
 
-type Key = "name" | "quantity" | "price" | "value" | "share" | "change24h" | "change7d" | "change1m" | "change1y";
+type Key =
+  | "name"
+  | "quantity"
+  | "price"
+  | "value"
+  | "share"
+  | "change24h"
+  | "change7d"
+  | "change1m"
+  | "change6m"
+  | "change1y";
 
 const COLUMNS: { key: Key; label: string }[] = [
   { key: "name", label: "Ativo" },
@@ -20,8 +30,9 @@ const COLUMNS: { key: Key; label: string }[] = [
   { key: "value", label: "Valor" },
   { key: "share", label: "%" },
   { key: "change24h", label: "24h" },
-  { key: "change7d", label: "7D" },
+  { key: "change7d", label: "1S" },
   { key: "change1m", label: "1M" },
+  { key: "change6m", label: "6M" },
   { key: "change1y", label: "1A" },
 ];
 
@@ -102,7 +113,7 @@ export function HoldingsTable({ rows, currency }: { rows: HoldingsTableRow[]; cu
               <TableCell className={cn(align("share"), "tabular-nums")}>
                 {r.share === null ? "—" : formatPct(r.share)}
               </TableCell>
-              {(["change24h", "change7d", "change1m", "change1y"] as const).map((k) => (
+              {(["change24h", "change7d", "change1m", "change6m", "change1y"] as const).map((k) => (
                 <TableCell key={k} className={cn(align(k), "tabular-nums")}>
                   <Change value={r[k]} />
                 </TableCell>

@@ -17,7 +17,7 @@ import { FiatTable } from "@/components/dashboard/fiat-table";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
 import { StaleBanner } from "@/components/dashboard/stale-banner";
 
-export const metadata = { title: "$ · Carteira Cripto" };
+export const metadata = { title: "R$ · Carteira Cripto" };
 
 const COOKIE = "moeda-fiat";
 const DAY = 86_400_000;
@@ -56,11 +56,13 @@ export default async function FiatDashboardPage({ searchParams }: PageProps<"/fi
   // Tudo é calculado em reais e convertido aqui para a moeda escolhida.
   const f = view.factorNow;
   const fAgo = (days: number) => view.factorAt(now.getTime() - days * DAY);
-  const [f30, f365] = [fAgo(30), fAgo(365)];
+  const [f30, f60, f90, f365] = [fAgo(30), fAgo(60), fAgo(90), fAgo(365)];
   const rows = fiat.rows.map((r) => ({
     ...r,
     amount: r.amount * f,
     change1m: adjustChange(r.change1m, f, f30),
+    change2m: adjustChange(r.change2m, f, f60),
+    change3m: adjustChange(r.change3m, f, f90),
     change1y: adjustChange(r.change1y, f, f365),
   }));
 

@@ -34,6 +34,9 @@ describe("computeFiat", () => {
     expect(pf.change1m).toBeCloseTo(50, 10);
     expect(pf.past365).toBe(1000);
     expect(pf.change1y).toBeCloseTo(200, 10);
+    expect(pf.past60).toBe(1000);
+    expect(pf.change2m).toBeCloseTo(200, 10);
+    expect(pf.change3m).toBeCloseTo(200, 10);
     const pj = r.rows.find((x) => x.name === "PJ")!;
     expect(pj.change1m).toBeNull();
     expect(r.rows.map((x) => x.name)).toEqual(["PF", "PJ"]);

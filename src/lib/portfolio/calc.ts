@@ -43,17 +43,20 @@ export function computePortfolio(holdings: Holding[], prices: Record<string, Cur
   return { rows, total, change24hUsd: delta, change24hPct: rows.length && base > 0 ? delta / base : null };
 }
 
-export type Period = "7D" | "30D" | "1A";
+export type Period = "1S" | "1M" | "1A";
 
 const HOUR = 3600_000;
 export const PERIODS: Record<Period, { days: number; stepMs: number; sourceDays: 30 | 365 }> = {
-  "7D": { days: 7, stepMs: HOUR, sourceDays: 30 },
-  "30D": { days: 30, stepMs: 4 * HOUR, sourceDays: 30 },
+  "1S": { days: 7, stepMs: HOUR, sourceDays: 30 },
+  "1M": { days: 30, stepMs: 4 * HOUR, sourceDays: 30 },
   "1A": { days: 365, stepMs: 24 * HOUR, sourceDays: 365 },
 };
 
+/** Aceita também os nomes antigos (7D, 30D) de links salvos. */
 export function parsePeriod(raw: unknown): Period {
-  return raw === "7D" || raw === "30D" || raw === "1A" ? raw : "30D";
+  if (raw === "1S" || raw === "7D") return "1S";
+  if (raw === "1A") return "1A";
+  return "1M";
 }
 
 /**
@@ -113,9 +116,14 @@ export function priceChange(history: PricePoint[], currentPrice: number, days: n
   return (currentPrice / past[1] - 1) * 100;
 }
 
-export type PeriodChanges = { change7d: number | null; change1m: number | null; change1y: number | null };
+export type PeriodChanges = {
+  change7d: number | null;
+  change1m: number | null;
+  change6m: number | null;
+  change1y: number | null;
+};
 
-/** 7D e 1M saem do histórico de 30 dias (por hora); 1A do histórico de 1 ano (diário). */
+/** 1S e 1M saem do histórico de 30 dias (por hora); 6M e 1A do histórico de 1 ano (diário). */
 export function periodChanges(
   ids: string[],
   prices: Record<string, CurrentPrice>,
@@ -128,10 +136,11 @@ export function periodChanges(
     const p = prices[id]?.usd;
     out[id] =
       p === undefined
-        ? { change7d: null, change1m: null, change1y: null }
+        ? { change7d: null, change1m: null, change6m: null, change1y: null }
         : {
             change7d: priceChange(history30[id] ?? [], p, 7, now),
             change1m: priceChange(history30[id] ?? [], p, 30, now),
+            change6m: priceChange(history365[id] ?? [], p, 182, now),
             change1y: priceChange(history365[id] ?? [], p, 365, now),
           };
   }

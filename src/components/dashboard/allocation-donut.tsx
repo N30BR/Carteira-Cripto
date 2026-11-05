@@ -3,7 +3,7 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { formatPct } from "@/lib/format";
-import { CATEGORICAL, OTHERS } from "./palette";
+import { CATEGORICAL, OTHERS, coinColor } from "./palette";
 
 type Slice = { symbol: string; value: number; share: number };
 
@@ -11,7 +11,11 @@ type Slice = { symbol: string; value: number; share: number };
 function toSlices(rows: Slice[]): (Slice & { color: string })[] {
   const top = rows.slice(0, CATEGORICAL.length);
   const rest = rows.slice(CATEGORICAL.length);
-  const out = top.map((r, i) => ({ ...r, color: CATEGORICAL[i] }));
+  // Cor oficial do token, se houver; senão, a próxima da paleta que ainda não foi usada.
+  const used = new Set(top.map((r) => coinColor(r.symbol)).filter(Boolean));
+  const free = CATEGORICAL.filter((c) => !used.has(c));
+  let next = 0;
+  const out = top.map((r) => ({ ...r, color: coinColor(r.symbol) ?? free[next++ % free.length] }));
   if (rest.length) {
     out.push({
       symbol: "Outros",
@@ -44,7 +48,8 @@ export function AllocationDonut({ rows, currency, emptyText = "Preços indispon�
               innerRadius="62%"
               outerRadius="100%"
               paddingAngle={slices.length > 1 ? 2 : 0}
-              stroke="none"
+              stroke="var(--border)"
+              strokeWidth={1}
               isAnimationActive={false}
             >
               {slices.map((s) => (
@@ -67,7 +72,7 @@ export function AllocationDonut({ rows, currency, emptyText = "Preços indispon�
       <ul className="grid w-full max-w-2xl grid-cols-1 gap-x-10 gap-y-2 text-sm sm:grid-cols-2" aria-label="Distribuição por ativo">
         {slices.map((s) => (
           <li key={s.symbol} className="flex items-center gap-2">
-            <span className="size-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
+            <span className="size-2.5 shrink-0 rounded-full ring-1 ring-border" style={{ background: s.color }} />
             <span className="font-medium">{s.symbol}</span>
             <span className="ml-auto tabular-nums text-muted-foreground">{formatPct(s.share)}</span>
           </li>

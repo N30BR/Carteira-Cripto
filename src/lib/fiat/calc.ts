@@ -41,18 +41,24 @@ export type FiatRow = {
   date: string;
   share: number | null;
   past30: number | null;
+  past60: number | null;
+  past90: number | null;
   past365: number | null;
   change1m: number | null;
+  change2m: number | null;
+  change3m: number | null;
   change1y: number | null;
 };
 
-/** Saldo total, participação e variações 1M/1A de cada conta (em reais). */
+/** Saldo total, participação e variações 1M/2M/3M/1A de cada conta (em reais). */
 export function computeFiat(
   accounts: FiatAccount[],
   balances: Record<number, BalancePoint[]>,
   today: string,
 ): { rows: FiatRow[]; total: number; total30: number | null } {
   const d30 = addDays(today, -30);
+  const d60 = addDays(today, -60);
+  const d90 = addDays(today, -90);
   const d365 = addDays(today, -365);
   let total = 0;
   let total30 = 0;
@@ -62,6 +68,8 @@ export function computeFiat(
     const pts = balances[a.id] ?? [];
     const amount = Number(a.amount);
     const past30 = balanceOn(pts, d30);
+    const past60 = balanceOn(pts, d60);
+    const past90 = balanceOn(pts, d90);
     const past365 = balanceOn(pts, d365);
     total += amount;
     if (past30 !== null) {
@@ -75,8 +83,12 @@ export function computeFiat(
       date: a.date,
       share: null as number | null,
       past30,
+      past60,
+      past90,
       past365,
       change1m: pctChange(amount, past30),
+      change2m: pctChange(amount, past60),
+      change3m: pctChange(amount, past90),
       change1y: pctChange(amount, past365),
     };
   });

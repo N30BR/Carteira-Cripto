@@ -33,6 +33,8 @@ export function FiatTable({ rows, currency }: { rows: FiatRow[]; currency: RefCu
             <TableHead className="text-center">%</TableHead>
             <TableHead className="text-center">Atualizado em</TableHead>
             <TableHead className="text-center">1M</TableHead>
+            <TableHead className="text-center">2M</TableHead>
+            <TableHead className="text-center">3M</TableHead>
             <TableHead className="text-center">1A</TableHead>
           </TableRow>
         </TableHeader>
@@ -43,9 +45,11 @@ export function FiatTable({ rows, currency }: { rows: FiatRow[]; currency: RefCu
               <TableCell className="text-center tabular-nums">{formatMoney(r.amount, currency)}</TableCell>
               <TableCell className="text-center tabular-nums">{r.share === null ? "—" : formatPct(r.share)}</TableCell>
               <TableCell className="text-center tabular-nums">{formatDate(r.date)}</TableCell>
-              <TableCell className="text-center tabular-nums">
-                <Change value={r.change1m} />
-              </TableCell>
+              {[r.change1m, r.change2m, r.change3m].map((v, i) => (
+                <TableCell key={i} className="text-center tabular-nums">
+                  <Change value={v} />
+                </TableCell>
+              ))}
               <TableCell className="text-center tabular-nums">
                 <Change value={r.change1y} />
               </TableCell>

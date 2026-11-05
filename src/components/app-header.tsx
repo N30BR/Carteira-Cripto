@@ -6,7 +6,9 @@ import { UserMenu } from "@/components/user-menu";
 export function AppHeader({ user }: { user: SessionUser }) {
   const links: { href: string; label: string; title?: string }[] = [
     { href: "/", label: "Cripto" },
-    { href: "/fiduciario", label: "$", title: "Dashboard fiduciário" },
+    { href: "/fiduciario", label: "R$", title: "Dashboard fiduciário" },
+    { href: "/faturas", label: "Faturas" },
+    { href: "/lancamentos", label: "Lançamentos" },
     { href: "/ativos", label: "Ativos" },
     ...(user.isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];

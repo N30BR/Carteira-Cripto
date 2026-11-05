@@ -130,7 +130,7 @@ describe("resiliência", () => {
     const fn = stubFetch(() => json({}, 500));
     const db = testDb();
     await getCurrentPrices(db, ["BTC"]);
-    await getHistory(db, ["BTC", "SOL"], "30D");
+    await getHistory(db, ["BTC", "SOL"], "1M");
     expect(calls(fn, "/api/v3/ticker/24hr")).toHaveLength(1);
     expect(calls(fn, "/api/v3/klines")).toHaveLength(0);
   });
@@ -160,8 +160,8 @@ describe("getHistory", () => {
   test("7D e 30D usam as mesmas velas de 1 h dos últimos 30 dias", async () => {
     const fn = stubFetch(() => json([kline(1000, "5")]));
     const db = testDb();
-    const a = await getHistory(db, ["BTC"], "7D");
-    const b = await getHistory(db, ["BTC"], "30D");
+    const a = await getHistory(db, ["BTC"], "1S");
+    const b = await getHistory(db, ["BTC"], "1M");
     const reqs = calls(fn, "/api/v3/klines");
     expect(reqs).toHaveLength(1);
     expect(reqs[0].searchParams.get("symbol")).toBe("BTCUSDT");
@@ -184,7 +184,7 @@ describe("getHistory", () => {
   test("USDT tem histórico fixo em 1 sem chamar a API", async () => {
     const fn = stubFetch(() => json([]));
     const now = new Date("2026-03-01T00:00:00Z");
-    const r = await getHistory(testDb(), ["USDT"], "30D", now);
+    const r = await getHistory(testDb(), ["USDT"], "1M", now);
     expect(calls(fn, "/api/v3/klines")).toHaveLength(0);
     expect(r.history.USDT[0][1]).toBe(1);
     expect(r.history.USDT[0][0]).toBeLessThanOrEqual(now.getTime() - 30 * 86_400_000);

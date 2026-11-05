@@ -56,7 +56,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   const btcPrice =
     requested === "BTC" ? (current.prices.BTC ?? (await getCurrentPrices(db, ["BTC"], now)).prices.BTC) : undefined;
   const [hist30, hist365, view] = await Promise.all([
-    getHistory(db, priced, "30D", now),
+    getHistory(db, priced, "1M", now),
     getHistory(db, priced, "1A", now),
     resolveCurrency(db, "USDT", requested, "USDT", now, { btcUsdt: btcPrice, historyDays: 365 }),
   ]);
@@ -67,7 +67,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   // Tudo é calculado em USDT e convertido aqui para a moeda escolhida.
   const f = view.factorNow;
   const fAgo = (days: number) => view.factorAt(now.getTime() - days * DAY);
-  const [f1, f7, f30, f365] = [view.factor24hAgo, fAgo(7), fAgo(30), fAgo(365)];
+  const [f1, f7, f30, f182, f365] = [view.factor24hAgo, fAgo(7), fAgo(30), fAgo(182), fAgo(365)];
   const tableRows = portfolio.rows.map((r) => {
     const c = changes[r.coinId];
     return {
@@ -77,6 +77,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
       change24h: adjustChange(r.change24h, f, f1),
       change7d: adjustChange(c.change7d, f, f7),
       change1m: adjustChange(c.change1m, f, f30),
+      change6m: adjustChange(c.change6m, f, f182),
       change1y: adjustChange(c.change1y, f, f365),
     };
   });
@@ -118,7 +119,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
               currency={view.currency}
             />
             <div className="flex items-center gap-2">
-              <PeriodSelector options={["7D", "30D", "1A"]} current={period} path="/" query={{ moeda: requested }} />
+              <PeriodSelector options={["1S", "1M", "1A"]} current={period} path="/" query={{ moeda: requested }} />
               <CurrencyMenu current={view.currency} cookieName={COOKIE} />
             </div>
           </div>
