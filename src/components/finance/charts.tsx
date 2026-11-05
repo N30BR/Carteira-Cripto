@@ -1,13 +1,12 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatMoney, type RefCurrency } from "@/lib/currency";
+import { MINOR_UNITS as MINOR, formatMoney, type RefCurrency } from "@/lib/currency";
 import { formatPct } from "@/lib/format";
 import { monthShort } from "@/lib/cards/months";
 import { DOWN, UP } from "@/components/dashboard/palette";
 
 const brl = (cents: number) => formatMoney(cents / 100, "BRL");
-const MINOR: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
 const money = (minor: number, cur: RefCurrency) => formatMoney(minor / MINOR[cur], cur);
 const NEUTRAL = "#60A5FA";
 // Eixo: "2 mil" em reais/dólares; em BTC (valores pequenos), 3 algarismos significativos.
@@ -201,7 +200,7 @@ export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDat
             formatter={(_, __, item) => {
               const d = item.payload as ComponentDatum;
               const v = d.signedCents ?? 0;
-              const sign = v < 0 ? "- " : d.tone === "neutral" && d.key !== "variation" ? "" : "+ ";
+              const sign = v < 0 ? "- " : d.tone === "neutral" || v === 0 ? "" : "+ ";
               return [`${sign}${money(Math.abs(v), currency)}`, d.label];
             }}
             labelFormatter={() => ""}

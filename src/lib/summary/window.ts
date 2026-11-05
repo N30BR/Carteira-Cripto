@@ -83,3 +83,9 @@ export function chartMonths(month: string, period: Period): string[] {
   if (w.invoiceMonths.length > 1) return w.invoiceMonths;
   return Array.from({ length: 6 }, (_, i) => addMonths(month, i - 5));
 }
+
+/** Rótulo das faturas do período: faturas são mensais, então 1D, 1S e 1M mostram o mês. */
+export function invoicePeriodLabel(month: string, period: Period): string {
+  const m = analysisWindow(month, period).invoiceMonths;
+  return m.length === 1 ? monthLabel(m[0]) : `${monthLabel(m[0])} a ${monthLabel(m.at(-1)!)}`;
+}

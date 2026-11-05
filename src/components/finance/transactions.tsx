@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { deleteTransactionAction, saveTransactionAction, type TransactionForm } from "@/app/(app)/lancamentos/transaction-actions";
 import { safeAction } from "@/lib/safe-action";
-import type { RefCurrency } from "@/lib/currency";
+import { CURRENCY_SYMBOL, type RefCurrency } from "@/lib/currency";
 import type { Transaction } from "@/lib/transactions/store";
 import { FilterTabs, KindBadge, SignedMoney, dateBr } from "./ui";
 
@@ -173,7 +173,7 @@ export function TransactionsTable({
               <TableHead>Data</TableHead>
               <TableHead>{kindHeader}</TableHead>
               <TableHead>Descrição</TableHead>
-              <TableHead className="text-right">Valor ({currency === "BRL" ? "R$" : currency === "USDT" ? "US$" : "₿"})</TableHead>
+              <TableHead className="text-right">Valor ({CURRENCY_SYMBOL[currency]})</TableHead>
               <TableHead className="text-center">Ações</TableHead>
             </TableRow>
           </TableHeader>

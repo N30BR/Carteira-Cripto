@@ -6,9 +6,9 @@ import { addMonths, monthLabel, monthShort, parseMonth } from "@/lib/cards/month
 import { listCardAccounts, type CardAccount } from "@/lib/cards/accounts";
 import { hasExpenses, listInstallments } from "@/lib/cards/store";
 import { cardSummary, monthTotals, monthlySeries, projection, topCategories } from "@/lib/cards/summary";
-import { brlDisplay } from "@/lib/currency-display";
+import { brlDisplay, staleRateWarning } from "@/lib/currency-display";
 import { parsePeriod } from "@/lib/portfolio/calc";
-import { analysisWindow, chartMonths, periodLabel } from "@/lib/summary/window";
+import { analysisWindow, chartMonths, invoicePeriodLabel } from "@/lib/summary/window";
 import { cn } from "@/lib/utils";
 import { appTimeZone, todayIn } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
@@ -56,7 +56,8 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
   const rows = listInstallments(getDb(), user.id, addMonths(month, -11), "2099-12").map((r) => ({ ...r, amountCents: convert(r.amountCents) }));
   // Período: começa no mês de referência; as faturas são mensais (1D, 1S e 1M = o mês).
   const win = analysisWindow(month, period);
-  const label = periodLabel(month, period);
+  // Faturas são mensais: em 1D, 1S e 1M o rótulo é o mês (os valores são do mês inteiro).
+  const label = invoicePeriodLabel(month, period);
   const single = win.invoiceMonths.length === 1;
   const accounts = listCardAccounts(getDb(), user.id);
   const colors = accountColors(accounts);
@@ -73,7 +74,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
       period={period}
       path="/faturas"
       month={month}
-      warning={display.warning}
+      warning={display.warning ?? staleRateWarning(display.staleSince, appTimeZone())}
     />
   );
 

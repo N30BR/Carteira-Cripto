@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
 import { parseMonth } from "@/lib/cards/months";
-import { brlDisplay } from "@/lib/currency-display";
+import { brlDisplay, staleRateWarning } from "@/lib/currency-display";
 import { parsePeriod } from "@/lib/portfolio/calc";
 import { analysisWindow, chartMonths, periodLabel } from "@/lib/summary/window";
 import { monthlyTransactions, transactionShares, transactionTotals } from "@/lib/transactions/calc";
@@ -53,7 +53,7 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
         period={period}
         path="/transacoes"
         month={month}
-        warning={display.warning}
+        warning={display.warning ?? staleRateWarning(display.staleSince, appTimeZone())}
       />
 
       <div className="grid gap-4 md:grid-cols-3">

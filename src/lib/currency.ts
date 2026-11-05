@@ -3,6 +3,9 @@ import type { RateHistory, Rates } from "@/lib/prices/rates";
 
 export type RefCurrency = "USDT" | "BTC" | "BRL";
 export const CURRENCIES: RefCurrency[] = ["USDT", "BTC", "BRL"];
+/** Unidades mínimas por moeda: centavos (BRL, USDT) e satoshis (BTC). */
+export const MINOR_UNITS: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
+export const CURRENCY_SYMBOL: Record<RefCurrency, string> = { BRL: "R$", USDT: "US$", BTC: "₿" };
 /** Moeda em que os valores estão guardados: cripto em USDT, contas em BRL. */
 export type BaseCurrency = "USDT" | "BRL";
 

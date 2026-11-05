@@ -12,7 +12,9 @@ import { formatPct } from "@/lib/format";
 import { parsePeriod } from "@/lib/portfolio/calc";
 import { consolidate, type ComponentKey, type Tone } from "@/lib/summary/consolidate";
 import { cryptoPeriod, fiatBalanceBrl } from "@/lib/summary/sources";
-import { analysisWindow, zonedMidnight } from "@/lib/summary/window";
+import { analysisWindow, invoicePeriodLabel, zonedMidnight } from "@/lib/summary/window";
+import { staleRateWarning } from "@/lib/currency-display";
+import { getCurrentPrices } from "@/lib/prices";
 import { transactionTotals } from "@/lib/transactions/calc";
 import { listTransactions } from "@/lib/transactions/store";
 import { appTimeZone, todayIn } from "@/lib/validation";
@@ -65,12 +67,16 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   // Conversão para a moeda escolhida, com as cotações da aba Cripto (Binance).
   const viewBrl = await resolveCurrency(db, "BRL", requested, "BRL", now);
   const currency = viewBrl.currency;
-  const viewUsdt = await resolveCurrency(db, "USDT", currency, "USDT", now, { historyDays: 365 });
+  // Em BTC usa o mesmo preço do BTC da carteira, para 1 BTC valer exatamente ₿ 1 (como na aba Cripto).
+  const btcUsdt = currency === "BTC" ? (await getCurrentPrices(db, ["BTC"], now)).prices.BTC : undefined;
+  const [viewUsdt, crypto] = await Promise.all([
+    resolveCurrency(db, "USDT", currency, "USDT", now, { historyDays: 365, btcUsdt }),
+    // Cada origem vem da sua área; a conta toda é feita uma vez só, em consolidate().
+    cryptoPeriod(db, user.id, startMs, endMs, now),
+  ]);
   const scale = MINOR[currency];
-  const fromBrlCents = (cents: number) => (cents / 100) * viewBrl.factorNow * scale;
-
-  // Cada origem vem da sua área; a conta toda é feita uma vez só, em consolidate().
-  const crypto = await cryptoPeriod(db, user.id, startMs, endMs, now);
+  // Em BRL não há conversão: os centavos ficam exatos.
+  const fromBrlCents = (cents: number) => (currency === "BRL" ? cents : (cents * viewBrl.factorNow * scale) / 100);
   const cryptoRate = viewUsdt.currency === currency;
   // Valores cripto convertidos pela cotação da própria data (como na aba Cripto).
   const toRef = (usdt: number | null, t: number) =>
@@ -93,8 +99,9 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   const byKey = Object.fromEntries(summary.components.map((c) => [c.key, c]));
 
   const periodLabel = period === "1M" ? monthLabel(month) : `${dateBr(win.fromDate)} a ${dateBr(win.toDate)}`;
-  const invoiceLabel =
-    win.invoiceMonths.length === 1 ? monthLabel(win.invoiceMonths[0]) : `${monthLabel(win.invoiceMonths[0])} a ${monthLabel(win.invoiceMonths.at(-1)!)}`;
+  const invoiceLabel = invoicePeriodLabel(month, period);
+  const notStarted = startMs >= now.getTime();
+  const staleSince = [viewBrl.staleSince, viewUsdt.staleSince].filter((d): d is Date => d instanceof Date).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
   const variationEnd = todayIn(tz, new Date(Math.min(endMs, now.getTime()) - 1));
   const when = crypto.asOf
     ? new Intl.DateTimeFormat("pt-BR", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(crypto.asOf)
@@ -125,10 +132,14 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
     ) : cryptoStart === null || cryptoEnd === null ? (
       `${cryptoReason}; fora da conta`
     ) : (
-      <>
-        De {dateBr(win.fromDate)} a {dateBr(variationEnd)} • só comparação, já incluída no saldo
-        {staleNote}
-      </>
+      notStarted ? (
+        "Período ainda não começou"
+      ) : (
+        <>
+          De {dateBr(win.fromDate)} a {dateBr(variationEnd)} • só comparação, já incluída no saldo
+          {staleNote}
+        </>
+      )
     ),
   };
   const valueOf = (key: ComponentKey) => {
@@ -152,7 +163,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
         period={period}
         path="/resumo"
         month={month}
-        warning={viewBrl.warning}
+        warning={viewBrl.warning ?? staleRateWarning(staleSince, tz)}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -288,7 +299,10 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                         </span>
                       </TableCell>
                       <TableCell>
-                        <KindBadge kind={c.tone === "info" ? ((c.signedCents ?? 0) < 0 ? "out" : "in") : c.tone} label={c.classification} />
+                        <KindBadge
+                          kind={c.tone === "info" ? (!c.signedCents ? "neutral" : c.signedCents < 0 ? "out" : "in") : c.tone}
+                          label={c.classification}
+                        />
                       </TableCell>
                       <TableCell className="text-right">{valueOf(c.key)}</TableCell>
                       <TableCell className="text-right tabular-nums">{c.share === null ? "—" : formatPct(c.share)}</TableCell>

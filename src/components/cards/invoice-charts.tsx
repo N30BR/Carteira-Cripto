@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatMoney, type RefCurrency } from "@/lib/currency";
+import { CURRENCY_SYMBOL as SYMBOL, MINOR_UNITS as MINOR, formatMoney, type RefCurrency } from "@/lib/currency";
 import { formatPct } from "@/lib/format";
 import { monthShort } from "@/lib/cards/months";
 import type { Side } from "@/lib/cards/store";
@@ -11,8 +11,6 @@ import { cn } from "@/lib/utils";
 import { NATURE_COLOR, categoryColor } from "./colors";
 
 // Valores em unidades mínimas da moeda (centavos; satoshis em BTC).
-const MINOR: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
-const SYMBOL: Record<RefCurrency, string> = { BRL: "R$", USDT: "US$", BTC: "₿" };
 const fmt = (minor: number, cur: RefCurrency) => formatMoney(minor / MINOR[cur], cur);
 const compact = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
 const tooltipStyle = {

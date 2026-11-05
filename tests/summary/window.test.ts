@@ -73,3 +73,13 @@ describe("rótulos e meses do gráfico do período", () => {
     expect(chartMonths("2026-01", "1A")).toHaveLength(12);
   });
 });
+
+describe("rótulo das faturas do período (faturas são mensais)", () => {
+  test("1D, 1S e 1M mostram o mês; 3M em diante, o intervalo de meses", async () => {
+    const { invoicePeriodLabel } = await import("@/lib/summary/window");
+    expect(invoicePeriodLabel("2026-11", "1D")).toBe("Nov/2026");
+    expect(invoicePeriodLabel("2026-11", "1S")).toBe("Nov/2026");
+    expect(invoicePeriodLabel("2026-11", "1M")).toBe("Nov/2026");
+    expect(invoicePeriodLabel("2026-11", "3M")).toBe("Nov/2026 a Jan/2027");
+  });
+});

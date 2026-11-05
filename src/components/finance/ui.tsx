@@ -1,7 +1,7 @@
 // Peças visuais comuns de Lançamentos, Faturas, Transações e Resumo (tema escuro do app).
 import type { LucideIcon } from "lucide-react";
 import { ArrowDown, ArrowUp, Scale } from "lucide-react";
-import { formatMoney, type RefCurrency } from "@/lib/currency";
+import { MINOR_UNITS, formatMoney, type RefCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import { DOWN, UP } from "@/components/dashboard/palette";
 
@@ -31,8 +31,7 @@ export function accountColors(accounts: { id: number }[]): Record<number, string
 
 export const brl = (cents: number) => formatMoney(cents / 100, "BRL");
 
-/** Unidades mínimas por moeda: centavos (BRL, USDT) e satoshis (BTC). */
-export const MINOR: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
+export const MINOR = MINOR_UNITS;
 /** Formata um valor em unidades mínimas da moeda. */
 export const money = (minor: number, currency: RefCurrency = "BRL") => formatMoney(minor / MINOR[currency], currency);
 
