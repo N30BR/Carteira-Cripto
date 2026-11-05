@@ -42,8 +42,8 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByTestId("capital-chart")).toBeVisible();
 
   // Período
-  await page.getByRole("link", { name: "7D", exact: true }).click();
-  await expect(page).toHaveURL(/periodo=7D/);
+  await page.getByRole("link", { name: "1S", exact: true }).click();
+  await expect(page).toHaveURL(/periodo=1S/);
 
   // Trocar o Cripto para BRL (1 USDT = R$ 5)
   await page.getByRole("button", { name: /Moeda de referência/ }).click();
@@ -63,6 +63,29 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // O Cripto lembra a moeda escolhida
   await page.goto("/");
   await expect(page.getByTestId("total")).toHaveText("R$ 150.000,00");
+
+  // Lançamentos: compra de R$ 1.200,00 em 3× no Cartão PJ, natureza PF
+  await page.getByRole("link", { name: "Lançamentos" }).click();
+  await expect(page.getByRole("link", { name: "Lançamentos" })).toHaveAttribute("aria-current", "page");
+  await page.getByLabel("Descrição do custo *").fill("Cadeira");
+  await page.getByLabel("Valor (R$) *").fill("1.200,00");
+  await page.getByLabel("Total de parcelas", { exact: true }).fill("3");
+  await page.getByRole("radio", { name: "o total" }).click();
+  await page.selectOption("#exp-card", "PJ");
+  await page.getByRole("button", { name: "+ Adicionar" }).click();
+  const cadeira = page.getByRole("row", { name: /Cadeira/ });
+  await expect(cadeira).toContainText("R$ 400,00");
+  await expect(cadeira).toContainText("1/3");
+  await expect(page.getByTestId("month-total")).toHaveText("Total: R$ 400,00");
+  await cadeira.getByRole("button", { name: "Pendente" }).click();
+  await expect(page.getByRole("row", { name: /Cadeira/ }).getByRole("button", { name: "Pago" })).toBeVisible();
+
+  // Faturas: o mesmo gasto aparece no Cartão PJ; os próximos 2 meses ficam na projeção
+  await page.getByRole("link", { name: "Faturas" }).click();
+  await expect(page.getByTestId("invoice-total")).toHaveText("R$ 400,00");
+  await expect(page.getByTestId("card-PJ-total")).toHaveText("R$ 400,00");
+  await expect(page.getByTestId("card-PF-total")).toHaveText("R$ 0,00");
+  await expect(page.getByText("1 compra parcelada ativa")).toBeVisible();
 
   // Sair
   await page.getByRole("button", { name: /admin/ }).click();
