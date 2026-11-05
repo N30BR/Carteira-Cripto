@@ -120,3 +120,88 @@ export const cardInstallments = sqliteTable(
   },
   (t) => [uniqueIndex("card_installments_expense_number").on(t.expenseId, t.number)],
 );
+
+/** Categorias e projetos das pendências. */
+export const todoGroups = sqliteTable(
+  "todo_groups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** category | project */
+    kind: text("kind").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("todo_groups_user_kind_name").on(t.userId, t.kind, t.name)],
+);
+
+export const todoTasks = sqliteTable("todo_tasks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  categoryId: integer("category_id").references(() => todoGroups.id, { onDelete: "set null" }),
+  projectId: integer("project_id").references(() => todoGroups.id, { onDelete: "set null" }),
+  /** 1 a 3 estrelas */
+  priority: integer("priority").notNull().default(2),
+  /** AAAA-MM-DD */
+  dueDate: text("due_date"),
+  /** HH:MM */
+  dueTime: text("due_time"),
+  /** pending | in_progress | done */
+  status: text("status").notNull().default("pending"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const todoChecklist = sqliteTable("todo_checklist", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  taskId: integer("task_id")
+    .notNull()
+    .references(() => todoTasks.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  done: integer("done", { mode: "boolean" }).notNull().default(false),
+  position: integer("position").notNull(),
+});
+
+export const todoNotes = sqliteTable("todo_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  taskId: integer("task_id")
+    .notNull()
+    .references(() => todoTasks.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/** Compromissos (reuniões, consultas, prazos) independentes das tarefas. */
+export const todoEvents = sqliteTable("todo_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  /** AAAA-MM-DD */
+  date: text("date").notNull(),
+  /** HH:MM */
+  time: text("time"),
+  categoryId: integer("category_id").references(() => todoGroups.id, { onDelete: "set null" }),
+  description: text("description").notNull().default(""),
+  /** scheduled | done | canceled */
+  status: text("status").notNull().default("scheduled"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const quickNotes = sqliteTable("quick_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
