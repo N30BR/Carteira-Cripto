@@ -106,10 +106,7 @@ export default async function FiatDashboardPage({ searchParams }: PageProps<"/fi
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-3">
-        <h2 className="font-medium">Contas</h2>
-        <FiatTable rows={rows} currency={view.currency} />
-      </div>
+      <FiatTable rows={rows} currency={view.currency} />
     </div>
   );
 }

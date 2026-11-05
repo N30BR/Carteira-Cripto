@@ -72,6 +72,18 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page).toHaveURL(/\/fiduciario/);
   await expect(page.getByTestId("total")).toHaveText("R$ 5.000,00");
   await expect(page.getByRole("row", { name: /Conta PF/ })).toContainText("100,00%");
+  // Seta ao lado de "Contas": escolher as variações da tabela (1M, 2M, 3M, 1A)
+  const fiatHeads = page.locator("thead th");
+  await expect(fiatHeads).toHaveText(["Conta", "Saldo", "%", "Atualizado em", "1M", "2M", "3M", "1A"]);
+  await page.getByRole("button", { name: "Escolher períodos da tabela" }).click();
+  await page.getByRole("button", { name: "Ocultar 2M" }).click();
+  await expect(fiatHeads).toHaveText(["Conta", "Saldo", "%", "Atualizado em", "1M", "3M", "1A"]);
+  await page.reload();
+  await expect(fiatHeads).toHaveCount(7);
+  await page.getByRole("button", { name: "Escolher períodos da tabela" }).click();
+  await page.getByRole("button", { name: "Mostrar 2M" }).click();
+  await expect(fiatHeads).toHaveCount(8);
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /Moeda de referência/ }).click();
   await page.getByRole("menuitemradio", { name: /USDT/ }).click();
   await expect(page.getByTestId("total")).toHaveText("US$ 1.000,00");
