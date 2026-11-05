@@ -10,6 +10,11 @@ const brl = (cents: number) => formatMoney(cents / 100, "BRL");
 const MINOR: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
 const money = (minor: number, cur: RefCurrency) => formatMoney(minor / MINOR[cur], cur);
 const NEUTRAL = "#60A5FA";
+// Eixo: "2 mil" em reais/dólares; em BTC (valores pequenos), 3 algarismos significativos.
+const axis = (minor: number, cur: RefCurrency) => {
+  const n = minor / MINOR[cur];
+  return cur === "BTC" ? n.toLocaleString("pt-BR", { maximumSignificantDigits: 3 }) : compact.format(n);
+};
 const compact = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
 const tooltipStyle = {
   background: "var(--popover)",
@@ -33,7 +38,14 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 }
 
 /** Entradas (verde) e saídas (vermelho) lado a lado, um par por mês. */
-export function TransactionBars({ data }: { data: { month: string; inflow: number; outflow: number }[] }) {
+export function TransactionBars({
+  data,
+  currency = "BRL",
+}: {
+  data: { month: string; inflow: number; outflow: number }[];
+  /** Moeda dos valores (em unidades mínimas: centavos, satoshis). */
+  currency?: RefCurrency;
+}) {
   const rows = data.map((d) => ({ ...d, label: monthShort(d.month).slice(0, 3) }));
   return (
     <div className="flex flex-col gap-2">
@@ -46,12 +58,12 @@ export function TransactionBars({ data }: { data: { month: string; inflow: numbe
           <BarChart data={rows} barGap={4} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
             <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={0.6} />
             <XAxis dataKey="label" tickLine={false} axisLine={false} tick={axisTick} />
-            <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => compact.format(v / 100)} />
+            <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => axis(v, currency)} />
             <Tooltip
               cursor={{ fill: "var(--muted)", opacity: 0.4 }}
               contentStyle={tooltipStyle}
               labelFormatter={(_, p) => (p?.[0] ? monthShort((p[0].payload as { month: string }).month) : "")}
-              formatter={(v, name) => [brl(Number(v)), String(name)]}
+              formatter={(v, name) => [money(Number(v), currency), String(name)]}
             />
             <Bar dataKey="inflow" name="Entradas" fill={UP} radius={[4, 4, 0, 0]} isAnimationActive={false} />
             <Bar dataKey="outflow" name="Saídas" fill={DOWN} radius={[4, 4, 0, 0]} isAnimationActive={false} />
@@ -120,10 +132,21 @@ function PieLegend({
 }
 
 /** Participação de entradas e saídas sobre entradas + saídas. */
-export function TransactionPie({ inflow, outflow, shares }: { inflow: number; outflow: number; shares: { inflow: number | null; outflow: number | null } }) {
+export function TransactionPie({
+  inflow,
+  outflow,
+  shares,
+  currency = "BRL",
+}: {
+  inflow: number;
+  outflow: number;
+  shares: { inflow: number | null; outflow: number | null };
+  currency?: RefCurrency;
+}) {
   return (
     <PieLegend
       labelInside
+      format={(v) => money(v, currency)}
       empty="Sem movimentações no período"
       slices={[
         { name: "Entradas", cents: inflow, share: shares.inflow ?? 0, color: UP },
@@ -164,7 +187,7 @@ export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDat
         <BarChart data={data} margin={{ top: 24, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={0.6} />
           <XAxis dataKey="short" tickLine={false} axisLine={false} tick={axisTick} />
-          <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => compact.format(v / MINOR[currency])} />
+          <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => axis(v, currency)} />
           <Tooltip
             cursor={{ fill: "var(--muted)", opacity: 0.4 }}
             contentStyle={tooltipStyle}

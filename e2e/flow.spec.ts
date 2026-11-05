@@ -134,6 +134,13 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByTestId("account-total-1")).toHaveText("R$ 400,00");
   await expect(page.getByTestId("account-total-0")).toHaveText("R$ 0,00");
   await expect(page.getByText("1 compra parcelada ativa")).toBeVisible();
+  // Faturas em USDT (1 USDT = R$ 5) e com período de 3 meses: as 3 parcelas da cadeira
+  await page.getByRole("button", { name: /Moeda de referência/ }).click();
+  await page.getByRole("menuitemradio", { name: /USDT/ }).click();
+  await expect(page.getByTestId("invoice-total")).toHaveText("US$ 80,00");
+  await page.getByRole("link", { name: "3M", exact: true }).click();
+  await expect(page).toHaveURL(/periodo=3M/);
+  await expect(page.getByTestId("invoice-total")).toHaveText("US$ 240,00");
 
   // Transações: indicadores do mês
   await page.getByRole("link", { name: "Transações" }).click();
@@ -141,6 +148,14 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByTestId("tx-outflow")).toHaveText("- R$ 780,00");
   await expect(page.getByTestId("tx-balance")).toHaveText("+ R$ 1.720,00");
   await expect(page.getByRole("button", { name: "Saídas (1)" })).toBeVisible();
+  // Transações em USDT; o padrão é BRL e cada aba lembra a sua moeda
+  await page.getByRole("button", { name: /Moeda de referência/ }).click();
+  await page.getByRole("menuitemradio", { name: /USDT/ }).click();
+  await expect(page.getByTestId("tx-balance")).toHaveText("+ US$ 344,00");
+  await expect(page.getByRole("table", { name: "Transações" })).toContainText("+ US$ 500,00");
+  await page.getByRole("link", { name: "3M", exact: true }).click();
+  await expect(page).toHaveURL(/periodo=3M/);
+  await expect(page.getByTestId("tx-balance")).toHaveText("+ US$ 344,00");
 
   // Resumo: saldo cripto no início do mês + variação no mês = 150.000 (saldo de hoje);
   // + reais 5.000 (neutros) + entradas 2.500 − faturas 400 − saídas 780

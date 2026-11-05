@@ -1,4 +1,4 @@
-import { addMonths } from "@/lib/cards/months";
+import { addMonths, monthLabel } from "@/lib/cards/months";
 import type { Holding } from "@/lib/holdings/holdings";
 import type { Period, PricePoint } from "@/lib/portfolio/calc";
 
@@ -66,4 +66,20 @@ export function zonedMidnight(iso: string, timeZone: string): number {
   );
   const asLocal = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
   return utc - (asLocal - utc);
+}
+
+const dateBr = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+
+/** Texto do período: "Nov/2026" em 1M; "01/11/2026 a 31/01/2027" nos demais. */
+export function periodLabel(month: string, period: Period): string {
+  if (period === "1M") return monthLabel(month);
+  const w = analysisWindow(month, period);
+  return `${dateBr(w.fromDate)} a ${dateBr(w.toDate)}`;
+}
+
+/** Meses do gráfico mensal: até 1M, os 6 meses que terminam no mês; de 3M em diante, os meses do período. */
+export function chartMonths(month: string, period: Period): string[] {
+  const w = analysisWindow(month, period);
+  if (w.invoiceMonths.length > 1) return w.invoiceMonths;
+  return Array.from({ length: 6 }, (_, i) => addMonths(month, i - 5));
 }

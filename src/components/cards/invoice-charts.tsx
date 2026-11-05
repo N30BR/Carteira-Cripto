@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatMoney } from "@/lib/currency";
+import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { formatPct } from "@/lib/format";
 import { monthShort } from "@/lib/cards/months";
 import type { Side } from "@/lib/cards/store";
@@ -10,7 +10,10 @@ import { NO_CATEGORY } from "@/lib/cards/summary";
 import { cn } from "@/lib/utils";
 import { NATURE_COLOR, categoryColor } from "./colors";
 
-const brl = (cents: number) => formatMoney(cents / 100, "BRL");
+// Valores em unidades mínimas da moeda (centavos; satoshis em BTC).
+const MINOR: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
+const SYMBOL: Record<RefCurrency, string> = { BRL: "R$", USDT: "US$", BTC: "₿" };
+const fmt = (minor: number, cur: RefCurrency) => formatMoney(minor / MINOR[cur], cur);
 const compact = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
 const tooltipStyle = {
   background: "var(--popover)",
@@ -41,9 +44,11 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
 export function InvoiceBars({
   data,
   accounts,
+  currency = "BRL",
 }: {
   data: { month: string; byAccount: Record<number, number> }[];
   accounts: { id: number; name: string; color: string }[];
+  currency?: RefCurrency;
 }) {
   const [show, setShow] = useState<string>("ALL");
   const rows = data.map((d) => ({
@@ -72,13 +77,15 @@ export function InvoiceBars({
               axisLine={false}
               width={64}
               tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-              tickFormatter={(v: number) => `R$ ${compact.format(v / 100)}`}
+              tickFormatter={(v: number) =>
+                `${SYMBOL[currency]} ${currency === "BTC" ? (v / MINOR[currency]).toLocaleString("pt-BR", { maximumSignificantDigits: 3 }) : compact.format(v / MINOR[currency])}`
+              }
             />
             <Tooltip
               cursor={{ fill: "var(--muted)", opacity: 0.4 }}
               contentStyle={tooltipStyle}
               labelFormatter={(_, p) => (p?.[0] ? monthShort((p[0].payload as { month: string }).month) : "")}
-              formatter={(v, name) => [brl(Number(v)), String(name)]}
+              formatter={(v, name) => [fmt(Number(v), currency), String(name)]}
             />
             <Legend />
             {shown.map((a) => (
@@ -93,7 +100,7 @@ export function InvoiceBars({
 
 type Slice = { name: string; cents: number; color: string };
 
-function PieWithLegend({ slices, total, empty }: { slices: Slice[]; total: number; empty: string }) {
+function PieWithLegend({ slices, total, empty, currency }: { slices: Slice[]; total: number; empty: string; currency: RefCurrency }) {
   if (!slices.length || total <= 0) {
     return <div className="grid h-48 place-items-center rounded-xl border border-dashed text-sm text-muted-foreground">{empty}</div>;
   }
@@ -110,7 +117,7 @@ function PieWithLegend({ slices, total, empty }: { slices: Slice[]; total: numbe
             <Tooltip
               contentStyle={tooltipStyle}
               itemStyle={{ color: "var(--popover-foreground)" }}
-              formatter={(v, name) => [`${brl(Number(v))} (${formatPct(Number(v) / total)})`, String(name)]}
+              formatter={(v, name) => [`${fmt(Number(v), currency)} (${formatPct(Number(v) / total)})`, String(name)]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -122,7 +129,7 @@ function PieWithLegend({ slices, total, empty }: { slices: Slice[]; total: numbe
             <span className="min-w-0 truncate" title={s.name}>
               {s.name}
             </span>
-            <span className="tabular-nums whitespace-nowrap text-muted-foreground">{brl(s.cents)}</span>
+            <span className="tabular-nums whitespace-nowrap text-muted-foreground">{fmt(s.cents, currency)}</span>
             <span className="w-16 text-right font-semibold tabular-nums">{formatPct(s.cents / total)}</span>
           </li>
         ))}
@@ -134,8 +141,10 @@ function PieWithLegend({ slices, total, empty }: { slices: Slice[]; total: numbe
 /** Pizza por categoria do mês, com filtro PF/PJ; mostra as 7 maiores e junta o resto em "Outras". */
 export function CategoryPie({
   items,
+  currency = "BRL",
 }: {
   items: { nature: Side; categoryId: number | null; category: string | null; cents: number }[];
+  currency?: RefCurrency;
 }) {
   const [nature, setNature] = useState<"ALL" | Side>("ALL");
   const sums = new Map<string, { cents: number; id: number | null }>();
@@ -164,16 +173,16 @@ export function CategoryPie({
           ]}
         />
       </div>
-      <PieWithLegend slices={slices} total={total} empty="Sem despesas no mês" />
+      <PieWithLegend slices={slices} total={total} empty="Sem despesas no período" currency={currency} />
     </div>
   );
 }
 
 /** Pizza PF × PJ pela natureza da despesa (não pelo cartão). */
-export function NaturePie({ pf, pj }: { pf: number; pj: number }) {
+export function NaturePie({ pf, pj, currency = "BRL" }: { pf: number; pj: number; currency?: RefCurrency }) {
   const slices = [
     { name: "Pessoa Física (PF)", cents: pf, color: NATURE_COLOR.PF },
     { name: "Pessoa Jurídica (PJ)", cents: pj, color: NATURE_COLOR.PJ },
   ].filter((s) => s.cents > 0);
-  return <PieWithLegend slices={slices} total={pf + pj} empty="Sem despesas no mês" />;
+  return <PieWithLegend slices={slices} total={pf + pj} empty="Sem despesas no período" currency={currency} />;
 }

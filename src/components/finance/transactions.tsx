@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { deleteTransactionAction, saveTransactionAction, type TransactionForm } from "@/app/(app)/lancamentos/transaction-actions";
 import { safeAction } from "@/lib/safe-action";
+import type { RefCurrency } from "@/lib/currency";
 import type { Transaction } from "@/lib/transactions/store";
 import { FilterTabs, KindBadge, SignedMoney, dateBr } from "./ui";
 
@@ -110,10 +111,15 @@ export function TransactionsTable({
   items,
   emptyText,
   kindHeader = "Entrada / Saída",
+  currency = "BRL",
+  factor = 1,
 }: {
   items: Transaction[];
   emptyText: string;
   kindHeader?: string;
+  /** Moeda de exibição; `factor` converte centavos de real em unidades mínimas dela. */
+  currency?: RefCurrency;
+  factor?: number;
 }) {
   const [filter, setFilter] = useState<"ALL" | "in" | "out">("ALL");
   const [search, setSearch] = useState("");
@@ -167,7 +173,7 @@ export function TransactionsTable({
               <TableHead>Data</TableHead>
               <TableHead>{kindHeader}</TableHead>
               <TableHead>Descrição</TableHead>
-              <TableHead className="text-right">Valor (R$)</TableHead>
+              <TableHead className="text-right">Valor ({currency === "BRL" ? "R$" : currency === "USDT" ? "US$" : "₿"})</TableHead>
               <TableHead className="text-center">Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -189,7 +195,7 @@ export function TransactionsTable({
                     {t.description}
                   </TableCell>
                   <TableCell className="text-right">
-                    <SignedMoney cents={t.kind === "in" ? t.amountCents : -t.amountCents} />
+                    <SignedMoney cents={(t.kind === "in" ? t.amountCents : -t.amountCents) * factor} currency={currency} />
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-center gap-1">

@@ -56,3 +56,20 @@ describe("meia-noite no fuso do app", () => {
     expect(zonedMidnight("2027-01-01", "America/Sao_Paulo")).toBe(Date.UTC(2027, 0, 1, 3));
   });
 });
+
+describe("rótulos e meses do gráfico do período", () => {
+  test("rótulo: o mês em 1M; as datas nos demais", async () => {
+    const { periodLabel } = await import("@/lib/summary/window");
+    expect(periodLabel("2026-11", "1M")).toBe("Nov/2026");
+    expect(periodLabel("2026-11", "1S")).toBe("01/11/2026 a 07/11/2026");
+    expect(periodLabel("2026-11", "3M")).toBe("01/11/2026 a 31/01/2027");
+  });
+
+  test("gráfico mensal: até 1M mostra os 6 meses até o mês; de 3M em diante, os meses do período", async () => {
+    const { chartMonths } = await import("@/lib/summary/window");
+    expect(chartMonths("2026-11", "1M")).toEqual(["2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"]);
+    expect(chartMonths("2026-11", "1D")).toHaveLength(6);
+    expect(chartMonths("2026-11", "3M")).toEqual(["2026-11", "2026-12", "2027-01"]);
+    expect(chartMonths("2026-01", "1A")).toHaveLength(12);
+  });
+});

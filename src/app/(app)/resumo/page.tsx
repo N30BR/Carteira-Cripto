@@ -9,7 +9,7 @@ import { monthTotals } from "@/lib/cards/summary";
 import { pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { formatPct } from "@/lib/format";
-import { PERIOD_OPTIONS, parsePeriod } from "@/lib/portfolio/calc";
+import { parsePeriod } from "@/lib/portfolio/calc";
 import { consolidate, type ComponentKey, type Tone } from "@/lib/summary/consolidate";
 import { cryptoPeriod, fiatBalanceBrl } from "@/lib/summary/sources";
 import { analysisWindow, zonedMidnight } from "@/lib/summary/window";
@@ -18,11 +18,9 @@ import { listTransactions } from "@/lib/transactions/store";
 import { appTimeZone, todayIn } from "@/lib/validation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CurrencyMenu } from "@/components/dashboard/currency-menu";
-import { PeriodSelector } from "@/components/dashboard/period-selector";
 import { ComponentBars, ComponentPie } from "@/components/finance/charts";
 import { BLUE, DOWN, KindBadge, MINOR, NEUTRAL, SectionTitle, SignedMoney, StatCard, TotalChip, TotalsBar, UP, dateBr } from "@/components/finance/ui";
-import { MonthPicker } from "@/components/month-picker";
+import { PeriodHeader } from "@/components/finance/period-header";
 
 export const metadata = { title: "Resumo · Carteira Cripto" };
 
@@ -148,20 +146,17 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">Resumo</h1>
-            <CurrencyMenu current={currency} cookieName={COOKIE} />
-          </div>
-          <p className="text-sm text-muted-foreground">Visão consolidada dos saldos, faturas e movimentações financeiras.</p>
-          {viewBrl.warning && <p className="text-xs text-amber-400">{viewBrl.warning}</p>}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PeriodSelector options={PERIOD_OPTIONS} current={period} path="/resumo" query={{ moeda: requested, mes: month }} />
-          <MonthPicker month={month} />
-        </div>
-      </div>
+      <PeriodHeader
+        title="Resumo"
+        subtitle="Visão consolidada dos saldos, faturas e movimentações financeiras."
+        currency={currency}
+        requested={requested}
+        cookieName={COOKIE}
+        period={period}
+        path="/resumo"
+        month={month}
+        warning={viewBrl.warning}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {summary.components.map((c) => (
