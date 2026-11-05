@@ -81,7 +81,9 @@ export function computeFiat(
     };
   });
 
-  for (const r of rows) r.share = total > 0 ? r.amount / total : null;
+  // Participação sobre a soma dos saldos positivos: uma conta negativa não infla as outras.
+  const positive = rows.reduce((s, r) => s + Math.max(0, r.amount), 0);
+  for (const r of rows) r.share = positive > 0 && r.amount >= 0 ? r.amount / positive : null;
   rows.sort((a, b) => b.amount - a.amount);
   return { rows, total, total30: anyPast ? total30 : null };
 }
@@ -97,16 +99,24 @@ export function buildFiatCurve(
   if (!series.length) return [];
 
   const first = series.map((pts) => pts[0].date).sort()[0];
-  const start = period === "Tudo" ? first : addDays(today, -PERIOD_DAYS[period]);
+  const yesterday = addDays(today, -1);
+  // "Tudo" começa no primeiro registro, mas pelo menos ontem, para a curva ter 2 pontos.
+  const start = period === "Tudo" ? (first < yesterday ? first : yesterday) : addDays(today, -PERIOD_DAYS[period]);
 
   // Até ~1000 pontos: períodos longos andam de vários em vários dias.
   const totalDays = Math.round((dayTime(today) - dayTime(start)) / 86_400_000);
   const step = Math.max(1, Math.ceil(totalDays / 1000));
 
+  // Cada série é percorrida uma vez só (as datas já vêm em ordem): custo proporcional a pontos + saldos.
+  const cursors = series.map((pts) => ({ pts, i: -1 }));
+  const valueOn = (d: string) =>
+    cursors.reduce((sum, c) => {
+      while (c.i + 1 < c.pts.length && c.pts[c.i + 1].date <= d) c.i++;
+      return sum + (c.i >= 0 ? Number(c.pts[c.i].amount) : 0);
+    }, 0);
+
   const points: { t: number; value: number }[] = [];
-  for (let d = start; d < today; d = addDays(d, step)) {
-    points.push({ t: dayTime(d), value: series.reduce((s, pts) => s + (balanceOn(pts, d) ?? 0), 0) });
-  }
-  points.push({ t: now.getTime(), value: series.reduce((s, pts) => s + (balanceOn(pts, today) ?? 0), 0) });
+  for (let d = start; d < today; d = addDays(d, step)) points.push({ t: dayTime(d), value: valueOn(d) });
+  points.push({ t: now.getTime(), value: valueOn(today) });
   return points;
 }

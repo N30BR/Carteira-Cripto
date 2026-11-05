@@ -2,7 +2,7 @@ import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
 import { listAccounts } from "@/lib/fiat/accounts";
 import { listHoldings } from "@/lib/holdings/holdings";
-import { todayIn } from "@/lib/validation";
+import { appTimeZone, todayIn } from "@/lib/validation";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddAssetDialog } from "./add-asset-dialog";
 import { FiatSection } from "./fiat-section";
@@ -16,7 +16,7 @@ export default async function AssetsPage() {
   const holdings = listHoldings(db, user.id);
   const owned = Object.fromEntries(holdings.map((h) => [h.coinId, h.quantity]));
   const accounts = listAccounts(db, user.id);
-  const today = todayIn(process.env.APP_TIMEZONE ?? "America/Sao_Paulo");
+  const today = todayIn(appTimeZone());
 
   return (
     <div className="flex flex-col gap-10">

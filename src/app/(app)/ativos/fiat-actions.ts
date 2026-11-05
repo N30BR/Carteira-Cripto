@@ -4,12 +4,15 @@ import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
 import { createAccount, deleteAccount, renameAccount, setBalance, type Result } from "@/lib/fiat/accounts";
-import { parseBalanceDate, parseBrl, todayIn, validateAccountName } from "@/lib/validation";
+import { allowFiatChange } from "@/lib/fiat/limit";
+import { appTimeZone, parseBalanceDate, parseBrl, todayIn, validateAccountName } from "@/lib/validation";
 
 const NOT_FOUND: Result = { ok: false, error: "Conta não encontrada" };
+const TOO_MANY: Result = { ok: false, error: "Muitas alterações seguidas. Aguarde um minuto." };
+
 
 function today(): string {
-  return todayIn(process.env.APP_TIMEZONE ?? "America/Sao_Paulo");
+  return todayIn(appTimeZone());
 }
 
 function refresh() {
@@ -28,6 +31,7 @@ function parseBalance(rawAmount: unknown, rawDate: unknown): { ok: false; error:
 
 export async function createAccountAction(rawName: string, rawAmount: string, rawDate: string): Promise<Result> {
   const user = await requireUser();
+  if (!allowFiatChange(user.id)) return TOO_MANY;
   const name = validateAccountName(String(rawName ?? ""));
   if (!name.ok) return name;
   const b = parseBalance(rawAmount, rawDate);
@@ -39,6 +43,7 @@ export async function createAccountAction(rawName: string, rawAmount: string, ra
 
 export async function setBalanceAction(accountId: number, rawAmount: string, rawDate: string): Promise<Result> {
   const user = await requireUser();
+  if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!Number.isInteger(accountId)) return NOT_FOUND;
   const b = parseBalance(rawAmount, rawDate);
   if (!b.ok) return b;
@@ -49,6 +54,7 @@ export async function setBalanceAction(accountId: number, rawAmount: string, raw
 
 export async function renameAccountAction(accountId: number, rawName: string): Promise<Result> {
   const user = await requireUser();
+  if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!Number.isInteger(accountId)) return NOT_FOUND;
   const name = validateAccountName(String(rawName ?? ""));
   if (!name.ok) return name;
@@ -59,6 +65,7 @@ export async function renameAccountAction(accountId: number, rawName: string): P
 
 export async function deleteAccountAction(accountId: number): Promise<Result> {
   const user = await requireUser();
+  if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!Number.isInteger(accountId)) return NOT_FOUND;
   const r = deleteAccount(getDb(), user.id, accountId);
   refresh();

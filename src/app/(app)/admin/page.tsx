@@ -2,13 +2,14 @@ import { getDb } from "@/db/client";
 import { requireAdmin } from "@/lib/auth/current";
 import { isLocked } from "@/lib/auth/login";
 import { listUsers } from "@/lib/admin/users";
+import { appTimeZone } from "@/lib/validation";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeleteUserButton, NewUserDialog, ResetPasswordDialog, UnlockButton } from "./user-dialogs";
 
 export const metadata = { title: "Admin · Carteira Cripto" };
 
-const TZ = process.env.APP_TIMEZONE ?? "America/Sao_Paulo";
+const TZ = appTimeZone();
 const date = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: TZ });
 const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
 

@@ -53,11 +53,12 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   // e 1 ano (1A e variação 1A); cada um fica guardado por 1 hora.
   const priced = ids.filter((id) => current.prices[id]);
   // Com a referência em BTC, o mesmo preço do BTC da carteira entra na conversão (BTC vale exatamente ₿ 1).
-  const btcPrice = current.prices.BTC ?? (await getCurrentPrices(db, ["BTC"], now)).prices.BTC;
+  const btcPrice =
+    requested === "BTC" ? (current.prices.BTC ?? (await getCurrentPrices(db, ["BTC"], now)).prices.BTC) : undefined;
   const [hist30, hist365, view] = await Promise.all([
     getHistory(db, priced, "30D", now),
     getHistory(db, priced, "1A", now),
-    resolveCurrency(db, "USDT", requested, "USDT", now, { btcUsdt: btcPrice }),
+    resolveCurrency(db, "USDT", requested, "USDT", now, { btcUsdt: btcPrice, historyDays: 365 }),
   ]);
   const hist = PERIODS[period].sourceDays === 365 ? hist365 : hist30;
   const portfolio = computePortfolio(holdings, current.prices);
@@ -117,7 +118,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
               currency={view.currency}
             />
             <div className="flex items-center gap-2">
-              <PeriodSelector options={["7D", "30D", "1A"]} current={period} path="/" query={{ moeda: view.currency }} />
+              <PeriodSelector options={["7D", "30D", "1A"]} current={period} path="/" query={{ moeda: requested }} />
               <CurrencyMenu current={view.currency} cookieName={COOKIE} />
             </div>
           </div>

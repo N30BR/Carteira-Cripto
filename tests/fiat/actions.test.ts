@@ -14,11 +14,13 @@ import {
   renameAccountAction,
   setBalanceAction,
 } from "@/app/(app)/ativos/fiat-actions";
+import { resetFiatLimits } from "@/lib/fiat/limit";
 
 type Db = Parameters<typeof listAccounts>[0];
 let other = 0;
 
 beforeEach(() => {
+  resetFiatLimits();
   const db = testDb();
   state.db = db;
   const mk = (username: string) =>
@@ -61,5 +63,14 @@ describe("actions fiduciárias", () => {
     expect(listAccounts(state.db as Db, state.userId)[0]).toMatchObject({ name: "Pessoal", amount: "250.00" });
     expect(await deleteAccountAction(id)).toEqual({ ok: true });
     expect(listAccounts(state.db as Db, state.userId)).toEqual([]);
+  });
+});
+
+describe("limite de alterações", () => {
+  test("mais de 60 alterações por minuto são recusadas", async () => {
+    await createAccountAction("PF", "1", "");
+    const id = listAccounts(state.db as Db, state.userId)[0].id;
+    for (let i = 0; i < 59; i++) await setBalanceAction(id, "1", "");
+    expect(await setBalanceAction(id, "1", "")).toEqual({ ok: false, error: "Muitas alterações seguidas. Aguarde um minuto." });
   });
 });

@@ -6,7 +6,7 @@ import { adjustChange, pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { listAccounts, listBalances } from "@/lib/fiat/accounts";
 import { FIAT_PERIODS, buildFiatCurve, computeFiat, parseFiatPeriod } from "@/lib/fiat/calc";
-import { todayIn } from "@/lib/validation";
+import { appTimeZone, todayIn } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AllocationDonut } from "@/components/dashboard/allocation-donut";
@@ -48,7 +48,7 @@ export default async function FiatDashboardPage({ searchParams }: PageProps<"/fi
   }
 
   const now = new Date();
-  const today = todayIn(process.env.APP_TIMEZONE ?? "America/Sao_Paulo", now);
+  const today = todayIn(appTimeZone(), now);
   const balances = listBalances(db, user.id);
   const fiat = computeFiat(accounts, balances, today);
   const view = await resolveCurrency(db, "BRL", requested, "BRL", now);
@@ -89,7 +89,7 @@ export default async function FiatDashboardPage({ searchParams }: PageProps<"/fi
               currency={view.currency}
             />
             <div className="flex items-center gap-2">
-              <PeriodSelector options={FIAT_PERIODS} current={period} path="/fiduciario" query={{ moeda: view.currency }} />
+              <PeriodSelector options={FIAT_PERIODS} current={period} path="/fiduciario" query={{ moeda: requested }} />
               <CurrencyMenu current={view.currency} cookieName={COOKIE} />
             </div>
           </div>

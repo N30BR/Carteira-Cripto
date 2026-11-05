@@ -1,4 +1,4 @@
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { fiatAccounts, fiatBalances } from "@/db/schema";
 
@@ -50,9 +50,21 @@ export function listAccounts(db: Db, userId: number): FiatAccount[] {
     .where(eq(fiatAccounts.userId, userId))
     .orderBy(asc(fiatAccounts.name))
     .all();
-  const balances = listBalances(db, userId);
+  // Só o saldo mais recente de cada conta (sem carregar o histórico inteiro).
+  const latest = db
+    .select({ accountId: fiatBalances.accountId, date: fiatBalances.date, amount: fiatBalances.amount })
+    .from(fiatBalances)
+    .innerJoin(fiatAccounts, eq(fiatAccounts.id, fiatBalances.accountId))
+    .where(
+      and(
+        eq(fiatAccounts.userId, userId),
+        sql`${fiatBalances.date} = (select max(b2.date) from fiat_balances b2 where b2.account_id = ${fiatBalances.accountId})`,
+      ),
+    )
+    .all();
+  const byAccount = new Map(latest.map((l) => [l.accountId, l]));
   return accounts.map((a) => {
-    const last = balances[a.id]?.at(-1);
+    const last = byAccount.get(a.id);
     return { ...a, amount: last?.amount ?? "0.00", date: last?.date ?? "" };
   });
 }
@@ -69,8 +81,10 @@ export function createAccount(db: Db, userId: number, input: { name: string } & 
   if (nameTaken(db, userId, input.name)) return DUPLICATE;
   const [{ n }] = db.select({ n: count() }).from(fiatAccounts).where(eq(fiatAccounts.userId, userId)).all();
   if (n >= MAX_ACCOUNTS) return { ok: false, error: `Limite de ${MAX_ACCOUNTS} contas atingido` };
-  const [acc] = db.insert(fiatAccounts).values({ userId, name: input.name, createdAt: new Date() }).returning().all();
-  upsertBalance(db, acc.id, input);
+  db.transaction((tx) => {
+    const [acc] = tx.insert(fiatAccounts).values({ userId, name: input.name, createdAt: new Date() }).returning().all();
+    upsertBalance(tx as unknown as Db, acc.id, input);
+  });
   return { ok: true };
 }
 

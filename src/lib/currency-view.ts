@@ -35,14 +35,14 @@ export async function resolveCurrency(
   requested: RefCurrency,
   fallback: RefCurrency,
   now = new Date(),
-  opts: { btcUsdt?: CurrentPrice } = {},
+  opts: { btcUsdt?: CurrentPrice; historyDays?: 365 | 1000 } = {},
 ): Promise<CurrencyView> {
   if (requested === base) return identity(base);
 
   const [fetched, h30, h1000] = await Promise.all([
     getRates(db, now),
     getRateHistory(db, 30, now),
-    getRateHistory(db, 1000, now),
+    getRateHistory(db, opts.historyDays ?? 1000, now),
   ]);
   const rates = opts.btcUsdt
     ? { ...fetched, btcUsdt: opts.btcUsdt.usd, btcUsdtChange24h: opts.btcUsdt.change24h }

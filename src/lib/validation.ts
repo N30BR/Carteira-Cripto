@@ -50,15 +50,34 @@ export function parseBrl(raw: string): ParsedQuantity {
     int = m[1];
     dec = m[2] ?? "";
   }
-  if (int.replace("-", "").length > 13) return invalid;
-  return { ok: true, value: `${int}.${dec.padEnd(2, "0")}` };
+  const negative = int.startsWith("-");
+  const digits = int.replace("-", "").replace(/^0+(?=\d)/, "");
+  if (digits.length > 13) return invalid;
+  const cents = dec.padEnd(2, "0");
+  const isZero = /^0+$/.test(digits) && /^0+$/.test(cents);
+  return { ok: true, value: `${negative && !isZero ? "-" : ""}${digits}.${cents}` };
 }
 
 export function validateAccountName(raw: string): ParsedQuantity {
-  const name = raw.trim();
+  const name = raw.normalize("NFC").trim();
+  // Caracteres de controle e invisíveis (quebra de linha, zero-width, inversão de texto) não entram.
+  if (/[\p{Cc}\p{Cf}]/u.test(name)) return { ok: false, error: "O nome tem caracteres não permitidos" };
   return name.length >= 1 && name.length <= 40
     ? { ok: true, value: name }
     : { ok: false, error: "Informe um nome de 1 a 40 caracteres" };
+}
+
+const DEFAULT_TZ = "America/Sao_Paulo";
+
+/** Fuso do app (APP_TIMEZONE); valor inválido cai no padrão em vez de derrubar a página. */
+export function appTimeZone(raw: string | undefined = process.env.APP_TIMEZONE): string {
+  if (!raw) return DEFAULT_TZ;
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: raw });
+    return raw;
+  } catch {
+    return DEFAULT_TZ;
+  }
 }
 
 /** Data de hoje (AAAA-MM-DD) no fuso indicado. */

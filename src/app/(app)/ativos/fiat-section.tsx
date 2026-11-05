@@ -25,7 +25,15 @@ function formatDate(d: string): string {
   return `${day}/${m}/${y}`;
 }
 
-type Field = { name: string; label: string; type?: "text" | "date"; placeholder?: string; initial?: string };
+type Field = {
+  name: string;
+  label: string;
+  type?: "text" | "date";
+  placeholder?: string;
+  initial?: string;
+  min?: string;
+  max?: string;
+};
 
 /** Diálogo pequeno com campos de texto; mantém o que foi digitado quando há erro. */
 function FormDialog({
@@ -83,6 +91,8 @@ function FormDialog({
                 type={f.type ?? "text"}
                 inputMode={f.name === "amount" ? "decimal" : undefined}
                 placeholder={f.placeholder}
+                min={f.min}
+                max={f.max}
                 value={values[f.name]}
                 onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
                 autoComplete="off"
@@ -109,7 +119,7 @@ const amountField: Field = { name: "amount", label: "Saldo (R$)", placeholder: "
 
 export function FiatSection({ accounts, today }: { accounts: FiatAccount[]; today: string }) {
   const [pending, start] = useTransition();
-  const dateField: Field = { name: "date", label: "Data do saldo", type: "date", initial: today };
+  const dateField: Field = { name: "date", label: "Data do saldo", type: "date", initial: today, min: "2000-01-01", max: today };
 
   function remove(a: FiatAccount) {
     if (!confirm(`Remover a conta "${a.name}"? O histórico de saldos dela também será apagado.`)) return;
