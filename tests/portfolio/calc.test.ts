@@ -115,3 +115,35 @@ describe("buildCurve", () => {
     expect(buildCurve([H("bitcoin", "btc", "1")], {}, {}, "7D", now)).toEqual({ points: [], missingHistory: [] });
   });
 });
+
+import { periodChanges, priceChange } from "@/lib/portfolio/calc";
+
+describe("variação por período", () => {
+  const DAY = 86_400_000;
+  const now = new Date("2026-06-01T12:00:00Z");
+  const t = (daysAgo: number) => now.getTime() - daysAgo * DAY;
+
+  test("usa o último preço até a data alvo", () => {
+    const hist: PricePoint[] = [[t(10), 80], [t(7.5), 90], [t(6), 95]];
+    expect(priceChange(hist, 99, 7, now)).toBeCloseTo((99 / 90 - 1) * 100, 10);
+  });
+
+  test("histórico que começa depois da data alvo: indisponível", () => {
+    expect(priceChange([[t(5), 10]], 12, 7, now)).toBeNull();
+    expect(priceChange([], 12, 7, now)).toBeNull();
+  });
+
+  test("preço antigo zero não divide por zero", () => {
+    expect(priceChange([[t(8), 0]], 12, 7, now)).toBeNull();
+  });
+
+  test("periodChanges: 7D e 1M do histórico de 30 dias, 1A do histórico de 1 ano", () => {
+    const h30: Record<string, PricePoint[]> = { BTC: [[t(31), 50], [t(8), 80]] };
+    const h365: Record<string, PricePoint[]> = { BTC: [[t(366), 40]] };
+    const r = periodChanges(["BTC", "SEM"], { BTC: { usd: 100, change24h: 1 } }, h30, h365, now);
+    expect(r.BTC.change7d).toBeCloseTo(25, 10);
+    expect(r.BTC.change1m).toBeCloseTo(100, 10);
+    expect(r.BTC.change1y).toBeCloseTo(150, 10);
+    expect(r.SEM).toEqual({ change7d: null, change1m: null, change1y: null });
+  });
+});

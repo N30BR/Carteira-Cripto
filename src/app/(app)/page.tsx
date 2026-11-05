@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
 import { listHoldings } from "@/lib/holdings/holdings";
 import { getCurrentPrices, getHistory } from "@/lib/prices";
-import { buildCurve, computePortfolio, parsePeriod } from "@/lib/portfolio/calc";
+import { PERIODS, buildCurve, computePortfolio, parsePeriod, periodChanges } from "@/lib/portfolio/calc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AllocationDonut } from "@/components/dashboard/allocation-donut";
@@ -40,12 +40,21 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
   const now = new Date();
   const ids = holdings.map((h) => h.coinId);
   const current = await getCurrentPrices(db, ids, now);
-  // Histórico só das moedas com preço: as outras nem entram na curva.
-  const hist = await getHistory(db, ids.filter((id) => current.prices[id]), period, now);
+  // Histórico só das moedas com preço. Os dois são usados: 30 dias (7D/30D e variações 7D/1M)
+  // e 1 ano (1A e variação 1A); cada um fica guardado por 1 hora.
+  const priced = ids.filter((id) => current.prices[id]);
+  const [hist30, hist365] = await Promise.all([getHistory(db, priced, "30D", now), getHistory(db, priced, "1A", now)]);
+  const hist = PERIODS[period].sourceDays === 365 ? hist365 : hist30;
   const portfolio = computePortfolio(holdings, current.prices);
   const curve = buildCurve(holdings, hist.history, current.prices, period, now);
+  const changes = periodChanges(ids, current.prices, hist30.history, hist365.history, now);
+  const tableRows = portfolio.rows.map((r) => ({ ...r, ...changes[r.coinId] }));
 
-  const staleSince = [current.stale && current.fetchedAt, hist.stale && hist.oldestFetchedAt]
+  const staleSince = [
+    current.stale && current.fetchedAt,
+    hist30.stale && hist30.oldestFetchedAt,
+    hist365.stale && hist365.oldestFetchedAt,
+  ]
     .filter((d): d is Date => d instanceof Date)
     .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
 
@@ -71,7 +80,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
+      <div className="flex flex-col gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Distribuição</CardTitle>
@@ -82,7 +91,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
         </Card>
         <div className="flex flex-col gap-3">
           <h2 className="font-medium">Ativos</h2>
-          <HoldingsTable rows={portfolio.rows} />
+          <HoldingsTable rows={tableRows} />
         </div>
       </div>
     </div>

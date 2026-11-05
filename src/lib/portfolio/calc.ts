@@ -99,3 +99,41 @@ export function buildCurve(
   points.push({ t: end, value: finalValue });
   return { points, missingHistory };
 }
+
+const DAY_MS = 24 * HOUR;
+
+/** Variação % do preço em relação a `days` dias atrás; null sem histórico que cubra a data. */
+export function priceChange(history: PricePoint[], currentPrice: number, days: number, now = new Date()): number | null {
+  const target = now.getTime() - days * DAY_MS;
+  let past: PricePoint | null = null;
+  for (const point of history) {
+    if (point[0] <= target && (past === null || point[0] >= past[0])) past = point;
+  }
+  if (past === null || past[1] <= 0) return null;
+  return (currentPrice / past[1] - 1) * 100;
+}
+
+export type PeriodChanges = { change7d: number | null; change1m: number | null; change1y: number | null };
+
+/** 7D e 1M saem do histórico de 30 dias (por hora); 1A do histórico de 1 ano (diário). */
+export function periodChanges(
+  ids: string[],
+  prices: Record<string, CurrentPrice>,
+  history30: Record<string, PricePoint[]>,
+  history365: Record<string, PricePoint[]>,
+  now = new Date(),
+): Record<string, PeriodChanges> {
+  const out: Record<string, PeriodChanges> = {};
+  for (const id of ids) {
+    const p = prices[id]?.usd;
+    out[id] =
+      p === undefined
+        ? { change7d: null, change1m: null, change1y: null }
+        : {
+            change7d: priceChange(history30[id] ?? [], p, 7, now),
+            change1m: priceChange(history30[id] ?? [], p, 30, now),
+            change1y: priceChange(history365[id] ?? [], p, 365, now),
+          };
+  }
+  return out;
+}

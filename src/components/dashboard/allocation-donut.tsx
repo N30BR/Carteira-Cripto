@@ -32,7 +32,7 @@ export function AllocationDonut({ rows }: { rows: Slice[] }) {
     );
   }
   return (
-    <div className="flex flex-col items-center gap-6 sm:flex-row">
+    <div className="flex flex-col items-center gap-8 sm:flex-row">
       <div className="size-48 shrink-0">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -63,7 +63,7 @@ export function AllocationDonut({ rows }: { rows: Slice[] }) {
           </PieChart>
         </ResponsiveContainer>
       </div>
-      <ul className="flex w-full flex-col gap-2 text-sm" aria-label="Distribuição por ativo">
+      <ul className="grid w-full max-w-2xl grid-cols-1 gap-x-10 gap-y-2 text-sm sm:grid-cols-2" aria-label="Distribuição por ativo">
         {slices.map((s) => (
           <li key={s.symbol} className="flex items-center gap-2">
             <span className="size-2.5 shrink-0 rounded-full" style={{ background: s.color }} />

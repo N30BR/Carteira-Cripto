@@ -4,27 +4,43 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatPct, formatPrice, formatQty, formatUsd } from "@/lib/format";
-import type { PortfolioRow } from "@/lib/portfolio/calc";
+import type { PeriodChanges, PortfolioRow } from "@/lib/portfolio/calc";
+import { cn } from "@/lib/utils";
 import { DOWN, UP } from "./palette";
 
-type Key = "name" | "quantity" | "price" | "value" | "share" | "change24h";
+export type HoldingsTableRow = PortfolioRow & PeriodChanges;
 
-const COLUMNS: { key: Key; label: string; right?: boolean }[] = [
+type Key = "name" | "quantity" | "price" | "value" | "share" | "change24h" | "change7d" | "change1m" | "change1y";
+
+const COLUMNS: { key: Key; label: string }[] = [
   { key: "name", label: "Ativo" },
-  { key: "quantity", label: "Quantidade", right: true },
-  { key: "price", label: "Preço", right: true },
-  { key: "value", label: "Valor US$", right: true },
-  { key: "share", label: "%", right: true },
-  { key: "change24h", label: "24h", right: true },
+  { key: "quantity", label: "Quantidade" },
+  { key: "price", label: "Preço" },
+  { key: "value", label: "Valor US$" },
+  { key: "share", label: "%" },
+  { key: "change24h", label: "24h" },
+  { key: "change7d", label: "7D" },
+  { key: "change1m", label: "1M" },
+  { key: "change1y", label: "1A" },
 ];
 
-function sortValue(r: PortfolioRow, key: Key): string | number | null {
+function sortValue(r: HoldingsTableRow, key: Key): string | number | null {
   if (key === "name") return r.name.toLowerCase();
   if (key === "quantity") return Number(r.quantity);
   return r[key];
 }
 
-export function HoldingsTable({ rows }: { rows: PortfolioRow[] }) {
+/** Variação em % (ex.: 2.5 = 2,5%) com seta e cor; "—" quando não há dado. */
+function Change({ value }: { value: number | null }) {
+  if (value === null) return <>—</>;
+  return (
+    <span style={{ color: value >= 0 ? UP : DOWN }}>
+      {value >= 0 ? "▲" : "▼"} {formatPct(Math.abs(value) / 100)}
+    </span>
+  );
+}
+
+export function HoldingsTable({ rows }: { rows: HoldingsTableRow[] }) {
   const [sort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "value", desc: true });
 
   const sorted = [...rows].sort((a, b) => {
@@ -39,6 +55,9 @@ export function HoldingsTable({ rows }: { rows: PortfolioRow[] }) {
   const toggle = (key: Key) =>
     setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== "name" }));
 
+  // Todas as colunas centralizadas, menos "Ativo".
+  const align = (key: Key) => (key === "name" ? "text-left" : "text-center");
+
   return (
     <div className="rounded-xl border">
       <Table>
@@ -47,7 +66,7 @@ export function HoldingsTable({ rows }: { rows: PortfolioRow[] }) {
             {COLUMNS.map((c) => (
               <TableHead
                 key={c.key}
-                className={c.right ? "text-right" : undefined}
+                className={align(c.key)}
                 aria-sort={sort.key === c.key ? (sort.desc ? "descending" : "ascending") : "none"}
               >
                 <button type="button" onClick={() => toggle(c.key)} className="hover:text-foreground">
@@ -61,7 +80,7 @@ export function HoldingsTable({ rows }: { rows: PortfolioRow[] }) {
         <TableBody>
           {sorted.map((r) => (
             <TableRow key={r.id}>
-              <TableCell>
+              <TableCell className="text-left">
                 <span className="font-medium uppercase">{r.symbol}</span>
                 {r.name !== r.symbol && <span className="ml-1 text-muted-foreground">{r.name}</span>}
                 {r.price === null && (
@@ -70,16 +89,21 @@ export function HoldingsTable({ rows }: { rows: PortfolioRow[] }) {
                   </Badge>
                 )}
               </TableCell>
-              <TableCell className="text-right tabular-nums">{formatQty(r.quantity)}</TableCell>
-              <TableCell className="text-right tabular-nums">{r.price === null ? "—" : formatPrice(r.price)}</TableCell>
-              <TableCell className="text-right tabular-nums">{r.value === null ? "—" : formatUsd(r.value)}</TableCell>
-              <TableCell className="text-right tabular-nums">{r.share === null ? "—" : formatPct(r.share)}</TableCell>
-              <TableCell
-                className="text-right tabular-nums"
-                style={{ color: r.change24h === null ? undefined : r.change24h >= 0 ? UP : DOWN }}
-              >
-                {r.change24h === null ? "—" : `${r.change24h >= 0 ? "▲" : "▼"} ${formatPct(Math.abs(r.change24h) / 100)}`}
+              <TableCell className={cn(align("quantity"), "tabular-nums")}>{formatQty(r.quantity)}</TableCell>
+              <TableCell className={cn(align("price"), "tabular-nums")}>
+                {r.price === null ? "—" : formatPrice(r.price)}
               </TableCell>
+              <TableCell className={cn(align("value"), "tabular-nums")}>
+                {r.value === null ? "—" : formatUsd(r.value)}
+              </TableCell>
+              <TableCell className={cn(align("share"), "tabular-nums")}>
+                {r.share === null ? "—" : formatPct(r.share)}
+              </TableCell>
+              {(["change24h", "change7d", "change1m", "change1y"] as const).map((k) => (
+                <TableCell key={k} className={cn(align(k), "tabular-nums")}>
+                  <Change value={r[k]} />
+                </TableCell>
+              ))}
             </TableRow>
           ))}
         </TableBody>
