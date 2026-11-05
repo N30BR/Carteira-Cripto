@@ -169,7 +169,7 @@ Fluxo do dashboard: `requireUser()` → `listHoldings(userId)` → `getCurrentPr
 3. `npm run dev` → `http://localhost:3000`
 
 ### Produção (Easypanel)
-- Serviço **App** apontando para o repositório Git, build pelo `Dockerfile` (Next.js `standalone`, Node 22, porta 3000), **1 réplica**.
+- Serviço **App** apontando para o repositório Git, build pelo `Dockerfile` (Next.js `standalone`, Node 22), **1 réplica**. Porta do app: a da variável `PORT` (o Easypanel costuma definir 80; sem ela, 3000). A porta do domínio no Easypanel precisa ser a mesma.
 - **Volume** montado em `/app/data`. Na inicialização o container ajusta o dono da pasta e roda o app como usuário não-root `node`.
 - Variáveis: `ADMIN_USERNAME` e `ADMIN_PASSWORD` (só no primeiro deploy), opcionais `APP_DOMAIN`, `TRUSTED_PROXY_HOPS`, `APP_TIMEZONE`, `BINANCE_BASE_URL`.
 - Domínio com HTTPS configurado no Easypanel.

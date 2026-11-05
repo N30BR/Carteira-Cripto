@@ -35,7 +35,7 @@ Não precisa de chave. O app usa a API pública de dados de mercado da Binance (
 2. Em **Build**, escolha **Dockerfile** (o arquivo `Dockerfile` da raiz).
 3. Deixe **1 réplica**. O banco é um arquivo SQLite e não pode ser dividido entre containers.
 4. Em **Mounts**, adicione um **Volume** montado em `/app/data`. **Sem esse volume, todos os dados somem a cada deploy.**
-5. Em **Domains**, configure seu domínio. O Easypanel cuida do HTTPS. A porta interna é `3000`.
+5. Em **Domains**, configure seu domínio. O Easypanel cuida do HTTPS. A porta do domínio precisa ser a mesma em que o app escuta. O Easypanel costuma definir `PORT=80` sozinho, e o log mostra `Local: http://localhost:80`. Nesse caso, use **80**. Se o log mostrar outra porta (sem a variável, o padrão do Dockerfile é `3000`), use essa. Com portas diferentes, o site não abre.
 
 ### 3. Variáveis de ambiente
 
