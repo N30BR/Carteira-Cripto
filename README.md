@@ -74,6 +74,6 @@ Faça backup com regularidade: perder o volume apaga todas as carteiras e contas
 
 ## Atualizar o app no Easypanel
 
-1. **Faça um backup antes:** no console do serviço, rode . As atualizações que mudam o banco (como as tabelas do fiduciário) aplicam a mudança sozinhas ao iniciar, e o backup é a garantia caso algo dê errado.
-2. Envie o código para o GitHub ().
-3. No Easypanel, clique em **Implantar** e acompanhe os logs até aparecer .
+1. **Faça um backup antes:** no console do serviço, rode `node scripts/backup.mjs`. As atualizações que mudam o banco (como as tabelas do fiduciário) aplicam a mudança sozinhas ao iniciar, e o backup é a garantia caso algo dê errado.
+2. Envie o código para o GitHub (`git push`).
+3. No Easypanel, clique em **Implantar** e acompanhe os logs até aparecer `✓ Ready`.
