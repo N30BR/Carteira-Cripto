@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Carteira Cripto
 
-## Getting Started
+Dashboard da carteira de criptoativos com login. Cada pessoa vê só a própria carteira: o saldo total, a curva de capital (7D, 30D, 1A), a distribuição por ativo e a tabela de ativos. Os preços vêm da CoinGecko.
 
-First, run the development server:
+Next.js 16 · SQLite (Drizzle) · Tailwind + shadcn/ui · Recharts.
+
+## Desenvolvimento
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run create-admin      # pergunta usuário e senha do primeiro admin
+npm run dev               # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Testes:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm test                  # unidade e integração (Vitest)
+npx playwright install chromium
+npm run test:e2e          # ponta a ponta (CoinGecko simulada)
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploy no Easypanel
 
-## Learn More
+### 1. Chave da CoinGecko (gratuita)
 
-To learn more about Next.js, take a look at the following resources:
+Sem chave, a CoinGecko bloqueia servidores com frequência (erro 429) e o gráfico fica sem histórico.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Crie uma conta em <https://www.coingecko.com/en/developers/dashboard>.
+2. Gere uma chave do plano **Demo**.
+3. Guarde a chave para o passo 3.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 2. Criar o serviço
 
-## Deploy on Vercel
+1. No Easypanel, crie um **App** apontando para este repositório Git (GitHub ou GitLab).
+2. Em **Build**, escolha **Dockerfile** (o arquivo `Dockerfile` da raiz).
+3. Deixe **1 réplica**. O banco é um arquivo SQLite e não pode ser dividido entre containers.
+4. Em **Mounts**, adicione um **Volume** montado em `/app/data`. **Sem esse volume, todos os dados somem a cada deploy.**
+5. Em **Domains**, configure seu domínio. O Easypanel cuida do HTTPS. A porta interna é `3000`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 3. Variáveis de ambiente
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Variável | Valor | Quando |
+|---|---|---|
+| `COINGECKO_API_KEY` | sua chave Demo | sempre |
+| `ADMIN_USERNAME` | ex.: `pedro` | só no 1º deploy |
+| `ADMIN_PASSWORD` | senha forte (mín. 8) | só no 1º deploy |
+| `APP_DOMAIN` | ex.: `carteira.seudominio.com` | opcional: use se as ações de formulário derem erro de origem |
+| `TRUSTED_PROXY_HOPS` | `1` (padrão) ou `2` com Cloudflare na frente | opcional |
+| `APP_TIMEZONE` | `America/Sao_Paulo` (padrão) | opcional |
+
+No primeiro start, se o banco estiver vazio, o app cria o administrador com `ADMIN_USERNAME`/`ADMIN_PASSWORD` e mostra no log `Administrador inicial criado: <usuario>`. **Depois do primeiro login, apague essas duas variáveis** no Easypanel.
+
+Os demais usuários são criados na tela **Admin**. Não há cadastro público.
+
+### 4. Backup
+
+O banco fica no volume, em `/app/data/app.db`. Há duas formas de fazer backup:
+
+- **Pelo console do serviço no Easypanel:**
+  ```bash
+  node scripts/backup.mjs
+  ```
+  O comando gera `/app/data/backups/app-AAAA-MM-DD.db`, uma cópia segura mesmo com o app rodando. Baixe o arquivo pelo Easypanel ou copie para fora da VPS.
+- **Pelo backup de volumes do Easypanel**, se estiver disponível no seu plano.
+
+Faça backup com regularidade: perder o volume apaga todas as carteiras e contas.
+
+### Segurança, em resumo
+
+- As senhas são guardadas com argon2. O cookie de sessão é `httpOnly`, `secure` e `__Host-`, e o banco guarda só o hash da sessão.
+- Depois de 5 erros de senha, a conta fica bloqueada por 15 min. O admin pode desbloquear antes.
+- Cada IP tem um limite de 20 falhas de login a cada 15 min. O IP vem do cabeçalho que o proxy do Easypanel acrescenta.
+- Para quem tenta entrar, conta bloqueada e senha errada mostram a mesma mensagem.
