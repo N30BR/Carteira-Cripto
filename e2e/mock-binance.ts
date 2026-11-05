@@ -1,15 +1,22 @@
 // Binance falsa para os testes de ponta a ponta (porta 4010).
+// BTC a US$ 60.000 e 1 USDT = R$ 5, para os valores do teste serem fáceis de conferir.
 import http from "node:http";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 
-/** Velas com fechamento subindo de 50000 a 60000 ao longo do período. */
-function klines(count: number, stepMs: number): unknown[][] {
+const PRICES: Record<string, { last: string; change: string; from: number; to: number }> = {
+  BTCUSDT: { last: "60000.00", change: "1.500", from: 50000, to: 60000 },
+  USDTBRL: { last: "5.00", change: "0.000", from: 5, to: 5 },
+};
+
+/** Velas com fechamento indo de `from` a `to` ao longo do período. */
+function klines(pair: string, count: number, stepMs: number): unknown[][] {
+  const { from, to } = PRICES[pair];
   const now = Date.now();
   return Array.from({ length: count }, (_, i) => {
     const close = now - (count - 1 - i) * stepMs;
-    const price = 50000 + (10000 * i) / (count - 1);
+    const price = from + ((to - from) * i) / (count - 1);
     return [close - stepMs, "0", "0", "0", String(price), "0", close];
   });
 }
@@ -26,11 +33,13 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === "/api/v3/ticker/24hr") {
     const symbols: string[] = JSON.parse(url.searchParams.get("symbols") ?? "[]");
-    if (symbols.some((s) => s !== "BTCUSDT")) return send({ code: -1121, msg: "Invalid symbol." }, 400);
-    return send([{ symbol: "BTCUSDT", lastPrice: "60000.00", priceChangePercent: "1.500" }]);
+    if (symbols.some((s) => !PRICES[s])) return send({ code: -1121, msg: "Invalid symbol." }, 400);
+    return send(symbols.map((s) => ({ symbol: s, lastPrice: PRICES[s].last, priceChangePercent: PRICES[s].change })));
   }
-  if (url.pathname === "/api/v3/klines" && url.searchParams.get("symbol") === "BTCUSDT") {
-    return send(url.searchParams.get("interval") === "1d" ? klines(365, DAY) : klines(720, HOUR));
+  const pair = url.searchParams.get("symbol") ?? "";
+  if (url.pathname === "/api/v3/klines" && PRICES[pair]) {
+    const limit = Number(url.searchParams.get("limit"));
+    return send(url.searchParams.get("interval") === "1d" ? klines(pair, limit, DAY) : klines(pair, limit, HOUR));
   }
   res.writeHead(404).end();
 });
