@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
-import { adjustChange, parseCurrency } from "@/lib/currency";
+import { adjustChange, pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { listAccounts, listBalances } from "@/lib/fiat/accounts";
 import { FIAT_PERIODS, buildFiatCurve, computeFiat, parseFiatPeriod } from "@/lib/fiat/calc";
@@ -26,7 +26,7 @@ export default async function FiatDashboardPage({ searchParams }: PageProps<"/fi
   const user = await requireUser();
   const params = await searchParams;
   const period = parseFiatPeriod(params.periodo);
-  const requested = parseCurrency(params.moeda ?? (await cookies()).get(COOKIE)?.value, "BRL");
+  const requested = pickCurrency(params.moeda, (await cookies()).get(COOKIE)?.value, "BRL");
   const db = getDb();
   const accounts = listAccounts(db, user.id);
 

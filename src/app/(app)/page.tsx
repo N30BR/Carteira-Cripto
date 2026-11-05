@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
-import { adjustChange, parseCurrency } from "@/lib/currency";
+import { adjustChange, pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { listHoldings } from "@/lib/holdings/holdings";
 import { getCurrentPrices, getHistory } from "@/lib/prices";
@@ -26,7 +26,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   const user = await requireUser();
   const params = await searchParams;
   const period = parsePeriod(params.periodo);
-  const requested = parseCurrency(params.moeda ?? (await cookies()).get(COOKIE)?.value, "USDT");
+  const requested = pickCurrency(params.moeda, (await cookies()).get(COOKIE)?.value, "USDT");
   const db = getDb();
   const holdings = listHoldings(db, user.id);
 
@@ -52,10 +52,12 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   // Histórico só das moedas com preço. Os dois são usados: 30 dias (7D/30D e variações 24h/7D/1M)
   // e 1 ano (1A e variação 1A); cada um fica guardado por 1 hora.
   const priced = ids.filter((id) => current.prices[id]);
+  // Com a referência em BTC, o mesmo preço do BTC da carteira entra na conversão (BTC vale exatamente ₿ 1).
+  const btcPrice = current.prices.BTC ?? (await getCurrentPrices(db, ["BTC"], now)).prices.BTC;
   const [hist30, hist365, view] = await Promise.all([
     getHistory(db, priced, "30D", now),
     getHistory(db, priced, "1A", now),
-    resolveCurrency(db, "USDT", requested, "USDT", now),
+    resolveCurrency(db, "USDT", requested, "USDT", now, { btcUsdt: btcPrice }),
   ]);
   const hist = PERIODS[period].sourceDays === 365 ? hist365 : hist30;
   const portfolio = computePortfolio(holdings, current.prices);
@@ -64,7 +66,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   // Tudo é calculado em USDT e convertido aqui para a moeda escolhida.
   const f = view.factorNow;
   const fAgo = (days: number) => view.factorAt(now.getTime() - days * DAY);
-  const [f1, f7, f30, f365] = [fAgo(1), fAgo(7), fAgo(30), fAgo(365)];
+  const [f1, f7, f30, f365] = [view.factor24hAgo, fAgo(7), fAgo(30), fAgo(365)];
   const tableRows = portfolio.rows.map((r) => {
     const c = changes[r.coinId];
     return {

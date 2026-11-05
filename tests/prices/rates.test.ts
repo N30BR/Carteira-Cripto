@@ -32,14 +32,28 @@ describe("getRates", () => {
     });
     const db = testDb();
     const t0 = new Date("2026-01-01T00:00:00Z");
-    expect(await getRates(db, t0)).toEqual({ usdtBrl: 5.4, btcUsdt: 80000, fetchedAt: t0, stale: false });
+    expect(await getRates(db, t0)).toEqual({
+      usdtBrl: 5.4,
+      btcUsdt: 80000,
+      usdtBrlChange24h: 0,
+      btcUsdtChange24h: 0,
+      fetchedAt: t0,
+      stale: false,
+    });
     await getRates(db, new Date(t0.getTime() + 30_000));
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
   test("sem resposta e sem cache: cotações nulas, sem lançar", async () => {
     stub(() => json({}, 503));
-    expect(await getRates(testDb())).toEqual({ usdtBrl: null, btcUsdt: null, fetchedAt: null, stale: false });
+    expect(await getRates(testDb())).toEqual({
+      usdtBrl: null,
+      btcUsdt: null,
+      usdtBrlChange24h: null,
+      btcUsdtChange24h: null,
+      fetchedAt: null,
+      stale: false,
+    });
   });
 });
 

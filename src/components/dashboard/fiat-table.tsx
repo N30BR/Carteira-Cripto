@@ -12,6 +12,8 @@ function formatDate(d: string): string {
 
 function Change({ value }: { value: number | null }) {
   if (value === null) return <>—</>;
+  // Arredondado a 0,00%: sem seta e sem cor (evita "▼ 0,00%" em vermelho).
+  if (Math.round(Math.abs(value) * 100) === 0) return <span className="text-muted-foreground">0,00%</span>;
   return (
     <span style={{ color: value >= 0 ? UP : DOWN }}>
       {value >= 0 ? "▲" : "▼"} {formatPct(Math.abs(value) / 100)}

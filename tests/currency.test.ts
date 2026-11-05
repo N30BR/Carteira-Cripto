@@ -74,3 +74,15 @@ describe("formatMoney", () => {
     expect(formatMoneyPrice(0.0123, "BTC")).toBe("₿ 0,01230000");
   });
 });
+
+import { pickCurrency } from "@/lib/currency";
+
+describe("pickCurrency", () => {
+  test("URL válida > cookie válido > padrão", () => {
+    expect(pickCurrency("BRL", "BTC", "USDT")).toBe("BRL");
+    expect(pickCurrency("EUR", "BTC", "USDT")).toBe("BTC");
+    expect(pickCurrency(undefined, "BTC", "USDT")).toBe("BTC");
+    expect(pickCurrency("EUR", "XYZ", "USDT")).toBe("USDT");
+    expect(pickCurrency(["BRL", "BTC"], undefined, "USDT")).toBe("USDT");
+  });
+});

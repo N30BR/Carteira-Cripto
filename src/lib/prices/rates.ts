@@ -11,14 +11,21 @@ const RATE_TTL = 60_000;
 const HISTORY_TTL = 60 * 60_000;
 
 export type Rates = { usdtBrl: number | null; btcUsdt: number | null };
+/** Cotações atuais com a variação % de 24h de cada par (para saber a cotação de 24h atrás). */
+export type CurrentRates = Rates & { usdtBrlChange24h: number | null; btcUsdtChange24h: number | null };
 export type RateHistory = { usdtBrl: PricePoint[]; btcUsdt: PricePoint[] };
 
-export async function getRates(db: Db, now = new Date()): Promise<Rates & { fetchedAt: Date | null; stale: boolean }> {
-  const r = await cached(db, "rates:now", RATE_TTL, async () => {
+export async function getRates(db: Db, now = new Date()): Promise<CurrentRates & { fetchedAt: Date | null; stale: boolean }> {
+  const r = await cached(db, "rates:now:v2", RATE_TTL, async (): Promise<CurrentRates> => {
     const t = await fetchPairTickers([BTC_USDT, USDT_BRL]);
-    return { usdtBrl: t[USDT_BRL]?.usd ?? null, btcUsdt: t[BTC_USDT]?.usd ?? null };
+    return {
+      usdtBrl: t[USDT_BRL]?.usd ?? null,
+      btcUsdt: t[BTC_USDT]?.usd ?? null,
+      usdtBrlChange24h: t[USDT_BRL]?.change24h ?? null,
+      btcUsdtChange24h: t[BTC_USDT]?.change24h ?? null,
+    };
   }, now);
-  if (!r) return { usdtBrl: null, btcUsdt: null, fetchedAt: null, stale: false };
+  if (!r) return { usdtBrl: null, btcUsdt: null, usdtBrlChange24h: null, btcUsdtChange24h: null, fetchedAt: null, stale: false };
   return { ...r.data, fetchedAt: r.fetchedAt, stale: r.stale };
 }
 

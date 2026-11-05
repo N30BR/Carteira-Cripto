@@ -11,6 +11,11 @@ export function parseCurrency(raw: unknown, fallback: RefCurrency): RefCurrency 
   return (CURRENCIES as string[]).includes(s) ? (s as RefCurrency) : fallback;
 }
 
+/** Moeda pedida na URL; se inválida, a lembrada no cookie; senão, a padrão. */
+export function pickCurrency(param: unknown, cookie: unknown, fallback: RefCurrency): RefCurrency {
+  return parseCurrency(param, parseCurrency(cookie, fallback));
+}
+
 /** Quanto vale 1 unidade de `base` em `cur`; null quando falta a cotação necessária. */
 export function factor(base: BaseCurrency, cur: RefCurrency, rates: Rates): number | null {
   if (base === cur) return 1;

@@ -51,3 +51,30 @@ describe("resolveCurrency", () => {
     expect(v.warning).toBe("Cotação de BTC indisponível no momento, mostrando em USDT.");
   });
 });
+
+describe("BTC como referência usa o mesmo preço da carteira", () => {
+  test("override do preço do BTC: fator agora e de 24h atrás batem com o ticker da carteira", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("ticker/24hr")) {
+        return json([{ symbol: "USDTBRL", lastPrice: "5", priceChangePercent: "0" }, { symbol: "BTCUSDT", lastPrice: "99", priceChangePercent: "1" }]);
+      }
+      return json([kline(1, "50")]);
+    }));
+    const v = await resolveCurrency(testDb(), "USDT", "BTC", "USDT", now, { btcUsdt: { usd: 100, change24h: 25 } });
+    expect(v.factorNow).toBeCloseTo(1 / 100, 12);
+    expect(v.factor24hAgo).toBeCloseTo(1 / 80, 12);
+  });
+
+  test("sem override, 24h atrás vem da variação 24h do ticker de cotação", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("ticker/24hr")) {
+        return json([{ symbol: "USDTBRL", lastPrice: "5.5", priceChangePercent: "10" }, { symbol: "BTCUSDT", lastPrice: "1", priceChangePercent: "0" }]);
+      }
+      return json([kline(1, "5")]);
+    }));
+    const v = await resolveCurrency(testDb(), "USDT", "BRL", "USDT", now);
+    expect(v.factor24hAgo).toBeCloseTo(5, 12);
+  });
+});
