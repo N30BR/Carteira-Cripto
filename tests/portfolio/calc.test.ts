@@ -100,6 +100,11 @@ describe("buildCurve", () => {
     expect(r.points[r.points.length - 1].value).toBe(6);
   });
 
+  test("nenhuma moeda com histórico: sem pontos (o gráfico mostra indisponível)", () => {
+    const r = buildCurve([H("bitcoin", "btc", "1")], {}, { bitcoin: { usd: 5, change24h: 0 } }, "1A", now);
+    expect(r).toEqual({ points: [], missingHistory: ["BTC"] });
+  });
+
   test("sem moedas com preço não há pontos", () => {
     expect(buildCurve([H("bitcoin", "btc", "1")], {}, {}, "7D", now)).toEqual({ points: [], missingHistory: [] });
   });

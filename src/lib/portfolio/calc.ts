@@ -75,6 +75,8 @@ export function buildCurve(
       pts: [...history[h.coinId]].sort((a, b) => a[0] - b[0]),
       i: -1,
     }));
+  // Sem nenhum histórico a curva seria uma linha em zero: melhor não desenhar.
+  if (!series.length) return { points: [], missingHistory };
 
   const { days, stepMs } = PERIODS[period];
   const end = now.getTime();

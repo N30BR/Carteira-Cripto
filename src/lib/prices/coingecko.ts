@@ -32,7 +32,10 @@ async function get<T>(path: string, params: Record<string, string>): Promise<T> 
       res = await fetch(url, { headers, cache: "no-store" });
     }
     if (!res.ok) throw new Error(`CoinGecko ${res.status} em ${path}`);
-    return (await res.json()) as T;
+    const body = await res.json();
+    // A CoinGecko às vezes responde 200 com o erro no corpo (ex.: limite atingido).
+    if (body?.status?.error_code) throw new Error(`CoinGecko ${body.status.error_code} em ${path}`);
+    return body as T;
   });
 }
 

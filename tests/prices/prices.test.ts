@@ -52,6 +52,20 @@ describe("getCurrentPrices", () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
+  test("erro no corpo com HTTP 200 é tratado como falha (não grava cache vazio)", async () => {
+    vi.useFakeTimers();
+    const db = testDb();
+    stubFetch(() => json({ bitcoin: { usd: 1, usd_24h_change: 0 } }));
+    const t0 = new Date("2026-01-01T00:00:00Z");
+    await getCurrentPrices(db, ["bitcoin"], t0);
+    stubFetch(() => json({ status: { error_code: 429, error_message: "rate" } }));
+    const p = getCurrentPrices(db, ["bitcoin"], new Date(t0.getTime() + 120_000));
+    await vi.runAllTimersAsync();
+    const r = await p;
+    expect(r.prices).toEqual({ bitcoin: { usd: 1, change24h: 0 } });
+    expect(r.stale).toBe(true);
+  });
+
   test("lista vazia não chama a API", async () => {
     const fn = stubFetch(() => json({}));
     expect(await getCurrentPrices(testDb(), [])).toEqual({ prices: {}, fetchedAt: null, stale: false });
