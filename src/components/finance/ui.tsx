@@ -8,6 +8,9 @@ import { DOWN, UP } from "@/components/dashboard/palette";
 export const BLUE = "#4C66DD";
 /** Saldos patrimoniais no Resumo: nem entrada nem saída. */
 export const NEUTRAL = "#60A5FA";
+/** Tons claros para a variação cripto (informativa), distintos de entradas e saídas. */
+export const SOFT_UP = "#86EFAC";
+export const SOFT_DOWN = "#FCA5A5";
 export { DOWN, UP };
 
 /** Cores das contas de cartão (até 4). */
@@ -48,12 +51,15 @@ export function SignedMoney({
   testId,
   currency = "BRL",
   neutral,
+  soft,
 }: {
   cents: number;
   className?: string;
   testId?: string;
   currency?: RefCurrency;
   neutral?: boolean;
+  /** Tons claros (variação cripto, informativa). */
+  soft?: boolean;
 }) {
   if (cents === 0 || neutral) {
     return (
@@ -69,17 +75,21 @@ export function SignedMoney({
   }
   const up = cents > 0;
   return (
-    <span className={cn("font-semibold whitespace-nowrap tabular-nums", className)} style={{ color: up ? UP : DOWN }} data-testid={testId}>
+    <span
+      className={cn("font-semibold whitespace-nowrap tabular-nums", className)}
+      style={{ color: soft ? (up ? SOFT_UP : SOFT_DOWN) : up ? UP : DOWN }}
+      data-testid={testId}
+    >
       {up ? "+" : "-"} {money(Math.abs(cents), currency)}
     </span>
   );
 }
 
 /** Etiqueta "↑ Entrada" (verde), "↓ Saída" (vermelha) ou neutra (saldo). */
-export function KindBadge({ kind, label }: { kind: "in" | "out" | "neutral"; label?: string }) {
+export function KindBadge({ kind, label, soft }: { kind: "in" | "out" | "neutral"; label?: string; soft?: boolean }) {
   const up = kind === "in";
   const Icon = kind === "neutral" ? Scale : up ? ArrowUp : ArrowDown;
-  const color = kind === "neutral" ? NEUTRAL : up ? UP : DOWN;
+  const color = kind === "neutral" ? NEUTRAL : up ? (soft ? SOFT_UP : UP) : soft ? SOFT_DOWN : DOWN;
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium"

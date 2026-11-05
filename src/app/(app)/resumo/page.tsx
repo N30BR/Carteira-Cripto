@@ -21,7 +21,7 @@ import { appTimeZone, todayIn } from "@/lib/validation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ComponentBars, ComponentPie } from "@/components/finance/charts";
-import { BLUE, DOWN, KindBadge, MINOR, NEUTRAL, SectionTitle, SignedMoney, StatCard, TotalChip, TotalsBar, UP, dateBr } from "@/components/finance/ui";
+import { BLUE, DOWN, KindBadge, MINOR, NEUTRAL, SOFT_DOWN, SOFT_UP, SectionTitle, SignedMoney, StatCard, TotalChip, TotalsBar, UP, dateBr } from "@/components/finance/ui";
 import { PeriodHeader } from "@/components/finance/period-header";
 
 export const metadata = { title: "Resumo · Carteira Cripto" };
@@ -45,8 +45,12 @@ const SHORT: Record<ComponentKey, string> = {
   outflow: "Saídas",
   variation: "Variação",
 };
-// Saldos neutros (azul); variação informativa em verde/vermelho conforme o sinal.
-const toneColor = (tone: Tone, v: number | null) => (tone === "neutral" ? NEUTRAL : tone === "out" || (tone === "info" && (v ?? 0) < 0) ? DOWN : UP);
+// Saldos neutros (azul); variação informativa em verde/vermelho claros conforme o sinal.
+const toneColor = (tone: Tone, v: number | null) => {
+  if (tone === "neutral") return NEUTRAL;
+  if (tone === "info") return (v ?? 0) < 0 ? SOFT_DOWN : SOFT_UP;
+  return tone === "out" ? DOWN : UP;
+};
 
 export default async function SummaryPage({ searchParams }: PageProps<"/resumo">) {
   const user = await requireUser();
@@ -147,7 +151,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
     return c.signedCents === null ? (
       <span className="text-base text-muted-foreground">Indisponível</span>
     ) : (
-      <SignedMoney cents={c.signedCents} currency={currency} neutral={c.tone === "neutral"} testId={`sum-${key}`} />
+      <SignedMoney cents={c.signedCents} currency={currency} neutral={c.tone === "neutral"} soft={c.tone === "info"} testId={`sum-${key}`} />
     );
   };
   const items = summary.components.map((c) => ({ ...c, short: SHORT[c.key] }));
@@ -234,7 +238,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                 {byKey.variation.signedCents === null ? (
                   <span className="text-muted-foreground">—</span>
                 ) : (
-                  <SignedMoney cents={byKey.variation.signedCents} currency={currency} testId="sum-variation-panel" />
+                  <SignedMoney cents={byKey.variation.signedCents} currency={currency} soft testId="sum-variation-panel" />
                 )}
               </dd>
             </div>
@@ -302,6 +306,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                         <KindBadge
                           kind={c.tone === "info" ? (!c.signedCents ? "neutral" : c.signedCents < 0 ? "out" : "in") : c.tone}
                           label={c.classification}
+                          soft={c.tone === "info"}
                         />
                       </TableCell>
                       <TableCell className="text-right">{valueOf(c.key)}</TableCell>

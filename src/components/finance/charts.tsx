@@ -179,9 +179,12 @@ function componentColors(items: ComponentDatum[]): Record<string, string> {
     }),
   );
 }
-// Saldos em azul; a variação (informativa) em verde ou vermelho conforme o sinal.
-const barColor = (c: ComponentDatum) =>
-  c.tone === "neutral" ? NEUTRAL : c.tone === "out" || (c.tone === "info" && (c.signedCents ?? 0) < 0) ? DOWN : UP;
+// Saldos em azul; a variação (informativa) em verde ou vermelho claros, conforme o sinal.
+const barColor = (c: ComponentDatum) => {
+  if (c.tone === "neutral") return NEUTRAL;
+  if (c.tone === "info") return (c.signedCents ?? 0) < 0 ? "#FCA5A5" : "#86EFAC";
+  return c.tone === "out" ? DOWN : UP;
+};
 
 /** Uma barra por componente com a magnitude; a cor diz se é saldo (azul), soma (verde) ou subtrai (vermelho). */
 export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDatum[]; currency?: RefCurrency }) {
