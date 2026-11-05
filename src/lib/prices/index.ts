@@ -1,28 +1,49 @@
 import type { Db } from "@/db/client";
 import { PERIODS, type CurrentPrice, type Period, type PricePoint } from "@/lib/portfolio/calc";
 import { normalizeSearch } from "@/lib/validation";
-import { cached, pruneExpired, readCache, writeCache } from "./cache";
-import { fetchMarketChart, fetchSearch, fetchSimplePrices, type CoinSearchResult } from "./coingecko";
+import { cached, readCache, writeCache } from "./cache";
+import { QUOTE, fetchKlines, fetchTickers, fetchUsdtAssets } from "./binance";
+import { coinName } from "./coin-names";
 
-export type { CoinSearchResult };
+export type CoinSearchResult = { id: string; symbol: string; name: string };
 
 const PRICE_TTL = 60_000;
 const HISTORY_TTL = 60 * 60_000;
-const SEARCH_TTL = 24 * 60 * 60_000;
+const LISTING_TTL = 24 * 60 * 60_000;
+const DAY = 86_400_000;
+
+/** Moedas com par USDT ativo na Binance. O próprio USDT vale US$ 1 e não tem par. */
+async function listedAssets(db: Db, now: Date): Promise<Set<string>> {
+  const r = await cached(db, "assets:usdt", LISTING_TTL, fetchUsdtAssets, now);
+  return new Set([...(r?.data ?? []), QUOTE]);
+}
+
+export async function isListedAsset(db: Db, id: string, now = new Date()): Promise<boolean> {
+  return (await listedAssets(db, now)).has(id);
+}
 
 export async function getCurrentPrices(
   db: Db,
   ids: string[],
   now = new Date(),
 ): Promise<{ prices: Record<string, CurrentPrice>; fetchedAt: Date | null; stale: boolean }> {
+  const prices: Record<string, CurrentPrice> = {};
+  let fetchedAt: Date | null = null;
+  let stale = false;
+
   const unique = [...new Set(ids)].sort();
+  if (!unique.length) return { prices, fetchedAt, stale };
+  if (unique.includes(QUOTE)) prices[QUOTE] = { usd: 1, change24h: 0 };
+
+  const listed = await listedAssets(db, now);
   // Cache por moeda: adicionar uma moeda nova não descarta o preço guardado das outras.
-  const hits = new Map(unique.map((id) => [id, readCache<CurrentPrice>(db, `price:${id}`, now)]));
-  const toFetch = unique.filter((id) => !hits.get(id) || hits.get(id)!.stale);
+  const coins = unique.filter((id) => id !== QUOTE && listed.has(id));
+  const hits = new Map(coins.map((id) => [id, readCache<CurrentPrice>(db, `price:${id}`, now)]));
+  const toFetch = coins.filter((id) => !hits.get(id) || hits.get(id)!.stale);
 
   if (toFetch.length) {
     try {
-      const fresh = await fetchSimplePrices(toFetch);
+      const fresh = await fetchTickers(toFetch);
       for (const [id, price] of Object.entries(fresh)) {
         writeCache(db, `price:${id}`, price, PRICE_TTL, now);
         hits.set(id, { data: price, fetchedAt: now, stale: false });
@@ -32,9 +53,6 @@ export async function getCurrentPrices(
     }
   }
 
-  const prices: Record<string, CurrentPrice> = {};
-  let fetchedAt: Date | null = null;
-  let stale = false;
   for (const [id, hit] of hits) {
     if (!hit) continue;
     prices[id] = hit.data;
@@ -51,12 +69,18 @@ export async function getHistory(
   now = new Date(),
 ): Promise<{ history: Record<string, PricePoint[]>; oldestFetchedAt: Date | null; stale: boolean }> {
   const days = PERIODS[period].sourceDays;
-  const results = await Promise.all(
-    [...new Set(ids)].map(async (id) => [id, await cached(db, `chart:${id}:${days}`, HISTORY_TTL, () => fetchMarketChart(id, days), now)] as const),
-  );
   const history: Record<string, PricePoint[]> = {};
   let oldest: Date | null = null;
   let stale = false;
+
+  const unique = [...new Set(ids)];
+  if (unique.includes(QUOTE)) history[QUOTE] = [[now.getTime() - days * DAY, 1], [now.getTime(), 1]];
+
+  const listed = await listedAssets(db, now);
+  const coins = unique.filter((id) => id !== QUOTE && listed.has(id));
+  const results = await Promise.all(
+    coins.map(async (id) => [id, await cached(db, `chart:${id}:${days}`, HISTORY_TTL, () => fetchKlines(id, days), now)] as const),
+  );
   for (const [id, r] of results) {
     if (!r) continue;
     history[id] = r.data;
@@ -66,10 +90,23 @@ export async function getHistory(
   return { history, oldestFetchedAt: oldest, stale };
 }
 
+/** Busca local na lista de moedas da Binance: símbolo exato, prefixo do símbolo, prefixo e trecho do nome. */
 export async function searchCoins(db: Db, query: string, now = new Date()): Promise<CoinSearchResult[]> {
   const q = normalizeSearch(query);
   if (!q) return [];
-  const r = await cached(db, `search:${q}`, SEARCH_TTL, () => fetchSearch(q), now);
-  pruneExpired(db, "search:", now);
-  return r?.data ?? [];
+  const Q = q.toUpperCase();
+  const rank = (id: string): number => {
+    const name = coinName(id).toLowerCase();
+    if (id === Q) return 0;
+    if (id.startsWith(Q)) return 1;
+    if (name.startsWith(q)) return 2;
+    if (name.includes(q)) return 3;
+    return -1;
+  };
+  return [...(await listedAssets(db, now))]
+    .map((id) => ({ id, r: rank(id) }))
+    .filter((x) => x.r >= 0)
+    .sort((a, b) => a.r - b.r || a.id.localeCompare(b.id))
+    .slice(0, 10)
+    .map(({ id }) => ({ id, symbol: id, name: coinName(id) }));
 }

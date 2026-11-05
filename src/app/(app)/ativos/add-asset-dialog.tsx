@@ -18,7 +18,7 @@ import { formatQty, quantityToInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addHoldingAction } from "./actions";
 
-type Coin = { id: string; symbol: string; name: string; thumb: string };
+type Coin = { id: string; symbol: string; name: string };
 
 export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
   const [open, setOpen] = useState(false);
@@ -79,7 +79,7 @@ export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
     e.preventDefault();
     if (!coin) return;
     start(async () => {
-      const r = await addHoldingAction({ id: coin.id, symbol: coin.symbol, name: coin.name }, quantity);
+      const r = await addHoldingAction(coin.id, quantity);
       if (r.ok) {
         toast.success(owned[coin.id] ? `${coin.name} atualizado` : `${coin.name} adicionado`);
         reset(false);
@@ -95,14 +95,14 @@ export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Adicionar ativo</DialogTitle>
-          <DialogDescription>Busque pelo nome ou símbolo e informe a quantidade.</DialogDescription>
+          <DialogDescription>Moedas negociadas na Binance contra USDT. Busque pelo símbolo ou nome.</DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <Label htmlFor="coin-search">Moeda</Label>
             <Input
               id="coin-search"
-              placeholder="Ex.: bitcoin, sol, link"
+              placeholder="Ex.: BTC, Solana, LINK"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               autoComplete="off"
@@ -122,10 +122,8 @@ export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
                         coin?.id === c.id && "bg-muted",
                       )}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      {c.thumb && <img src={c.thumb} alt="" className="size-5 rounded-full" />}
-                      <span className="font-medium">{c.name}</span>
-                      <span className="text-muted-foreground uppercase">{c.symbol}</span>
+                      <span className="font-medium">{c.symbol}</span>
+                      {c.name !== c.symbol && <span className="text-muted-foreground">{c.name}</span>}
                       {owned[c.id] && <span className="ml-auto text-xs text-muted-foreground">na carteira</span>}
                     </button>
                   </li>
@@ -135,7 +133,7 @@ export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
           </div>
           {coin && (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="coin-qty">Quantidade de {coin.symbol.toUpperCase()}</Label>
+              <Label htmlFor="coin-qty">Quantidade de {coin.symbol}</Label>
               <Input
                 id="coin-qty"
                 inputMode="decimal"

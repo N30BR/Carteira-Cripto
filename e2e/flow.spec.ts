@@ -19,11 +19,11 @@ test("login, adicionar ativo, ver dashboard, trocar período e sair", async ({ p
   // Adicionar 0,5 BTC
   await page.goto("/ativos");
   await page.getByRole("button", { name: "Adicionar ativo" }).click();
-  await page.getByLabel("Moeda").fill("bit");
+  await page.getByLabel("Moeda").fill("btc");
   await page.getByRole("option", { name: /Bitcoin/ }).click();
   await page.getByLabel(/Quantidade de BTC/).fill("0,5");
   await page.getByRole("button", { name: "Salvar" }).click();
-  await expect(page.getByRole("row", { name: /Bitcoin/ })).toContainText("0,5");
+  await expect(page.getByRole("row", { name: /BTC/ })).toContainText("0,5");
 
   // Dashboard
   await page.goto("/");

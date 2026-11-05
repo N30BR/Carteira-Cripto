@@ -4,43 +4,49 @@ import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
 import { deleteHolding, updateQuantity, upsertHolding } from "@/lib/holdings/holdings";
+import { isListedAsset } from "@/lib/prices";
+import { coinName } from "@/lib/prices/coin-names";
 import { parseQuantity } from "@/lib/validation";
 
 type Result = { ok: true } | { ok: false; error: string };
 
-export async function addHoldingAction(
-  coin: { id: string; symbol: string; name: string },
-  rawQuantity: string,
-): Promise<Result> {
-  const user = await requireUser();
-  const q = parseQuantity(rawQuantity);
-  if (!q.ok) return q;
-  if (!coin.id || coin.id.length > 100) return { ok: false, error: "Escolha uma moeda da lista" };
-  const r = upsertHolding(getDb(), user.id, {
-    coinId: coin.id,
-    symbol: coin.symbol.slice(0, 20),
-    name: coin.name.slice(0, 100),
-    quantity: q.value,
-  });
+function refresh() {
   revalidatePath("/ativos");
   revalidatePath("/");
+}
+
+export async function addHoldingAction(coinId: string, rawQuantity: string): Promise<Result> {
+  const user = await requireUser();
+  if (typeof coinId !== "string" || !/^[A-Z0-9]{1,20}$/.test(coinId)) {
+    return { ok: false, error: "Escolha uma moeda da lista" };
+  }
+  const q = parseQuantity(String(rawQuantity ?? ""));
+  if (!q.ok) return q;
+  const db = getDb();
+  if (!(await isListedAsset(db, coinId))) return { ok: false, error: "Moeda não encontrada na Binance" };
+
+  // Símbolo e nome definidos aqui, não pelo navegador.
+  const r = upsertHolding(db, user.id, { coinId, symbol: coinId, name: coinName(coinId), quantity: q.value });
+  refresh();
   return r;
 }
 
 export async function updateHoldingAction(holdingId: number, rawQuantity: string): Promise<Result> {
   const user = await requireUser();
-  const q = parseQuantity(rawQuantity);
+  const q = parseQuantity(String(rawQuantity ?? ""));
   if (!q.ok) return q;
-  if (!updateQuantity(getDb(), user.id, holdingId, q.value)) return { ok: false, error: "Ativo não encontrado" };
-  revalidatePath("/ativos");
-  revalidatePath("/");
+  if (!Number.isInteger(holdingId) || !updateQuantity(getDb(), user.id, holdingId, q.value)) {
+    return { ok: false, error: "Ativo não encontrado" };
+  }
+  refresh();
   return { ok: true };
 }
 
 export async function deleteHoldingAction(holdingId: number): Promise<Result> {
   const user = await requireUser();
-  if (!deleteHolding(getDb(), user.id, holdingId)) return { ok: false, error: "Ativo não encontrado" };
-  revalidatePath("/ativos");
-  revalidatePath("/");
+  if (!Number.isInteger(holdingId) || !deleteHolding(getDb(), user.id, holdingId)) {
+    return { ok: false, error: "Ativo não encontrado" };
+  }
+  refresh();
   return { ok: true };
 }

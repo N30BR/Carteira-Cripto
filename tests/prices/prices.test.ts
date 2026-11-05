@@ -1,21 +1,44 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { testDb } from "../helpers/db";
-import { fetchMarketChart, resetCoinGeckoState } from "@/lib/prices/coingecko";
-import { getCurrentPrices, getHistory, searchCoins } from "@/lib/prices";
+import { fetchKlines, resetBinanceState } from "@/lib/prices/binance";
+import { getCurrentPrices, getHistory, isListedAsset, searchCoins } from "@/lib/prices";
 
 type Handler = (url: URL, init?: RequestInit) => Promise<Response> | Response;
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
+const EXCHANGE_INFO = {
+  symbols: [
+    { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING" },
+    { symbol: "SOLUSDT", baseAsset: "SOL", quoteAsset: "USDT", status: "TRADING" },
+    { symbol: "SOLBTC", baseAsset: "SOL", quoteAsset: "BTC", status: "TRADING" },
+    { symbol: "OLDUSDT", baseAsset: "OLD", quoteAsset: "USDT", status: "BREAK" },
+    { symbol: "BITUSDT", baseAsset: "BIT", quoteAsset: "USDT", status: "TRADING" },
+  ],
+};
+
+const ticker = (symbol: string, lastPrice: string, priceChangePercent: string) => ({
+  symbol,
+  lastPrice,
+  priceChangePercent,
+});
+const kline = (closeTime: number, close: string) => [closeTime - 1, "0", "0", "0", close, "0", closeTime];
+
+/** Responde exchangeInfo sempre; o resto vem do handler do teste. */
 function stubFetch(handler: Handler) {
-  const fn = vi.fn((input: string | URL, init?: RequestInit) => Promise.resolve(handler(new URL(String(input)), init)));
+  const fn = vi.fn((input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/api/v3/exchangeInfo") return Promise.resolve(json(EXCHANGE_INFO));
+    return Promise.resolve(handler(url, init));
+  });
   vi.stubGlobal("fetch", fn);
   return fn;
 }
+const calls = (fn: ReturnType<typeof stubFetch>, path: string) =>
+  fn.mock.calls.map((c) => new URL(String(c[0]))).filter((u) => u.pathname === path);
 
 beforeEach(() => {
-  resetCoinGeckoState();
-  vi.stubEnv("COINGECKO_BASE_URL", "https://cg.test/api/v3");
-  vi.stubEnv("COINGECKO_API_KEY", "");
+  resetBinanceState();
+  vi.stubEnv("BINANCE_BASE_URL", "https://bn.test");
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -23,59 +46,102 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("getCurrentPrices", () => {
-  test("monta a URL de simple/price e converte a resposta", async () => {
-    const fn = stubFetch(() => json({ bitcoin: { usd: 60000, usd_24h_change: 1.5 }, ethereum: { usd: 3000 } }));
-    const r = await getCurrentPrices(testDb(), ["ethereum", "bitcoin"]);
-    const url = new URL(String(fn.mock.calls[0][0]));
-    expect(url.pathname).toBe("/api/v3/simple/price");
-    expect(url.searchParams.get("ids")).toBe("bitcoin,ethereum");
-    expect(url.searchParams.get("vs_currencies")).toBe("usd");
-    expect(url.searchParams.get("include_24hr_change")).toBe("true");
-    expect(r.prices).toEqual({ bitcoin: { usd: 60000, change24h: 1.5 }, ethereum: { usd: 3000, change24h: null } });
-    expect(r.stale).toBe(false);
-  });
-
-  test("envia a chave Demo quando configurada", async () => {
-    vi.stubEnv("COINGECKO_API_KEY", "k123");
-    const fn = stubFetch(() => json({}));
-    await getCurrentPrices(testDb(), ["bitcoin"]);
-    const headers = new Headers(fn.mock.calls[0][1]?.headers);
-    expect(headers.get("x-cg-demo-api-key")).toBe("k123");
-  });
-
-  test("429 sem cache: tenta de novo uma vez e devolve vazio sem lançar", async () => {
-    vi.useFakeTimers();
-    const fn = stubFetch(() => json({ error: "rate" }, 429));
-    const p = getCurrentPrices(testDb(), ["bitcoin"]);
-    await vi.runAllTimersAsync();
-    expect(await p).toEqual({ prices: {}, fetchedAt: null, stale: false });
-    expect(fn).toHaveBeenCalledTimes(2);
-  });
-
-  test("erro no corpo com HTTP 200 é tratado como falha (não grava cache vazio)", async () => {
-    vi.useFakeTimers();
+describe("lista de moedas", () => {
+  test("só pares USDT ativos contam como listados; USDT também", async () => {
+    stubFetch(() => json([]));
     const db = testDb();
-    stubFetch(() => json({ bitcoin: { usd: 1, usd_24h_change: 0 } }));
-    const t0 = new Date("2026-01-01T00:00:00Z");
-    await getCurrentPrices(db, ["bitcoin"], t0);
-    stubFetch(() => json({ status: { error_code: 429, error_message: "rate" } }));
-    const p = getCurrentPrices(db, ["bitcoin"], new Date(t0.getTime() + 120_000));
-    await vi.runAllTimersAsync();
-    const r = await p;
-    expect(r.prices).toEqual({ bitcoin: { usd: 1, change24h: 0 } });
-    expect(r.stale).toBe(true);
+    expect(await isListedAsset(db, "BTC")).toBe(true);
+    expect(await isListedAsset(db, "USDT")).toBe(true);
+    expect(await isListedAsset(db, "OLD")).toBe(false);
+    expect(await isListedAsset(db, "NADA")).toBe(false);
   });
 
-  test("lista vazia não chama a API", async () => {
-    const fn = stubFetch(() => json({}));
-    expect(await getCurrentPrices(testDb(), [])).toEqual({ prices: {}, fetchedAt: null, stale: false });
+  test("busca por símbolo e nome: exato primeiro, depois prefixo, com nome amigável", async () => {
+    stubFetch(() => json([]));
+    const r = await searchCoins(testDb(), "bit");
+    expect(r.map((c) => c.id)).toEqual(["BIT", "BTC"]);
+    expect(r[1]).toEqual({ id: "BTC", symbol: "BTC", name: "Bitcoin" });
+    expect((await searchCoins(testDb(), "sol"))[0]).toEqual({ id: "SOL", symbol: "SOL", name: "Solana" });
+  });
+
+  test("termo curto não busca", async () => {
+    const fn = stubFetch(() => json([]));
+    expect(await searchCoins(testDb(), "b")).toEqual([]);
     expect(fn).not.toHaveBeenCalled();
   });
 });
 
-describe("fila de requisições", () => {
-  test("nunca mais de 2 em andamento", async () => {
+describe("getCurrentPrices", () => {
+  test("pede só pares listados e converte a resposta; USDT vale 1", async () => {
+    const fn = stubFetch(() => json([ticker("BTCUSDT", "60000.5", "1.5"), ticker("SOLUSDT", "100", "-2")]));
+    const r = await getCurrentPrices(testDb(), ["SOL", "BTC", "USDT", "NADA"]);
+    const req = calls(fn, "/api/v3/ticker/24hr")[0];
+    expect(JSON.parse(req.searchParams.get("symbols")!)).toEqual(["BTCUSDT", "SOLUSDT"]);
+    expect(r.prices).toEqual({
+      BTC: { usd: 60000.5, change24h: 1.5 },
+      SOL: { usd: 100, change24h: -2 },
+      USDT: { usd: 1, change24h: 0 },
+    });
+    expect(r.stale).toBe(false);
+  });
+
+  test("lista vazia não chama a API", async () => {
+    const fn = stubFetch(() => json([]));
+    expect(await getCurrentPrices(testDb(), [])).toEqual({ prices: {}, fetchedAt: null, stale: false });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  test("429 sem cache: tenta de novo uma vez e devolve vazio sem lançar", async () => {
+    vi.useFakeTimers();
+    const fn = stubFetch(() => json({ code: -1003 }, 429));
+    const p = getCurrentPrices(testDb(), ["BTC"]);
+    await vi.runAllTimersAsync();
+    expect(await p).toEqual({ prices: {}, fetchedAt: null, stale: false });
+    expect(calls(fn, "/api/v3/ticker/24hr")).toHaveLength(2);
+  });
+
+  test("adicionar uma moeda não perde o preço antigo das outras quando a API falha", async () => {
+    const db = testDb();
+    const t0 = new Date("2026-01-01T00:00:00Z");
+    stubFetch(() => json([ticker("BTCUSDT", "100", "1")]));
+    await getCurrentPrices(db, ["BTC"], t0);
+    resetBinanceState();
+    stubFetch(() => json({}, 500));
+    const r = await getCurrentPrices(db, ["BTC", "SOL"], new Date(t0.getTime() + 120_000));
+    expect(r.prices).toEqual({ BTC: { usd: 100, change24h: 1 } });
+    expect(r.stale).toBe(true);
+    expect(r.fetchedAt).toEqual(t0);
+  });
+
+  test("só busca as moedas sem preço válido no cache", async () => {
+    const db = testDb();
+    const fn = stubFetch((url) =>
+      json(JSON.parse(url.searchParams.get("symbols")!).map((s: string) => ticker(s, "1", "0"))),
+    );
+    await getCurrentPrices(db, ["BTC"]);
+    await getCurrentPrices(db, ["BTC", "SOL"]);
+    const reqs = calls(fn, "/api/v3/ticker/24hr");
+    expect(JSON.parse(reqs[1].searchParams.get("symbols")!)).toEqual(["SOLUSDT"]);
+  });
+});
+
+describe("resiliência", () => {
+  test("depois de uma falha, pausa a API por 60 s", async () => {
+    const fn = stubFetch(() => json({}, 500));
+    const db = testDb();
+    await getCurrentPrices(db, ["BTC"]);
+    await getHistory(db, ["BTC", "SOL"], "30D");
+    expect(calls(fn, "/api/v3/ticker/24hr")).toHaveLength(1);
+    expect(calls(fn, "/api/v3/klines")).toHaveLength(0);
+  });
+
+  test("toda requisição tem timeout", async () => {
+    const fn = stubFetch(() => json([]));
+    await getCurrentPrices(testDb(), ["BTC"]);
+    for (const c of fn.mock.calls) expect(c[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("nunca mais de 2 requisições em andamento", async () => {
     let inFlight = 0;
     let max = 0;
     stubFetch(async () => {
@@ -83,89 +149,44 @@ describe("fila de requisições", () => {
       max = Math.max(max, inFlight);
       await new Promise((r) => setTimeout(r, 5));
       inFlight--;
-      return json({ prices: [[1, 2]] });
+      return json([kline(1, "2")]);
     });
-    await Promise.all([1, 2, 3, 4, 5].map((i) => fetchMarketChart(`c${i}`, 30)));
+    await Promise.all(["A", "B", "C", "D", "E"].map((id) => fetchKlines(id, 30)));
     expect(max).toBe(2);
   });
 });
 
 describe("getHistory", () => {
-  test("7D e 30D usam a mesma busca de 30 dias", async () => {
-    const fn = stubFetch(() => json({ prices: [[1000, 5]] }));
+  test("7D e 30D usam as mesmas velas de 1 h dos últimos 30 dias", async () => {
+    const fn = stubFetch(() => json([kline(1000, "5")]));
     const db = testDb();
-    const a = await getHistory(db, ["bitcoin"], "7D");
-    const b = await getHistory(db, ["bitcoin"], "30D");
-    expect(fn).toHaveBeenCalledTimes(1);
-    expect(new URL(String(fn.mock.calls[0][0])).searchParams.get("days")).toBe("30");
-    expect(a.history).toEqual({ bitcoin: [[1000, 5]] });
+    const a = await getHistory(db, ["BTC"], "7D");
+    const b = await getHistory(db, ["BTC"], "30D");
+    const reqs = calls(fn, "/api/v3/klines");
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0].searchParams.get("symbol")).toBe("BTCUSDT");
+    expect(reqs[0].searchParams.get("interval")).toBe("1h");
+    expect(reqs[0].searchParams.get("limit")).toBe("720");
+    expect(a.history).toEqual({ BTC: [[1000, 5]] });
     expect(b.history).toEqual(a.history);
   });
 
-  test("1A busca 365 dias; moeda que falha sem cache fica de fora", async () => {
-    const fn = stubFetch((url) => (url.pathname.includes("/ruim/") ? json({}, 500) : json({ prices: [[1, 1]] })));
-    const r = await getHistory(testDb(), ["bitcoin", "ruim"], "1A");
-    expect(new URL(String(fn.mock.calls[0][0])).searchParams.get("days")).toBe("365");
-    expect(Object.keys(r.history)).toEqual(["bitcoin"]);
-    expect(r.oldestFetchedAt).toBeInstanceOf(Date);
-  });
-});
-
-describe("searchCoins", () => {
-  test("termo curto não chama a API", async () => {
-    const fn = stubFetch(() => json({ coins: [] }));
-    expect(await searchCoins(testDb(), "b")).toEqual([]);
-    expect(fn).not.toHaveBeenCalled();
+  test("1A usa velas diárias; moeda não listada fica de fora sem chamar a API", async () => {
+    const fn = stubFetch(() => json([kline(1, "1")]));
+    const r = await getHistory(testDb(), ["BTC", "NADA"], "1A");
+    const reqs = calls(fn, "/api/v3/klines");
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0].searchParams.get("interval")).toBe("1d");
+    expect(reqs[0].searchParams.get("limit")).toBe("365");
+    expect(Object.keys(r.history)).toEqual(["BTC"]);
   });
 
-  test("normaliza o termo, limita a 10 e usa cache", async () => {
-    const coins = Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, symbol: `C${i}`, name: `Coin ${i}`, thumb: "t", extra: 1 }));
-    const fn = stubFetch(() => json({ coins }));
-    const db = testDb();
-    const r = await searchCoins(db, "  BIT ");
-    await searchCoins(db, "bit");
-    expect(fn).toHaveBeenCalledTimes(1);
-    expect(new URL(String(fn.mock.calls[0][0])).searchParams.get("query")).toBe("bit");
-    expect(r).toHaveLength(10);
-    expect(r[0]).toEqual({ id: "c0", symbol: "C0", name: "Coin 0", thumb: "t" });
-  });
-});
-
-describe("resiliência", () => {
-  test("depois de uma falha, pausa a API por 60 s em vez de repetir tudo", async () => {
-    const fn = stubFetch(() => json({}, 500));
-    const db = testDb();
-    await getCurrentPrices(db, ["bitcoin"]);
-    await getHistory(db, ["bitcoin", "solana"], "30D");
-    expect(fn).toHaveBeenCalledTimes(1);
-  });
-
-  test("toda requisição tem timeout", async () => {
-    const fn = stubFetch(() => json({}));
-    await getCurrentPrices(testDb(), ["bitcoin"]);
-    expect(fn.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
-  });
-
-  test("adicionar uma moeda não perde o preço antigo das outras quando a API falha", async () => {
-    const db = testDb();
-    const t0 = new Date("2026-01-01T00:00:00Z");
-    stubFetch(() => json({ bitcoin: { usd: 100, usd_24h_change: 1 } }));
-    await getCurrentPrices(db, ["bitcoin"], t0);
-    resetCoinGeckoState();
-    stubFetch(() => json({}, 500));
-    const r = await getCurrentPrices(db, ["bitcoin", "solana"], new Date(t0.getTime() + 120_000));
-    expect(r.prices).toEqual({ bitcoin: { usd: 100, change24h: 1 } });
-    expect(r.stale).toBe(true);
-    expect(r.fetchedAt).toEqual(t0);
-  });
-
-  test("só busca na API as moedas sem preço válido no cache", async () => {
-    const db = testDb();
-    const fn = stubFetch((url) =>
-      json(Object.fromEntries((url.searchParams.get("ids") ?? "").split(",").map((id) => [id, { usd: 1 }]))),
-    );
-    await getCurrentPrices(db, ["bitcoin"]);
-    await getCurrentPrices(db, ["bitcoin", "solana"]);
-    expect(new URL(String(fn.mock.calls[1][0])).searchParams.get("ids")).toBe("solana");
+  test("USDT tem histórico fixo em 1 sem chamar a API", async () => {
+    const fn = stubFetch(() => json([]));
+    const now = new Date("2026-03-01T00:00:00Z");
+    const r = await getHistory(testDb(), ["USDT"], "30D", now);
+    expect(calls(fn, "/api/v3/klines")).toHaveLength(0);
+    expect(r.history.USDT[0][1]).toBe(1);
+    expect(r.history.USDT[0][0]).toBeLessThanOrEqual(now.getTime() - 30 * 86_400_000);
   });
 });

@@ -1,7 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { testDb } from "../helpers/db";
-import { priceCache } from "@/db/schema";
-import { cached, pruneExpired } from "@/lib/prices/cache";
+import { cached } from "@/lib/prices/cache";
 
 const t0 = new Date("2026-01-01T00:00:00Z");
 const at = (ms: number) => new Date(t0.getTime() + ms);
@@ -38,12 +37,4 @@ describe("cached", () => {
     expect(await cached(db, "k", 60_000, async () => { throw new Error("x"); }, t0)).toBeNull();
   });
 
-  test("pruneExpired apaga só o prefixo indicado e só os expirados", async () => {
-    const db = testDb();
-    await cached(db, "search:a", 1000, async () => 1, t0);
-    await cached(db, "search:b", 100_000, async () => 1, t0);
-    await cached(db, "price:x", 1000, async () => 1, t0);
-    pruneExpired(db, "search:", at(5000));
-    expect(db.select().from(priceCache).all().map((r) => r.key).sort()).toEqual(["price:x", "search:b"]);
-  });
 });

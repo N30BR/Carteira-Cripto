@@ -11,8 +11,8 @@ export default defineConfig({
   use: { baseURL: "http://localhost:3100" },
   webServer: [
     {
-      command: "npx tsx e2e/mock-coingecko.ts",
-      url: "http://localhost:4010/api/v3/search",
+      command: "npx tsx e2e/mock-binance.ts",
+      url: "http://localhost:4010/api/v3/exchangeInfo",
       reuseExistingServer: false,
     },
     {
@@ -23,7 +23,7 @@ export default defineConfig({
       env: {
         PORT: "3100",
         DATABASE_PATH: dbPath,
-        COINGECKO_BASE_URL: "http://localhost:4010/api/v3",
+        BINANCE_BASE_URL: "http://localhost:4010",
         ADMIN_USERNAME: "admin",
         ADMIN_PASSWORD: "senha-forte-123",
         COOKIE_SECURE: "false",

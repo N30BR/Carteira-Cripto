@@ -1,6 +1,6 @@
 # Carteira Cripto
 
-Dashboard da carteira de criptoativos com login. Cada pessoa vê só a própria carteira: o saldo total, a curva de capital (7D, 30D, 1A), a distribuição por ativo e a tabela de ativos. Os preços vêm da CoinGecko.
+Dashboard da carteira de criptoativos com login. Cada pessoa vê só a própria carteira: o saldo total, a curva de capital (7D, 30D, 1A), a distribuição por ativo e a tabela de ativos. Os preços vêm da API pública da Binance (pares contra USDT, sem chave).
 
 Next.js 16 · SQLite (Drizzle) · Tailwind + shadcn/ui · Recharts.
 
@@ -17,18 +17,17 @@ Testes:
 ```bash
 npm test                  # unidade e integração (Vitest)
 npx playwright install chromium
-npm run test:e2e          # ponta a ponta (CoinGecko simulada)
+npm run test:e2e          # ponta a ponta (Binance simulada)
 ```
 
 ## Deploy no Easypanel
 
-### 1. Chave da CoinGecko (gratuita)
+### 1. Preços (Binance)
 
-Sem chave, a CoinGecko bloqueia servidores com frequência (erro 429) e o gráfico fica sem histórico.
+Não precisa de chave. O app usa a API pública de dados de mercado da Binance (`data-api.binance.vision`).
 
-1. Crie uma conta em <https://www.coingecko.com/en/developers/dashboard>.
-2. Gere uma chave do plano **Demo**.
-3. Guarde a chave para o passo 3.
+- Só entram moedas negociadas na Binance contra **USDT**. O preço em USDT é tratado como dólar (1 USDT ≈ US$ 1).
+- A Binance bloqueia alguns países, como os **EUA**. Se a VPS estiver num deles, os preços não carregam: escolha uma VPS em outra região ou aponte `BINANCE_BASE_URL` para outro endpoint compatível.
 
 ### 2. Criar o serviço
 
@@ -42,12 +41,12 @@ Sem chave, a CoinGecko bloqueia servidores com frequência (erro 429) e o gráfi
 
 | Variável | Valor | Quando |
 |---|---|---|
-| `COINGECKO_API_KEY` | sua chave Demo | sempre |
 | `ADMIN_USERNAME` | ex.: `pedro` | só no 1º deploy |
 | `ADMIN_PASSWORD` | senha forte (mín. 8) | só no 1º deploy |
 | `APP_DOMAIN` | ex.: `carteira.seudominio.com` | opcional: use se as ações de formulário derem erro de origem |
 | `TRUSTED_PROXY_HOPS` | `1` (padrão) ou `2` com Cloudflare na frente | opcional |
 | `APP_TIMEZONE` | `America/Sao_Paulo` (padrão) | opcional |
+| `BINANCE_BASE_URL` | `https://data-api.binance.vision` (padrão) | opcional |
 
 No primeiro start, se o banco estiver vazio, o app cria o administrador com `ADMIN_USERNAME`/`ADMIN_PASSWORD` e mostra no log `Administrador inicial criado: <usuario>`. **Depois do primeiro login, apague essas duas variáveis** no Easypanel.
 

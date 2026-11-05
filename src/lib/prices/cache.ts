@@ -1,4 +1,4 @@
-import { and, eq, like, lt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { priceCache } from "@/db/schema";
 
@@ -37,8 +37,3 @@ export async function cached<T>(
   }
 }
 
-export function pruneExpired(db: Db, prefix: string, now = new Date()): void {
-  db.delete(priceCache)
-    .where(and(like(priceCache.key, `${prefix}%`), lt(priceCache.expiresAt, now)))
-    .run();
-}
