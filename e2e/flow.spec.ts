@@ -44,6 +44,22 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Período
   await page.getByRole("link", { name: "1S", exact: true }).click();
   await expect(page).toHaveURL(/periodo=1S/);
+  await expect(page.getByTestId("total-changes")).toContainText("1S");
+  await page.getByRole("link", { name: "6M", exact: true }).click();
+  await expect(page).toHaveURL(/periodo=6M/);
+
+  // Escolher as variações da tabela pela seta ao lado de "Ativos"
+  const heads = page.locator("thead th");
+  await expect(heads).toHaveText(["Ativo", "Quantidade", "Preço", "Valor ↓", "%", "24H", "1S", "1M", "6M", "1A"]);
+  await page.getByRole("button", { name: "Escolher períodos da tabela" }).click();
+  await page.getByRole("button", { name: "Ocultar 1S" }).click();
+  await expect(heads).toHaveText(["Ativo", "Quantidade", "Preço", "Valor ↓", "%", "24H", "1M", "6M", "1A"]);
+  await page.reload();
+  await expect(heads).toHaveCount(9);
+  await page.getByRole("button", { name: "Escolher períodos da tabela" }).click();
+  await page.getByRole("button", { name: "Mostrar 1S" }).click();
+  await expect(heads).toHaveCount(10);
+  await page.keyboard.press("Escape");
 
   // Trocar o Cripto para BRL (1 USDT = R$ 5)
   await page.getByRole("button", { name: /Moeda de referência/ }).click();

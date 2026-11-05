@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { Holding } from "@/lib/holdings/holdings";
-import { PERIODS, buildCurve, computePortfolio, parsePeriod, type PricePoint } from "@/lib/portfolio/calc";
+import { PERIODS, buildCurve, computePortfolio, PERIOD_OPTIONS, parsePeriod, type PricePoint } from "@/lib/portfolio/calc";
 
 const H = (coinId: string, symbol: string, quantity: string, id = 1): Holding => ({ id, coinId, symbol, name: coinId, quantity });
 const HOUR = 3600_000;
@@ -49,7 +49,9 @@ describe("computePortfolio", () => {
 });
 
 describe("periods", () => {
-  test("parsePeriod aceita os três e cai em 30D", () => {
+  test("parsePeriod aceita os seis períodos e cai em 1M", () => {
+    for (const p of ["1D", "1S", "1M", "3M", "6M", "1A"]) expect(parsePeriod(p)).toBe(p);
+    expect(PERIOD_OPTIONS).toEqual(["1D", "1S", "1M", "3M", "6M", "1A"]);
     expect(parsePeriod("1S")).toBe("1S");
     expect(parsePeriod("1M")).toBe("1M");
     expect(parsePeriod("7D")).toBe("1S");
@@ -63,6 +65,9 @@ describe("periods", () => {
     expect(PERIODS["1S"]).toEqual({ days: 7, stepMs: HOUR, sourceDays: 30 });
     expect(PERIODS["1M"]).toEqual({ days: 30, stepMs: 4 * HOUR, sourceDays: 30 });
     expect(PERIODS["1A"]).toEqual({ days: 365, stepMs: 24 * HOUR, sourceDays: 365 });
+    expect(PERIODS["1D"]).toEqual({ days: 1, stepMs: HOUR, sourceDays: 30 });
+    expect(PERIODS["3M"]).toEqual({ days: 90, stepMs: 24 * HOUR, sourceDays: 365 });
+    expect(PERIODS["6M"]).toEqual({ days: 182, stepMs: 24 * HOUR, sourceDays: 365 });
   });
 });
 

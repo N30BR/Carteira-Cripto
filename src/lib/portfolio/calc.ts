@@ -43,20 +43,23 @@ export function computePortfolio(holdings: Holding[], prices: Record<string, Cur
   return { rows, total, change24hUsd: delta, change24hPct: rows.length && base > 0 ? delta / base : null };
 }
 
-export type Period = "1S" | "1M" | "1A";
+export type Period = "1D" | "1S" | "1M" | "3M" | "6M" | "1A";
+export const PERIOD_OPTIONS: readonly Period[] = ["1D", "1S", "1M", "3M", "6M", "1A"];
 
 const HOUR = 3600_000;
 export const PERIODS: Record<Period, { days: number; stepMs: number; sourceDays: 30 | 365 }> = {
+  "1D": { days: 1, stepMs: HOUR, sourceDays: 30 },
   "1S": { days: 7, stepMs: HOUR, sourceDays: 30 },
   "1M": { days: 30, stepMs: 4 * HOUR, sourceDays: 30 },
+  "3M": { days: 90, stepMs: 24 * HOUR, sourceDays: 365 },
+  "6M": { days: 182, stepMs: 24 * HOUR, sourceDays: 365 },
   "1A": { days: 365, stepMs: 24 * HOUR, sourceDays: 365 },
 };
 
 /** Aceita também os nomes antigos (7D, 30D) de links salvos. */
 export function parsePeriod(raw: unknown): Period {
-  if (raw === "1S" || raw === "7D") return "1S";
-  if (raw === "1A") return "1A";
-  return "1M";
+  if (raw === "7D") return "1S";
+  return (PERIOD_OPTIONS as readonly unknown[]).includes(raw) ? (raw as Period) : "1M";
 }
 
 /**

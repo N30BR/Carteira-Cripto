@@ -6,7 +6,7 @@ import { adjustChange, pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { listHoldings } from "@/lib/holdings/holdings";
 import { getCurrentPrices, getHistory } from "@/lib/prices";
-import { PERIODS, buildCurve, computePortfolio, parsePeriod, periodChanges, totalChange } from "@/lib/portfolio/calc";
+import { PERIODS, PERIOD_OPTIONS, buildCurve, computePortfolio, parsePeriod, periodChanges, totalChange } from "@/lib/portfolio/calc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AllocationDonut } from "@/components/dashboard/allocation-donut";
@@ -49,8 +49,8 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   const now = new Date();
   const ids = holdings.map((h) => h.coinId);
   const current = await getCurrentPrices(db, ids, now);
-  // Histórico só das moedas com preço. Os dois são usados: 30 dias (7D/30D e variações 24h/7D/1M)
-  // e 1 ano (1A e variação 1A); cada um fica guardado por 1 hora.
+  // Histórico só das moedas com preço. Os dois são usados: 30 dias (1D/1S/1M) e 1 ano (3M/6M/1A),
+  // no gráfico, no saldo e nas variações da tabela; cada um fica guardado por 1 hora.
   const priced = ids.filter((id) => current.prices[id]);
   // Com a referência em BTC, o mesmo preço do BTC da carteira entra na conversão (BTC vale exatamente ₿ 1).
   const btcPrice =
@@ -60,7 +60,6 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
     getHistory(db, priced, "1A", now),
     resolveCurrency(db, "USDT", requested, "USDT", now, { btcUsdt: btcPrice, historyDays: 365 }),
   ]);
-  const hist = PERIODS[period].sourceDays === 365 ? hist365 : hist30;
   const portfolio = computePortfolio(holdings, current.prices);
   const changes = periodChanges(ids, current.prices, hist30.history, hist365.history, now);
 
@@ -87,18 +86,20 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   const changeAbs = total !== null && pastTotal !== null ? total - pastTotal : 0;
   const changePct = portfolio.change24hPct !== null && pastTotal && pastTotal > 0 ? (changeAbs / pastTotal) * 100 : null;
 
-  // 3M e 6M do saldo total: mesmas moedas, preço de agora × preço de então, cada um pela cotação da sua época.
+  const hist = PERIODS[period].sourceDays === 365 ? hist365 : hist30;
+  // Variação do saldo no período escolhido: 1D pela variação de 24 h; os demais com as mesmas moedas,
+  // preço de agora × preço de então, cada um pela cotação da sua época.
   const longChange = (label: string, days: number, fPast: number): BalanceChange => {
-    const c = totalChange(holdings, current.prices, hist365.history, days, now);
+    const c = totalChange(holdings, current.prices, hist.history, days, now);
     if (!c) return { label, abs: 0, pct: null };
     const nowRef = c.now * f;
     const pastRef = c.past * fPast;
     return { label, abs: nowRef - pastRef, pct: pastRef > 0 ? (nowRef / pastRef - 1) * 100 : null };
   };
   const balanceChanges: BalanceChange[] = [
-    { label: "1D", abs: changeAbs, pct: changePct },
-    longChange("3M", 90, fAgo(90)),
-    longChange("6M", 182, f182),
+    period === "1D"
+      ? { label: "1D", abs: changeAbs, pct: changePct }
+      : longChange(period, PERIODS[period].days, fAgo(PERIODS[period].days)),
   ];
 
   const curve = buildCurve(holdings, hist.history, current.prices, period, now);
@@ -131,7 +132,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
               currency={view.currency}
             />
             <div className="flex items-center gap-2">
-              <PeriodSelector options={["1S", "1M", "1A"]} current={period} path="/" query={{ moeda: requested }} />
+              <PeriodSelector options={PERIOD_OPTIONS} current={period} path="/" query={{ moeda: requested }} />
               <CurrencyMenu current={view.currency} cookieName={COOKIE} />
             </div>
           </div>
@@ -148,10 +149,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
             <AllocationDonut rows={slices} currency={view.currency} />
           </CardContent>
         </Card>
-        <div className="flex flex-col gap-3">
-          <h2 className="font-medium">Ativos</h2>
-          <HoldingsTable rows={tableRows} currency={view.currency} />
-        </div>
+        <HoldingsTable rows={tableRows} currency={view.currency} />
       </div>
     </div>
   );

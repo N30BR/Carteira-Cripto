@@ -7,6 +7,7 @@ import { formatMoney, formatMoneyPrice, type RefCurrency } from "@/lib/currency"
 import { formatPct, formatQty } from "@/lib/format";
 import type { PeriodChanges, PortfolioRow } from "@/lib/portfolio/calc";
 import { cn } from "@/lib/utils";
+import { CHANGE_COLUMNS, ChangeColumnsMenu, useShownChanges, type ChangeKey } from "./change-columns-menu";
 import { DOWN, UP } from "./palette";
 
 export type HoldingsTableRow = PortfolioRow & PeriodChanges;
@@ -29,11 +30,7 @@ const COLUMNS: { key: Key; label: string }[] = [
   { key: "price", label: "Preço" },
   { key: "value", label: "Valor" },
   { key: "share", label: "%" },
-  { key: "change24h", label: "24h" },
-  { key: "change7d", label: "1S" },
-  { key: "change1m", label: "1M" },
-  { key: "change6m", label: "6M" },
-  { key: "change1y", label: "1A" },
+  ...CHANGE_COLUMNS,
 ];
 
 function sortValue(r: HoldingsTableRow, key: Key): string | number | null {
@@ -56,6 +53,8 @@ function Change({ value }: { value: number | null }) {
 
 export function HoldingsTable({ rows, currency }: { rows: HoldingsTableRow[]; currency: RefCurrency }) {
   const [sort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "value", desc: true });
+  const [shown, setShown] = useShownChanges();
+  const columns = COLUMNS.filter((c) => !c.key.startsWith("change") || shown.includes(c.key as ChangeKey));
 
   const sorted = [...rows].sort((a, b) => {
     const va = sortValue(a, sort.key);
@@ -73,55 +72,61 @@ export function HoldingsTable({ rows, currency }: { rows: HoldingsTableRow[]; cu
   const align = (key: Key) => (key === "name" ? "text-left" : "text-center");
 
   return (
-    <div className="rounded-xl border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {COLUMNS.map((c) => (
-              <TableHead
-                key={c.key}
-                className={align(c.key)}
-                aria-sort={sort.key === c.key ? (sort.desc ? "descending" : "ascending") : "none"}
-              >
-                <button type="button" onClick={() => toggle(c.key)} className="hover:text-foreground">
-                  {c.label}
-                  {sort.key === c.key && (sort.desc ? " ↓" : " ↑")}
-                </button>
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sorted.map((r) => (
-            <TableRow key={r.id}>
-              <TableCell className="text-left">
-                <span className="font-medium uppercase">{r.symbol}</span>
-                {r.name !== r.symbol && <span className="ml-1 text-muted-foreground">{r.name}</span>}
-                {r.price === null && (
-                  <Badge variant="outline" className="ml-2">
-                    sem preço
-                  </Badge>
-                )}
-              </TableCell>
-              <TableCell className={cn(align("quantity"), "tabular-nums")}>{formatQty(r.quantity)}</TableCell>
-              <TableCell className={cn(align("price"), "tabular-nums")}>
-                {r.price === null ? "—" : formatMoneyPrice(r.price, currency)}
-              </TableCell>
-              <TableCell className={cn(align("value"), "tabular-nums")}>
-                {r.value === null ? "—" : formatMoney(r.value, currency)}
-              </TableCell>
-              <TableCell className={cn(align("share"), "tabular-nums")}>
-                {r.share === null ? "—" : formatPct(r.share)}
-              </TableCell>
-              {(["change24h", "change7d", "change1m", "change6m", "change1y"] as const).map((k) => (
-                <TableCell key={k} className={cn(align(k), "tabular-nums")}>
-                  <Change value={r[k]} />
-                </TableCell>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-1.5">
+        <h2 className="font-medium">Ativos</h2>
+        <ChangeColumnsMenu shown={shown} onChange={setShown} />
+      </div>
+      <div className="rounded-xl border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {columns.map((c) => (
+                <TableHead
+                  key={c.key}
+                  className={align(c.key)}
+                  aria-sort={sort.key === c.key ? (sort.desc ? "descending" : "ascending") : "none"}
+                >
+                  <button type="button" onClick={() => toggle(c.key)} className="hover:text-foreground">
+                    {c.label}
+                    {sort.key === c.key && (sort.desc ? " ↓" : " ↑")}
+                  </button>
+                </TableHead>
               ))}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="text-left">
+                  <span className="font-medium uppercase">{r.symbol}</span>
+                  {r.name !== r.symbol && <span className="ml-1 text-muted-foreground">{r.name}</span>}
+                  {r.price === null && (
+                    <Badge variant="outline" className="ml-2">
+                      sem preço
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell className={cn(align("quantity"), "tabular-nums")}>{formatQty(r.quantity)}</TableCell>
+                <TableCell className={cn(align("price"), "tabular-nums")}>
+                  {r.price === null ? "—" : formatMoneyPrice(r.price, currency)}
+                </TableCell>
+                <TableCell className={cn(align("value"), "tabular-nums")}>
+                  {r.value === null ? "—" : formatMoney(r.value, currency)}
+                </TableCell>
+                <TableCell className={cn(align("share"), "tabular-nums")}>
+                  {r.share === null ? "—" : formatPct(r.share)}
+                </TableCell>
+                {shown.map((k) => (
+                  <TableCell key={k} className={cn(align(k), "tabular-nums")}>
+                    <Change value={r[k]} />
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

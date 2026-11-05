@@ -128,3 +128,15 @@
     @apply font-sans;
   }
 }
+/* Listas das caixas de seleção nativas (Cartão, Categoria...): o navegador abre a lista com fundo
+   branco, então os itens ficam em preto; o item escolhido fica branco sobre cinza-escuro. */
+@layer base {
+  select option {
+    background-color: #ffffff;
+    color: #0a0a0a;
+  }
+  select option:checked {
+    background-color: #3f3f46;
+    color: #ffffff;
+  }
+}

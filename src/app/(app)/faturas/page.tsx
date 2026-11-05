@@ -210,18 +210,18 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
               <TableHeader>
                 <TableRow>
                   <TableHead>Mês</TableHead>
-                  <TableHead className="text-right">Cartão PF</TableHead>
-                  <TableHead className="text-right">Cartão PJ</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-center">Cartão PF</TableHead>
+                  <TableHead className="text-center">Cartão PJ</TableHead>
+                  <TableHead className="text-center">Total</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {proj.months.map((p) => (
                   <TableRow key={p.month}>
                     <TableCell className="font-medium">{monthShort(p.month)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{brl(p.cardPF)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{brl(p.cardPJ)}</TableCell>
-                    <TableCell className="text-right font-semibold tabular-nums">{brl(p.total)}</TableCell>
+                    <TableCell className="text-center tabular-nums">{brl(p.cardPF)}</TableCell>
+                    <TableCell className="text-center tabular-nums">{brl(p.cardPJ)}</TableCell>
+                    <TableCell className="text-center font-semibold tabular-nums">{brl(p.total)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -242,22 +242,22 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
             <TableHeader>
               <TableRow>
                 <TableHead>Mês</TableHead>
-                <TableHead className="text-right">Cartão PF</TableHead>
-                <TableHead className="text-right">Cartão PJ</TableHead>
-                <TableHead className="text-right">Despesas PF</TableHead>
-                <TableHead className="text-right">Despesas PJ</TableHead>
-                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-center">Cartão PF</TableHead>
+                <TableHead className="text-center">Cartão PJ</TableHead>
+                <TableHead className="text-center">Despesas PF</TableHead>
+                <TableHead className="text-center">Despesas PJ</TableHead>
+                <TableHead className="text-center">Total</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {series12.map((m) => (
                 <TableRow key={m.month} className={m.month === month ? "bg-muted/50 font-semibold" : undefined}>
                   <TableCell>{monthLabel(m.month)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{brl(m.cardPF)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{brl(m.cardPJ)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{brl(m.pf)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{brl(m.pj)}</TableCell>
-                  <TableCell className="text-right font-semibold tabular-nums">{brl(m.total)}</TableCell>
+                  <TableCell className="text-center tabular-nums">{brl(m.cardPF)}</TableCell>
+                  <TableCell className="text-center tabular-nums">{brl(m.cardPJ)}</TableCell>
+                  <TableCell className="text-center tabular-nums">{brl(m.pf)}</TableCell>
+                  <TableCell className="text-center tabular-nums">{brl(m.pj)}</TableCell>
+                  <TableCell className="text-center font-semibold tabular-nums">{brl(m.total)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
