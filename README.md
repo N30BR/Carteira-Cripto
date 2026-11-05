@@ -1,6 +1,6 @@
 # Carteira Cripto
 
-Dashboard da carteira de criptoativos com login. Cada pessoa vê só a própria carteira: o saldo total, a curva de capital (7D, 30D, 1A), a distribuição por ativo e a tabela de ativos. Os preços vêm da API pública da Binance (pares contra USDT, sem chave).
+Dashboard com login para acompanhar a carteira de criptoativos (aba **Cripto**) e as contas em Real (aba **$**: conta PF, conta PJ, caixinhas…). Cada pessoa vê só os próprios dados. Os dois dashboards podem ser vistos em **USDT, BTC ou BRL**; preços e cotações vêm da API pública da Binance (sem chave).
 
 Next.js 16 · SQLite (Drizzle) · Tailwind + shadcn/ui · Recharts.
 
@@ -71,3 +71,9 @@ Faça backup com regularidade: perder o volume apaga todas as carteiras e contas
 - Depois de 5 erros de senha, a conta fica bloqueada por 15 min. O admin pode desbloquear antes.
 - Cada IP tem um limite de 20 falhas de login a cada 15 min. O IP vem do cabeçalho que o proxy do Easypanel acrescenta.
 - Para quem tenta entrar, conta bloqueada e senha errada mostram a mesma mensagem.
+
+## Atualizar o app no Easypanel
+
+1. **Faça um backup antes:** no console do serviço, rode . As atualizações que mudam o banco (como as tabelas do fiduciário) aplicam a mudança sozinhas ao iniciar, e o backup é a garantia caso algo dê errado.
+2. Envie o código para o GitHub ().
+3. No Easypanel, clique em **Implantar** e acompanhe os logs até aparecer .
