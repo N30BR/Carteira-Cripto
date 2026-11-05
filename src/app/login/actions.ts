@@ -7,18 +7,18 @@ import { attemptLogin } from "@/lib/auth/login";
 import { clientIp, ipLimited, recordIpFailure } from "@/lib/auth/ip-limit";
 import { sessionCookieName, sessionCookieOptions } from "@/lib/auth/cookie";
 
-export type LoginState = { error?: string };
+export type LoginState = { error?: string; username?: string };
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const ip = clientIp((await headers()).get("x-forwarded-for"));
-  if (ipLimited(ip)) return { error: "Muitas tentativas. Tente novamente em 15 minutos." };
-
   const username = String(formData.get("username") ?? "");
+  if (ipLimited(ip)) return { error: "Muitas tentativas. Tente novamente em 15 minutos.", username };
+
   const password = String(formData.get("password") ?? "");
   const result = await attemptLogin(getDb(), username, password);
   if (!result.ok) {
     recordIpFailure(ip);
-    return { error: "Usuário ou senha inválidos" };
+    return { error: "Usuário ou senha inválidos", username };
   }
 
   (await cookies()).set(sessionCookieName(), result.token, sessionCookieOptions(result.expiresAt));

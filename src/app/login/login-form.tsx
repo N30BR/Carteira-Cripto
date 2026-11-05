@@ -12,7 +12,7 @@ export function LoginForm() {
     <form action={formAction} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="username">Usuário</Label>
-        <Input id="username" name="username" autoComplete="username" required autoFocus />
+        <Input id="username" name="username" autoComplete="username" defaultValue={state.username} required autoFocus />
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="password">Senha</Label>
