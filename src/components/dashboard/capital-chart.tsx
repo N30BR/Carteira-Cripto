@@ -1,34 +1,39 @@
 "use client";
 
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatUsd } from "@/lib/format";
-import type { Period } from "@/lib/portfolio/calc";
+import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { ACCENT } from "./palette";
 
-const axisFmt: Record<Period, Intl.DateTimeFormat> = {
-  "7D": new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }),
-  "30D": new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }),
-  "1A": new Intl.DateTimeFormat("pt-BR", { month: "short", year: "2-digit" }),
-};
+const shortDate = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" });
+const monthYear = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "2-digit" });
 const tipFmt = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" });
 const compact = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
+const compactBtc = new Intl.NumberFormat("pt-BR", { maximumSignificantDigits: 3 });
+const PREFIX: Record<RefCurrency, string> = { USDT: "US$", BRL: "R$", BTC: "₿" };
+const DAY = 86_400_000;
 
 export function CapitalChart({
   points,
-  period,
-  missingHistory,
+  currency,
+  missingHistory = [],
+  emptyText = "Preços indisponíveis",
 }: {
   points: { t: number; value: number }[];
-  period: Period;
-  missingHistory: string[];
+  currency: RefCurrency;
+  missingHistory?: string[];
+  emptyText?: string;
 }) {
   if (points.length < 2) {
     return (
       <div className="grid h-64 place-items-center rounded-xl border border-dashed text-sm text-muted-foreground">
-        Preços indisponíveis
+        {emptyText}
       </div>
     );
   }
+  // Períodos até 2 meses: dia/mês; mais longos: mês/ano.
+  const span = points[points.length - 1].t - points[0].t;
+  const axisFmt = span <= 62 * DAY ? shortDate : monthYear;
+  const axisValue = (v: number) => `${PREFIX[currency]} ${(currency === "BTC" ? compactBtc : compact).format(v)}`;
 
   return (
     <div className="flex flex-col gap-2">
@@ -46,7 +51,7 @@ export function CapitalChart({
               type="number"
               scale="time"
               domain={["dataMin", "dataMax"]}
-              tickFormatter={(t: number) => axisFmt[period].format(t)}
+              tickFormatter={(t: number) => axisFmt.format(t)}
               tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
               axisLine={false}
               tickLine={false}
@@ -56,7 +61,7 @@ export function CapitalChart({
               dataKey="value"
               orientation="right"
               domain={["auto", "auto"]}
-              tickFormatter={(v: number) => `US$ ${compact.format(v)}`}
+              tickFormatter={axisValue}
               tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
               axisLine={false}
               tickLine={false}
@@ -71,7 +76,7 @@ export function CapitalChart({
                 color: "var(--popover-foreground)",
               }}
               labelFormatter={(t) => tipFmt.format(Number(t))}
-              formatter={(v) => [formatUsd(Number(v)), "Saldo"]}
+              formatter={(v) => [formatMoney(Number(v), currency), "Saldo"]}
             />
             <Area
               type="monotone"

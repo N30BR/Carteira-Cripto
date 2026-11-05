@@ -1,28 +1,35 @@
-import { formatPct, formatUsd } from "@/lib/format";
+import { formatMoney, type RefCurrency } from "@/lib/currency";
+import { formatPct } from "@/lib/format";
 import { DOWN, UP } from "./palette";
 
 export function BalanceCard({
   total,
-  change24hUsd,
-  change24hPct,
+  changeAbs,
+  changePct,
+  changeLabel,
+  currency,
 }: {
   total: number | null;
-  change24hUsd: number;
-  change24hPct: number | null;
+  changeAbs: number;
+  changePct: number | null;
+  /** Ex.: "24h" ou "no mês". */
+  changeLabel: string;
+  currency: RefCurrency;
 }) {
-  const up = change24hUsd >= 0;
+  const up = changeAbs >= 0;
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm text-muted-foreground">Saldo total</span>
       <span className="text-4xl font-semibold tracking-tight tabular-nums" data-testid="total">
-        {total === null ? "—" : formatUsd(total)}
+        {total === null ? "—" : formatMoney(total, currency)}
       </span>
-      <span className="text-sm tabular-nums" style={{ color: change24hPct === null ? undefined : up ? UP : DOWN }}>
-        {change24hPct === null ? (
-          <span className="text-muted-foreground">— (24h)</span>
+      <span className="text-sm tabular-nums" style={{ color: changePct === null ? undefined : up ? UP : DOWN }}>
+        {changePct === null ? (
+          <span className="text-muted-foreground">— ({changeLabel})</span>
         ) : (
           <>
-            {up ? "▲" : "▼"} {formatUsd(Math.abs(change24hUsd))} ({formatPct(Math.abs(change24hPct))}) · 24h
+            {up ? "▲" : "▼"} {formatMoney(Math.abs(changeAbs), currency)} ({formatPct(Math.abs(changePct) / 100)}) ·{" "}
+            {changeLabel}
           </>
         )}
       </span>

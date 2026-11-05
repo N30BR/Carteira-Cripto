@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
   adjustChange,
-  convertCurve,
   factor,
   formatMoney,
   formatMoneyPrice,
@@ -49,18 +48,6 @@ describe("rateAt", () => {
   });
 });
 
-describe("convertCurve", () => {
-  test("cada ponto pela cotação da época; o último pela atual", () => {
-    const history = { usdtBrl: [[100, 4], [200, 5]] as [number, number][], btcUsdt: [] };
-    const points = [{ t: 150, value: 10 }, { t: 250, value: 10 }, { t: 300, value: 10 }];
-    const out = convertCurve(points, "USDT", "BRL", history, { usdtBrl: 6, btcUsdt: 1 });
-    expect(out.map((p) => p.value)).toEqual([40, 50, 60]);
-  });
-  test("mesma moeda: não muda", () => {
-    const points = [{ t: 1, value: 3 }];
-    expect(convertCurve(points, "BRL", "BRL", { usdtBrl: [], btcUsdt: [] }, { usdtBrl: null, btcUsdt: null })).toEqual(points);
-  });
-});
 
 describe("adjustChange", () => {
   test("variação na moeda de referência", () => {

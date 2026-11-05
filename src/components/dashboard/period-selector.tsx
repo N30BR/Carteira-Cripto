@@ -1,16 +1,24 @@
 import Link from "next/link";
-import type { Period } from "@/lib/portfolio/calc";
 import { cn } from "@/lib/utils";
 
-const OPTIONS: Period[] = ["7D", "30D", "1A"];
-
-export function PeriodSelector({ current }: { current: Period }) {
+/** Botões de período como links; mantém os outros parâmetros da página (ex.: a moeda). */
+export function PeriodSelector({
+  options,
+  current,
+  path,
+  query,
+}: {
+  options: readonly string[];
+  current: string;
+  path: string;
+  query: Record<string, string>;
+}) {
   return (
     <div className="inline-flex rounded-lg border p-0.5 text-sm" role="group" aria-label="Período do gráfico">
-      {OPTIONS.map((p) => (
+      {options.map((p) => (
         <Link
           key={p}
-          href={`/?periodo=${p}`}
+          href={`${path}?${new URLSearchParams({ ...query, periodo: p })}`}
           scroll={false}
           aria-current={p === current ? "page" : undefined}
           className={cn(

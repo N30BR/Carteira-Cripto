@@ -37,21 +37,6 @@ export function ratesAt(history: RateHistory, t: number): Rates {
   return { usdtBrl: rateAt(history.usdtBrl, t), btcUsdt: rateAt(history.btcUsdt, t) };
 }
 
-/** Converte a curva ponto a ponto pela cotação da época; o último ponto (agora) usa a cotação atual. */
-export function convertCurve(
-  points: { t: number; value: number }[],
-  base: BaseCurrency,
-  cur: RefCurrency,
-  history: RateHistory,
-  current: Rates,
-): { t: number; value: number }[] {
-  if (base === cur) return points;
-  const now = factor(base, cur, current);
-  return points.map((p, i) => {
-    const f = i === points.length - 1 ? now : (factor(base, cur, ratesAt(history, p.t)) ?? now);
-    return { t: p.t, value: f === null ? p.value : p.value * f };
-  });
-}
 
 /** Variação % convertida para a moeda de referência: (1 + v) × fator_agora / fator_antes − 1. */
 export function adjustChange(pct: number | null, fNow: number | null, fPast: number | null): number | null {

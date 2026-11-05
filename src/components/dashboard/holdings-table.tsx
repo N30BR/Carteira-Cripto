@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatPct, formatPrice, formatQty, formatUsd } from "@/lib/format";
+import { formatMoney, formatMoneyPrice, type RefCurrency } from "@/lib/currency";
+import { formatPct, formatQty } from "@/lib/format";
 import type { PeriodChanges, PortfolioRow } from "@/lib/portfolio/calc";
 import { cn } from "@/lib/utils";
 import { DOWN, UP } from "./palette";
@@ -16,7 +17,7 @@ const COLUMNS: { key: Key; label: string }[] = [
   { key: "name", label: "Ativo" },
   { key: "quantity", label: "Quantidade" },
   { key: "price", label: "Preço" },
-  { key: "value", label: "Valor US$" },
+  { key: "value", label: "Valor" },
   { key: "share", label: "%" },
   { key: "change24h", label: "24h" },
   { key: "change7d", label: "7D" },
@@ -40,7 +41,7 @@ function Change({ value }: { value: number | null }) {
   );
 }
 
-export function HoldingsTable({ rows }: { rows: HoldingsTableRow[] }) {
+export function HoldingsTable({ rows, currency }: { rows: HoldingsTableRow[]; currency: RefCurrency }) {
   const [sort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "value", desc: true });
 
   const sorted = [...rows].sort((a, b) => {
@@ -91,10 +92,10 @@ export function HoldingsTable({ rows }: { rows: HoldingsTableRow[] }) {
               </TableCell>
               <TableCell className={cn(align("quantity"), "tabular-nums")}>{formatQty(r.quantity)}</TableCell>
               <TableCell className={cn(align("price"), "tabular-nums")}>
-                {r.price === null ? "—" : formatPrice(r.price)}
+                {r.price === null ? "—" : formatMoneyPrice(r.price, currency)}
               </TableCell>
               <TableCell className={cn(align("value"), "tabular-nums")}>
-                {r.value === null ? "—" : formatUsd(r.value)}
+                {r.value === null ? "—" : formatMoney(r.value, currency)}
               </TableCell>
               <TableCell className={cn(align("share"), "tabular-nums")}>
                 {r.share === null ? "—" : formatPct(r.share)}

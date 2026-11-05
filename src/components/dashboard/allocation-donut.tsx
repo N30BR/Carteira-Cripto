@@ -1,7 +1,8 @@
 "use client";
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { formatPct, formatUsd } from "@/lib/format";
+import { formatMoney, type RefCurrency } from "@/lib/currency";
+import { formatPct } from "@/lib/format";
 import { CATEGORICAL, OTHERS } from "./palette";
 
 type Slice = { symbol: string; value: number; share: number };
@@ -22,12 +23,12 @@ function toSlices(rows: Slice[]): (Slice & { color: string })[] {
   return out;
 }
 
-export function AllocationDonut({ rows }: { rows: Slice[] }) {
+export function AllocationDonut({ rows, currency, emptyText = "Preços indisponíveis" }: { rows: Slice[]; currency: RefCurrency; emptyText?: string }) {
   const slices = toSlices(rows);
   if (!slices.length) {
     return (
       <div className="grid h-56 place-items-center rounded-xl border border-dashed text-sm text-muted-foreground">
-        Preços indisponíveis
+        {emptyText}
       </div>
     );
   }
@@ -58,7 +59,7 @@ export function AllocationDonut({ rows }: { rows: Slice[] }) {
                 color: "var(--popover-foreground)",
               }}
               itemStyle={{ color: "var(--popover-foreground)" }}
-              formatter={(v, name) => [formatUsd(Number(v)), String(name)]}
+              formatter={(v, name) => [formatMoney(Number(v), currency), String(name)]}
             />
           </PieChart>
         </ResponsiveContainer>

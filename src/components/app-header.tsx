@@ -4,8 +4,9 @@ import { Logo } from "@/components/logo";
 import { UserMenu } from "@/components/user-menu";
 
 export function AppHeader({ user }: { user: SessionUser }) {
-  const links = [
-    { href: "/", label: "Dashboard" },
+  const links: { href: string; label: string; title?: string }[] = [
+    { href: "/", label: "Cripto" },
+    { href: "/fiduciario", label: "$", title: "Dashboard fiduciário" },
     { href: "/ativos", label: "Ativos" },
     ...(user.isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];
@@ -20,6 +21,8 @@ export function AppHeader({ user }: { user: SessionUser }) {
             <Link
               key={l.href}
               href={l.href}
+              aria-label={l.title}
+              title={l.title}
               className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               {l.label}
