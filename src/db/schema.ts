@@ -40,3 +40,32 @@ export const priceCache = sqliteTable("price_cache", {
   fetchedAt: integer("fetched_at", { mode: "timestamp_ms" }).notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const fiatAccounts = sqliteTable(
+  "fiat_accounts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("fiat_accounts_user_name").on(t.userId, t.name)],
+);
+
+export const fiatBalances = sqliteTable(
+  "fiat_balances",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => fiatAccounts.id, { onDelete: "cascade" }),
+    /** AAAA-MM-DD */
+    date: text("date").notNull(),
+    /** Reais com 2 casas, ex.: "5230.50" (pode ser negativo). */
+    amount: text("amount").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("fiat_balances_account_date").on(t.accountId, t.date)],
+);
