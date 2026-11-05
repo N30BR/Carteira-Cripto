@@ -19,6 +19,7 @@ import {
   deleteExpenseAction,
   renameCategoryAction,
   saveExpenseAction,
+  setCardClosingDayAction,
   setCardDueDayAction,
   toggleInstallmentAction,
   updateCardAccountAction,
@@ -120,7 +121,7 @@ describe("lançamentos", () => {
     expect(await createCardAccountAction("Quinta", "PF")).toEqual({ ok: false, error: "Limite de 4 contas atingido" });
     const nubank = listCardAccounts(state.db as Db, state.userId).find((a) => a.name === "Nubank")!;
     expect(await updateCardAccountAction(nubank.id, "Nubank Roxo", "PJ")).toEqual({ ok: true });
-    expect(listCardAccounts(state.db as Db, state.userId).find((a) => a.id === nubank.id)).toEqual({ id: nubank.id, name: "Nubank Roxo", kind: "PJ", dueDay: null });
+    expect(listCardAccounts(state.db as Db, state.userId).find((a) => a.id === nubank.id)).toEqual({ id: nubank.id, name: "Nubank Roxo", kind: "PJ", closingDay: null, dueDay: null });
     await saveExpenseAction(null, form({ accountId: nubank.id }));
     expect(mine()[0]).toMatchObject({ nature: "PJ", accountName: "Nubank Roxo" });
     expect((await deleteCardAccountAction(nubank.id)).ok).toBe(false);
@@ -144,6 +145,15 @@ describe("lançamentos", () => {
     expect((await setCardDueDayAction(1, "10" as unknown as number)).ok).toBe(false);
     expect(await setCardDueDayAction(3, 10)).toEqual({ ok: false, error: "Conta não encontrada" });
     expect(await setCardDueDayAction(1.5, 10)).toEqual({ ok: false, error: "Conta não encontrada" });
+  });
+
+  test("fechamento por conta: 1 a 31, vazio limpa; só nas próprias contas", async () => {
+    expect(await setCardClosingDayAction(1, 11)).toEqual({ ok: true });
+    expect(listCardAccounts(state.db as Db, state.userId)[0].closingDay).toBe(11);
+    expect((await setCardClosingDayAction(1, 0)).ok).toBe(false);
+    expect((await setCardClosingDayAction(1, "11" as unknown as number)).ok).toBe(false);
+    expect(await setCardClosingDayAction(3, 11)).toEqual({ ok: false, error: "Conta não encontrada" });
+    expect(await setCardClosingDayAction(1, null)).toEqual({ ok: true });
   });
 
   test("categorias: criar e renomear com validação de nome", async () => {

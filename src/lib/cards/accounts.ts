@@ -6,7 +6,7 @@ import type { Result } from "./categories";
 import { MAX_CARD_ACCOUNTS, type Side } from "./account-limits";
 
 export { MAX_CARD_ACCOUNTS, type Side } from "./account-limits";
-export type CardAccount = { id: number; name: string; kind: Side; dueDay: number | null };
+export type CardAccount = { id: number; name: string; kind: Side; closingDay: number | null; dueDay: number | null };
 export const DEFAULT_ACCOUNTS: { name: string; kind: Side }[] = [
   { name: "Cartão PF", kind: "PF" },
   { name: "Cartão PJ", kind: "PJ" },
@@ -17,7 +17,7 @@ const DUPLICATE: Result = { ok: false, error: "Já existe uma conta com esse nom
 
 export function listCardAccounts(db: Db, userId: number): CardAccount[] {
   return db
-    .select({ id: cardAccounts.id, name: cardAccounts.name, kind: cardAccounts.kind, dueDay: cardAccounts.dueDay })
+    .select({ id: cardAccounts.id, name: cardAccounts.name, kind: cardAccounts.kind, closingDay: cardAccounts.closingDay, dueDay: cardAccounts.dueDay })
     .from(cardAccounts)
     .where(eq(cardAccounts.userId, userId))
     .orderBy(asc(cardAccounts.id))
@@ -27,7 +27,7 @@ export function listCardAccounts(db: Db, userId: number): CardAccount[] {
 export function getCardAccount(db: Db, userId: number, id: number): CardAccount | null {
   return (
     (db
-      .select({ id: cardAccounts.id, name: cardAccounts.name, kind: cardAccounts.kind, dueDay: cardAccounts.dueDay })
+      .select({ id: cardAccounts.id, name: cardAccounts.name, kind: cardAccounts.kind, closingDay: cardAccounts.closingDay, dueDay: cardAccounts.dueDay })
       .from(cardAccounts)
       .where(and(eq(cardAccounts.id, id), eq(cardAccounts.userId, userId)))
       .get() as CardAccount | undefined) ?? null
@@ -83,5 +83,15 @@ export function setCardDueDay(db: Db, userId: number, id: number, day: number | 
     return { ok: false, error: "O vencimento deve ser um dia de 1 a 31" };
   }
   db.update(cardAccounts).set({ dueDay: day }).where(eq(cardAccounts.id, id)).run();
+  return { ok: true };
+}
+
+/** Dia de fechamento da fatura da conta (1–31), ou null para limpar. */
+export function setCardClosingDay(db: Db, userId: number, id: number, day: number | null): Result {
+  if (!getCardAccount(db, userId, id)) return NOT_FOUND;
+  if (day !== null && !(Number.isInteger(day) && day >= 1 && day <= 31)) {
+    return { ok: false, error: "O fechamento deve ser um dia de 1 a 31" };
+  }
+  db.update(cardAccounts).set({ closingDay: day }).where(eq(cardAccounts.id, id)).run();
   return { ok: true };
 }

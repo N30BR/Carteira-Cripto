@@ -1,0 +1,1 @@
+ALTER TABLE `card_accounts` ADD `closing_day` integer;

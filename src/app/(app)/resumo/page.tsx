@@ -3,7 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
-import { addMonths, monthLabel, parseMonth } from "@/lib/cards/months";
+import { monthLabel, parseMonth } from "@/lib/cards/months";
 import { listCardAccounts } from "@/lib/cards/accounts";
 import { invoicesDueBetween } from "@/lib/cards/due";
 import { listInstallments } from "@/lib/cards/store";
@@ -91,9 +91,9 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   const cryptoStart = toRef(crypto.startUsdt, startMs);
   const cryptoEnd = toRef(crypto.endUsdt, crypto.endMs);
   const fiat = fiatBalanceBrl(db, user.id, today);
-  // Faturas pela data em que vencem: a de um mês vence no mês seguinte, no dia do cartão.
+  // Faturas pela data em que vencem: a fatura de cada mês vence no próprio mês, no dia do cartão.
   const dueDays = Object.fromEntries(listCardAccounts(db, user.id).map((a) => [a.id, a.dueDay]));
-  const invoiceRows = listInstallments(db, user.id, addMonths(win.fromDate.slice(0, 7), -1), addMonths(win.toDate.slice(0, 7), -1));
+  const invoiceRows = listInstallments(db, user.id, win.fromDate.slice(0, 7), win.toDate.slice(0, 7));
   const invoices = invoicesDueBetween(invoiceRows, dueDays, win.fromDate, win.toDate);
   const tx = transactionTotals(listTransactions(db, user.id, win.fromDate, win.toDate));
   const summary = consolidate({
@@ -131,7 +131,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
       : fiat.oldest === fiat.newest
         ? `Saldo de ${dateBr(fiat.oldest!)}`
         : `Saldos de ${dateBr(fiat.oldest!)} a ${dateBr(fiat.newest!)}`,
-    invoices: `Que vencem em ${periodLabel} (a fatura de um mês vence no seguinte)`,
+    invoices: `Que vencem em ${periodLabel}`,
     inflow: `Transações de ${periodLabel}`,
     outflow: `Transações de ${periodLabel}`,
     variation: crypto.empty ? (

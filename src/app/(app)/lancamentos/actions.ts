@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
-import { createCardAccount, deleteCardAccount, setCardDueDay, updateCardAccount, type Side } from "@/lib/cards/accounts";
+import { createCardAccount, deleteCardAccount, setCardClosingDay, setCardDueDay, updateCardAccount, type Side } from "@/lib/cards/accounts";
 import { createCategory, deleteCategory, renameCategory, type Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
 import { parseMonth } from "@/lib/cards/months";
@@ -174,6 +174,17 @@ export async function setCardDueDayAction(id: number, day: number | null): Promi
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (day !== null && typeof day !== "number") return { ok: false, error: "O vencimento deve ser um dia de 1 a 31" };
   const r = setCardDueDay(getDb(), user.id, id, day);
+  refresh();
+  return r;
+}
+
+/** Dia de fechamento da fatura de uma conta (1–31); null limpa. */
+export async function setCardClosingDayAction(id: number, day: number | null): Promise<Result> {
+  const user = await requireUser();
+  if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  if (day !== null && typeof day !== "number") return { ok: false, error: "O fechamento deve ser um dia de 1 a 31" };
+  const r = setCardClosingDay(getDb(), user.id, id, day);
   refresh();
   return r;
 }

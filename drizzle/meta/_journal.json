@@ -50,6 +50,13 @@
       "when": 1793918104706,
       "tag": "0006_exotic_wildside",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793918981399,
+      "tag": "0007_typical_dazzler",
+      "breakpoints": true
     }
   ]
 }

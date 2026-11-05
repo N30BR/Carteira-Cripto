@@ -87,3 +87,33 @@ describe("projeção", () => {
     expect(p.activePurchases).toBe(1);
   });
 });
+
+describe("compras parceladas em aberto (o que falta pagar até a última parcela)", () => {
+  // Notebook 12× de R$ 100,00, de jan a dez/2026.
+  const months = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`);
+  const notebook = (paidUpTo: number) =>
+    months.map((m, i) =>
+      row({ expenseId: 500, description: "Notebook", number: i + 1, installments: 12, invoiceMonth: m, amountCents: 10000, paid: i + 1 <= paidUpTo }),
+    );
+
+  test("outubro (10/12) pago: faltam novembro e dezembro", async () => {
+    const { openPurchases } = await import("@/lib/cards/summary");
+    const [p] = openPurchases(notebook(10), "2026-10");
+    expect(p).toMatchObject({ expenseId: 500, paidCount: 10, remainingCount: 2, remainingCents: 20000, nextMonth: "2026-11", lastMonth: "2026-12", overdueCount: 0 });
+  });
+
+  test("outubro não pago: faltam outubro, novembro e dezembro", async () => {
+    const { openPurchases } = await import("@/lib/cards/summary");
+    const [p] = openPurchases(notebook(9), "2026-10");
+    expect(p).toMatchObject({ remainingCount: 3, remainingCents: 30000, nextMonth: "2026-10", overdueCount: 0 });
+    // Vista de novembro: a de outubro continua em aberto, agora em atraso.
+    expect(openPurchases(notebook(9), "2026-11")[0]).toMatchObject({ remainingCount: 3, overdueCount: 1, overdueCents: 10000 });
+  });
+
+  test("compra totalmente paga não aparece; ordem pela próxima parcela a pagar", async () => {
+    const { openPurchases } = await import("@/lib/cards/summary");
+    const other = [row({ expenseId: 600, description: "Curso", number: 1, installments: 2, invoiceMonth: "2026-09", amountCents: 5000 })];
+    expect(openPurchases(notebook(12), "2026-10")).toEqual([]);
+    expect(openPurchases([...notebook(10), ...other], "2026-10").map((p) => p.expenseId)).toEqual([600, 500]);
+  });
+});

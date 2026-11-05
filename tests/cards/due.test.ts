@@ -1,30 +1,40 @@
 import { describe, expect, test } from "vitest";
 import { testDb } from "../helpers/db";
 import { users } from "@/db/schema";
-import { ensureDefaultAccounts, listCardAccounts, setCardDueDay } from "@/lib/cards/accounts";
-import { dueDate, editAmount, invoicesDueBetween } from "@/lib/cards/due";
+import { ensureDefaultAccounts, listCardAccounts, setCardClosingDay, setCardDueDay } from "@/lib/cards/accounts";
+import { dueDate, editAmount, invoiceMonthFor, invoicesDueBetween } from "@/lib/cards/due";
 
 describe("data de vencimento", () => {
-  test("a fatura de um mês vence no mês seguinte, no dia do cartão", () => {
-    expect(dueDate("2026-10", 10)).toBe("2026-11-10");
-    expect(dueDate("2026-12", 5)).toBe("2027-01-05");
+  test("a fatura de cada mês vence no próprio mês, no dia do cartão", () => {
+    expect(dueDate("2026-11", 18)).toBe("2026-11-18");
+    expect(dueDate("2026-12", 5)).toBe("2026-12-05");
   });
 
   test("dia maior que o mês vira o último dia (31 em fevereiro = 28/29)", () => {
-    expect(dueDate("2026-01", 31)).toBe("2026-02-28");
-    expect(dueDate("2028-01", 30)).toBe("2028-02-29");
+    expect(dueDate("2026-02", 31)).toBe("2026-02-28");
+    expect(dueDate("2028-02", 30)).toBe("2028-02-29");
   });
 
-  test("sem vencimento informado: dia 1 do mês seguinte", () => {
-    expect(dueDate("2026-10", null)).toBe("2026-11-01");
+  test("sem vencimento informado: dia 1 do mês da fatura", () => {
+    expect(dueDate("2026-11", null)).toBe("2026-11-01");
+  });
+
+  test("fechamento: a partir do dia de fechamento a compra vai para a fatura do mês seguinte", () => {
+    expect(invoiceMonthFor("2026-11-10", 11)).toBe("2026-11");
+    expect(invoiceMonthFor("2026-11-11", 11)).toBe("2026-12");
+    expect(invoiceMonthFor("2026-12-20", 11)).toBe("2027-01");
+    expect(invoiceMonthFor("2026-11-30", null)).toBe("2026-11");
+    // fechamento dia 31 em fevereiro: fecha no último dia
+    expect(invoiceMonthFor("2026-02-28", 31)).toBe("2026-03");
+    expect(invoiceMonthFor("2026-02-27", 31)).toBe("2026-02");
   });
 
   test("faturas que vencem entre duas datas (o que o Resumo usa)", () => {
     const rows = [
-      { accountId: 1, invoiceMonth: "2026-10", amountCents: 1000 }, // vence 10/11
-      { accountId: 2, invoiceMonth: "2026-10", amountCents: 2000 }, // vence 25/11
-      { accountId: 1, invoiceMonth: "2026-11", amountCents: 4000 }, // vence 10/12
-      { accountId: 9, invoiceMonth: "2026-10", amountCents: 8000 }, // conta sem vencimento: 01/11
+      { accountId: 1, invoiceMonth: "2026-11", amountCents: 1000 }, // vence 10/11
+      { accountId: 2, invoiceMonth: "2026-11", amountCents: 2000 }, // vence 25/11
+      { accountId: 1, invoiceMonth: "2026-12", amountCents: 4000 }, // vence 10/12
+      { accountId: 9, invoiceMonth: "2026-11", amountCents: 8000 }, // conta sem vencimento: 01/11
     ];
     const days = { 1: 10, 2: 25 };
     expect(invoicesDueBetween(rows, days, "2026-11-01", "2026-11-30")).toBe(1000 + 2000 + 8000);
@@ -57,6 +67,17 @@ describe("dia de vencimento por conta", () => {
     expect(listCardAccounts(db, a)[0].dueDay).toBeNull();
     const theirs = listCardAccounts(db, b)[0];
     expect(setCardDueDay(db, a, theirs.id, 5)).toEqual({ ok: false, error: "Conta não encontrada" });
+  });
+
+  test("dia de fechamento: 1–31 ou vazio; só nas próprias contas", () => {
+    const { db, a, b } = setup();
+    const [pf] = listCardAccounts(db, a);
+    expect(listCardAccounts(db, a)[0].closingDay).toBeNull();
+    expect(setCardClosingDay(db, a, pf.id, 11)).toEqual({ ok: true });
+    expect(listCardAccounts(db, a)[0].closingDay).toBe(11);
+    expect(setCardClosingDay(db, a, pf.id, 0)).toEqual({ ok: false, error: "O fechamento deve ser um dia de 1 a 31" });
+    expect(setCardClosingDay(db, a, pf.id, null)).toEqual({ ok: true });
+    expect(setCardClosingDay(db, a, listCardAccounts(db, b)[0].id, 5)).toEqual({ ok: false, error: "Conta não encontrada" });
   });
 });
 

@@ -82,3 +82,53 @@ export function projection(rows: InstallmentRow[], month: string, count: number)
   const activePurchases = new Set(future.filter((r) => r.installments > 1).map((r) => r.expenseId)).size;
   return { months, pendingFuture, activePurchases };
 }
+
+export type OpenPurchase = {
+  expenseId: number;
+  description: string;
+  accountId: number;
+  accountName: string;
+  installments: number;
+  paidCount: number;
+  /** Parcelas ainda não pagas (inclui as de meses anteriores não marcadas como pagas). */
+  remainingCount: number;
+  remainingCents: number;
+  /** Mês da parcela em aberto mais antiga e da última parcela. */
+  nextMonth: string;
+  lastMonth: string;
+  /** Em aberto de meses anteriores ao mês escolhido (em atraso). */
+  overdueCount: number;
+  overdueCents: number;
+};
+
+/**
+ * Compras com parcelas ainda não pagas, até a última parcela. Uma parcela só sai da conta quando é
+ * marcada como paga: se a de outubro não foi paga, ainda faltam outubro, novembro e dezembro.
+ * `rows` precisa ter todas as parcelas das compras (não só as do mês).
+ */
+export function openPurchases(rows: InstallmentRow[], month: string): OpenPurchase[] {
+  const byExpense = new Map<number, InstallmentRow[]>();
+  for (const r of rows) (byExpense.get(r.expenseId) ?? byExpense.set(r.expenseId, []).get(r.expenseId)!).push(r);
+  const out: OpenPurchase[] = [];
+  for (const [expenseId, list] of byExpense) {
+    const open = list.filter((r) => !r.paid);
+    if (!open.length) continue;
+    const overdue = open.filter((r) => r.invoiceMonth < month);
+    const first = list[0];
+    out.push({
+      expenseId,
+      description: first.description,
+      accountId: first.accountId,
+      accountName: first.accountName,
+      installments: first.installments,
+      paidCount: list.filter((r) => r.paid).length,
+      remainingCount: open.length,
+      remainingCents: open.reduce((s, r) => s + r.amountCents, 0),
+      nextMonth: open.reduce((m, r) => (r.invoiceMonth < m ? r.invoiceMonth : m), open[0].invoiceMonth),
+      lastMonth: list.reduce((m, r) => (r.invoiceMonth > m ? r.invoiceMonth : m), list[0].invoiceMonth),
+      overdueCount: overdue.length,
+      overdueCents: overdue.reduce((s, r) => s + r.amountCents, 0),
+    });
+  }
+  return out.sort((a, b) => a.nextMonth.localeCompare(b.nextMonth) || a.description.localeCompare(b.description, "pt-BR"));
+}

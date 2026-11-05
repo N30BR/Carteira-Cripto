@@ -100,7 +100,9 @@ export const cardAccounts = sqliteTable(
     name: text("name").notNull(),
     /** PF ou PJ */
     kind: text("kind").notNull(),
-    /** Dia de vencimento da fatura (1–31), pago no mês seguinte ao da fatura; null = não informado. */
+    /** Dia de fechamento da fatura (1–31): compras a partir dele vão para a fatura do mês seguinte. */
+    closingDay: integer("closing_day"),
+    /** Dia de vencimento da fatura (1–31), no próprio mês da fatura; null = não informado. */
     dueDay: integer("due_day"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },

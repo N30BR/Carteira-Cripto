@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth/current";
 import { addMonths, monthLabel, monthShort, parseMonth } from "@/lib/cards/months";
 import { listCardAccounts, type CardAccount } from "@/lib/cards/accounts";
 import { hasExpenses, listInstallments } from "@/lib/cards/store";
-import { cardSummary, monthTotals, monthlySeries, projection, topCategories } from "@/lib/cards/summary";
+import { cardSummary, monthTotals, monthlySeries, openPurchases, projection, topCategories } from "@/lib/cards/summary";
 import { brlDisplay, staleRateWarning } from "@/lib/currency-display";
 import { parsePeriod } from "@/lib/portfolio/calc";
 import { analysisWindow, chartMonths, invoicePeriodLabel } from "@/lib/summary/window";
@@ -103,6 +103,13 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
   const last12 = Array.from({ length: 12 }, (_, i) => addMonths(month, -i));
   const series12 = monthlySeries(rows, last12);
   const proj = projection(rows, win.invoiceMonths.at(-1)!, 6);
+  // Em aberto até a última parcela: tudo que não foi marcado como pago, inclusive de meses anteriores.
+  const open = openPurchases(
+    listInstallments(getDb(), user.id, "2000-01", "2099-12").map((r) => ({ ...r, amountCents: convert(r.amountCents) })),
+    month,
+  );
+  const openTotal = open.reduce((x, o) => x + o.remainingCents, 0);
+  const overdue = open.reduce((x, o) => x + o.overdueCount, 0);
 
   const cardSection = (account: CardAccount, index: number) => {
     const s = cardSummary(monthRows, account.id);
@@ -119,7 +126,8 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
                 </p>
                 <p className="text-lg font-semibold">{kindLabel(account)}</p>
                 <p className="text-xs text-muted-foreground">
-                  {account.dueDay ? `Vence todo dia ${account.dueDay}, no mês seguinte ao da fatura` : "Vencimento não informado (defina em Lançamentos)"}
+                  {account.closingDay ? `Fecha dia ${account.closingDay}` : "Fechamento não informado"} •{" "}
+                  {account.dueDay ? `vence dia ${account.dueDay}` : "vencimento não informado"}
                 </p>
               </div>
             </div>
@@ -189,7 +197,13 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
       <div className="grid gap-4 md:grid-cols-3">
         <Indicator title="Despesas PF" value={brl(totals.pf)} hint="pela natureza" color={NATURE_COLOR.PF} />
         <Indicator title="Despesas PJ" value={brl(totals.pj)} hint="pela natureza" color={NATURE_COLOR.PJ} />
-        <Indicator title="Parcelas futuras" value={brl(proj.pendingFuture)} hint="comprometido" color="#F2A45F" />
+        <Indicator
+          title="Em aberto até a última parcela"
+          value={brl(openTotal)}
+          hint={overdue ? `${overdue} em atraso` : "nada em atraso"}
+          color="#F2A45F"
+          testId="open-total"
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.8fr_1fr]">
@@ -276,6 +290,59 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Compras em aberto</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            O que falta pagar de cada compra até a última parcela. Uma parcela só sai daqui quando é marcada como paga em
+            Lançamentos: se a de outubro não foi paga, ainda faltam outubro, novembro e dezembro.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {open.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma parcela em aberto.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table aria-label="Compras em aberto">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Compra</TableHead>
+                    <TableHead className="text-center">Cartão / Conta</TableHead>
+                    <TableHead className="text-center">Pagas</TableHead>
+                    <TableHead className="text-center">Faltam</TableHead>
+                    <TableHead className="text-center">Próxima a pagar</TableHead>
+                    <TableHead className="text-center">Última parcela</TableHead>
+                    <TableHead className="text-center">Valor restante</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {open.map((o) => (
+                    <TableRow key={o.expenseId}>
+                      <TableCell className="font-medium">{o.description}</TableCell>
+                      <TableCell className="text-center">{o.accountName}</TableCell>
+                      <TableCell className="text-center tabular-nums">
+                        {o.paidCount} / {o.installments}
+                      </TableCell>
+                      <TableCell className="text-center tabular-nums">
+                        {o.remainingCount}
+                        {o.overdueCount > 0 && (
+                          <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-400">
+                            {o.overdueCount} em atraso
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">{monthLabel(o.nextMonth)}</TableCell>
+                      <TableCell className="text-center">{monthLabel(o.lastMonth)}</TableCell>
+                      <TableCell className="text-center font-semibold tabular-nums">{brl(o.remainingCents)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

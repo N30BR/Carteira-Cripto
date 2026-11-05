@@ -89,6 +89,8 @@ export function LaunchesView({
   categories,
   accounts,
   transactions,
+  open,
+  overdue,
 }: {
   month: string;
   today: string;
@@ -96,6 +98,10 @@ export function LaunchesView({
   categories: Category[];
   accounts: CardAccount[];
   transactions: Transaction[];
+  /** Por compra: parcelas ainda não pagas e quanto falta (até a última parcela). */
+  open: Record<number, { remainingCount: number; remainingCents: number }>;
+  /** Parcelas de meses anteriores ainda não marcadas como pagas. */
+  overdue: { count: number; cents: number };
 }) {
   const [account, setAccount] = useState<string>("ALL");
   const [category, setCategory] = useState<string>("ALL");
@@ -165,6 +171,15 @@ export function LaunchesView({
               onDone={() => toast.success("Fatura lançada")}
             />
           </div>
+
+          {overdue.count > 0 && (
+            <p role="status" className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+              {overdue.count} parcela{overdue.count > 1 ? "s" : ""} de meses anteriores ainda não marcada{overdue.count > 1 ? "s" : ""} como
+              paga{overdue.count > 1 ? "s" : ""} ({brl(overdue.cents)}). Ela{overdue.count > 1 ? "s" : ""} continua
+              {overdue.count > 1 ? "m" : ""} em aberto até ser{overdue.count > 1 ? "em" : ""} paga{overdue.count > 1 ? "s" : ""}: volte ao mês dela
+              {overdue.count > 1 ? "s" : ""} para marcar.
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 border-t pt-5">
             <FilterTabs
@@ -250,6 +265,11 @@ export function LaunchesView({
                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
                           {r.number} / {r.installments}
                         </span>
+                        {r.installments > 1 && (
+                          <span className="block text-[11px] text-muted-foreground">
+                            {open[r.expenseId] ? `faltam ${open[r.expenseId].remainingCount} • ${brl(open[r.expenseId].remainingCents)}` : "quitada"}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-center">
                         {monthLabel(r.invoiceMonth)}

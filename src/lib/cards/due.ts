@@ -1,14 +1,25 @@
-// Vencimento das faturas (funções puras, sem banco). A fatura de um mês é paga no mês seguinte,
-// no dia de vencimento do cartão: a fatura de outubro vence em novembro.
+// Fechamento e vencimento das faturas (funções puras, sem banco). A fatura de cada mês fecha no dia de
+// fechamento do cartão e é paga no próprio mês, no dia de vencimento (ex.: novembro fecha dia 11 e vence
+// dia 18). Compras a partir do dia de fechamento entram na fatura do mês seguinte.
 import { addMonths } from "./months";
 
-/** Data (AAAA-MM-DD) em que vence a fatura do mês "AAAA-MM". Dia maior que o mês → último dia; sem dia → dia 1. */
-export function dueDate(invoiceMonth: string, dueDay: number | null): string {
-  const month = addMonths(invoiceMonth, 1);
+const lastDay = (month: string) => {
   const [y, m] = month.split("-").map(Number);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const day = Math.min(dueDay ?? 1, last);
-  return `${month}-${String(day).padStart(2, "0")}`;
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+};
+
+/** Data (AAAA-MM-DD) em que vence a fatura do mês "AAAA-MM", no próprio mês. Dia maior que o mês → último dia; sem dia → dia 1. */
+export function dueDate(invoiceMonth: string, dueDay: number | null): string {
+  const day = Math.min(dueDay ?? 1, lastDay(invoiceMonth));
+  return `${invoiceMonth}-${String(day).padStart(2, "0")}`;
+}
+
+/** Fatura (AAAA-MM) de uma compra feita em `purchaseDate`: a partir do dia de fechamento, vai para o mês seguinte. */
+export function invoiceMonthFor(purchaseDate: string, closingDay: number | null): string {
+  const month = purchaseDate.slice(0, 7);
+  if (closingDay === null) return month;
+  const closes = Math.min(closingDay, lastDay(month));
+  return Number(purchaseDate.slice(8, 10)) >= closes ? addMonths(month, 1) : month;
 }
 
 /** Soma das parcelas cujas faturas vencem entre `from` e `to` (datas inclusivas). */

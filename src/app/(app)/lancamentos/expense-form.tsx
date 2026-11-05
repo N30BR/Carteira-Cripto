@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { formatMoney } from "@/lib/currency";
 import type { CardAccount } from "@/lib/cards/accounts";
 import type { Category, Result } from "@/lib/cards/categories";
+import { invoiceMonthFor } from "@/lib/cards/due";
 import { planFromForm } from "@/lib/cards/installments";
 import { monthLabel } from "@/lib/cards/months";
 import { safeAction } from "@/lib/safe-action";
@@ -77,6 +78,14 @@ export function ExpenseFormFields({
   const set = <K extends keyof ExpenseForm>(k: K, v: ExpenseForm[K]) => setF((s) => ({ ...s, [k]: v }));
   // Conta escolhida que deixou de existir (excluída em "Adicionar"): vale a primeira da lista.
   const accountId = accounts.some((a) => a.id === f.accountId) ? f.accountId : (accounts[0]?.id ?? f.accountId);
+  const closingDay = accounts.find((a) => a.id === accountId)?.closingDay ?? null;
+  // Compra nova (1ª parcela): o mês da fatura sai da data da compra e do fechamento do cartão.
+  const auto = !editing && f.current === 1;
+  const withInvoice = (next: ExpenseForm): ExpenseForm => {
+    if (editing || next.current !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test(next.purchaseDate)) return next;
+    const day = accounts.find((a) => a.id === next.accountId)?.closingDay ?? null;
+    return { ...next, refMonth: invoiceMonthFor(next.purchaseDate, day) };
+  };
 
   const cents = brlToCents(f.amount);
   const plan = cents.ok
@@ -164,7 +173,7 @@ export function ExpenseFormFields({
               id="exp-account"
               className={selectClass}
               value={accountId}
-              onChange={(e) => set("accountId", Number(e.target.value))}
+              onChange={(e) => setF((s) => withInvoice({ ...s, accountId: Number(e.target.value) }))}
             >
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -196,10 +205,19 @@ export function ExpenseFormFields({
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-ref">Mês da fatura (parcela atual)</Label>
           <Input id="exp-ref" type="month" className="[color-scheme:dark]" value={f.refMonth} onChange={(e) => set("refMonth", e.target.value)} />
+          {auto && closingDay !== null && (
+            <span className="text-[11px] text-muted-foreground">Pelo fechamento (dia {closingDay}) e a data da compra</span>
+          )}
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-date">Data da compra</Label>
-          <Input id="exp-date" type="date" className="[color-scheme:dark]" value={f.purchaseDate} onChange={(e) => set("purchaseDate", e.target.value)} />
+          <Input
+            id="exp-date"
+            type="date"
+            className="[color-scheme:dark]"
+            value={f.purchaseDate}
+            onChange={(e) => setF((s) => withInvoice({ ...s, purchaseDate: e.target.value }))}
+          />
         </div>
         {!editing && (
           <div className="flex flex-col gap-1.5">
