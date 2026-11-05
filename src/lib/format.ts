@@ -14,3 +14,8 @@ export function formatPct(n: number): string {
 export function formatQty(q: string | number): string {
   return qty.format(Number(q));
 }
+
+/** Valor para pré-preencher um campo de quantidade: sem agrupar milhar e sem arredondar. */
+export function quantityToInput(q: string): string {
+  return q.replace(".", ",");
+}

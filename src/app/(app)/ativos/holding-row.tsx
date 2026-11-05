@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
-import { formatQty } from "@/lib/format";
+import { formatQty, quantityToInput } from "@/lib/format";
 import type { Holding } from "@/lib/holdings/holdings";
 import { deleteHoldingAction, updateHoldingAction } from "./actions";
 
@@ -73,7 +73,7 @@ export function HoldingRow({ h }: { h: Holding }) {
               size="sm"
               variant="outline"
               onClick={() => {
-                setValue(formatQty(h.quantity).replace(/\./g, ""));
+                setValue(quantityToInput(h.quantity));
                 setEditing(true);
               }}
             >

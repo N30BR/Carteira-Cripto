@@ -23,3 +23,20 @@ describe("format", () => {
     expect(formatQty("2")).toBe("2");
   });
 });
+
+import { quantityToInput } from "@/lib/format";
+import { parseQuantity } from "@/lib/validation";
+
+describe("quantityToInput", () => {
+  test("pré-preenche sem separador de milhar nem arredondamento", () => {
+    expect(quantityToInput("15000")).toBe("15000");
+    expect(quantityToInput("1234.5")).toBe("1234,5");
+    expect(quantityToInput("0.123456789012")).toBe("0,123456789012");
+  });
+
+  test("salvar o valor pré-preenchido mantém a quantidade", () => {
+    for (const q of ["15000", "1234.5", "0.123456789012", "0.00000001"]) {
+      expect(parseQuantity(quantityToInput(q))).toEqual({ ok: true, value: q });
+    }
+  });
+});

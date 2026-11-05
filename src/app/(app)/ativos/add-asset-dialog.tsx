@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatQty } from "@/lib/format";
+import { formatQty, quantityToInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addHoldingAction } from "./actions";
 
@@ -59,7 +59,7 @@ export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
 
   function choose(c: Coin) {
     setCoin(c);
-    setQuantity(owned[c.id] ? formatQty(owned[c.id]) : "");
+    setQuantity(owned[c.id] ? quantityToInput(owned[c.id]) : "");
     setError(undefined);
   }
 
