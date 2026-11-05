@@ -1,12 +1,15 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatMoney } from "@/lib/currency";
+import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { formatPct } from "@/lib/format";
 import { monthShort } from "@/lib/cards/months";
 import { DOWN, UP } from "@/components/dashboard/palette";
 
 const brl = (cents: number) => formatMoney(cents / 100, "BRL");
+const MINOR: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
+const money = (minor: number, cur: RefCurrency) => formatMoney(minor / MINOR[cur], cur);
+const NEUTRAL = "#60A5FA";
 const compact = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
 const tooltipStyle = {
   background: "var(--popover)",
@@ -62,7 +65,17 @@ export function TransactionBars({ data }: { data: { month: string; inflow: numbe
 type Slice = { name: string; cents: number; share: number; color: string };
 
 /** Pizza com o percentual escrito dentro das fatias e legenda à direita (nome e %). */
-function PieLegend({ slices, empty, labelInside }: { slices: Slice[]; empty: string; labelInside?: boolean }) {
+function PieLegend({
+  slices,
+  empty,
+  labelInside,
+  format = brl,
+}: {
+  slices: Slice[];
+  empty: string;
+  labelInside?: boolean;
+  format?: (v: number) => string;
+}) {
   const data = slices.filter((s) => s.cents > 0);
   if (!data.length) return <Empty text={empty} />;
   return (
@@ -86,7 +99,7 @@ function PieLegend({ slices, empty, labelInside }: { slices: Slice[]; empty: str
             <Tooltip
               contentStyle={tooltipStyle}
               itemStyle={{ color: "var(--popover-foreground)" }}
-              formatter={(v, name, item) => [`${brl(Number(v))} (${formatPct((item.payload as Slice).share)})`, String(name)]}
+              formatter={(v, name, item) => [`${format(Number(v))} (${formatPct((item.payload as Slice).share)})`, String(name)]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -120,22 +133,29 @@ export function TransactionPie({ inflow, outflow, shares }: { inflow: number; ou
   );
 }
 
-export type ComponentDatum = { key: string; label: string; short: string; signedCents: number | null; share: number | null };
+export type ComponentDatum = {
+  key: string;
+  label: string;
+  short: string;
+  signedCents: number | null;
+  share: number | null;
+  tone: "neutral" | "in" | "out";
+};
 
-// Verdes para os positivos e vermelhos para os negativos, em tons diferentes para separar os componentes.
-const GREENS = ["#16a34a", "#2dd4bf", "#86efac"];
+// Saldos em tons de azul (neutros), entradas em verdes e saídas em vermelhos, para separar os componentes.
+const BLUES = [NEUTRAL, "#93c5fd"];
+const GREENS = ["#16a34a", "#86efac", "#2dd4bf"];
 const REDS = ["#ef4444", "#fda4af", "#f97316"];
 
 function componentColors(items: ComponentDatum[]): Record<string, string> {
-  let g = 0;
-  let r = 0;
-  return Object.fromEntries(
-    items.map((c) => [c.key, (c.signedCents ?? 0) < 0 ? REDS[r++ % REDS.length] : GREENS[g++ % GREENS.length]]),
-  );
+  const next = { neutral: 0, in: 0, out: 0 };
+  const palette = { neutral: BLUES, in: GREENS, out: REDS };
+  return Object.fromEntries(items.map((c) => [c.key, palette[c.tone][next[c.tone]++ % palette[c.tone].length]]));
 }
+const barColor = (c: ComponentDatum) => (c.tone === "neutral" ? NEUTRAL : c.tone === "out" ? DOWN : UP);
 
-/** Uma barra por componente com a magnitude; cor e rótulo dizem se soma (verde) ou subtrai (vermelho). */
-export function ComponentBars({ items }: { items: ComponentDatum[] }) {
+/** Uma barra por componente com a magnitude; a cor diz se é saldo (azul), soma (verde) ou subtrai (vermelho). */
+export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDatum[]; currency?: RefCurrency }) {
   const data = items.map((c) => ({ ...c, abs: Math.abs(c.signedCents ?? 0) }));
   if (!data.some((d) => d.abs > 0)) return <Empty text="Sem valores para comparar" />;
   return (
@@ -144,20 +164,21 @@ export function ComponentBars({ items }: { items: ComponentDatum[] }) {
         <BarChart data={data} margin={{ top: 24, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={0.6} />
           <XAxis dataKey="short" tickLine={false} axisLine={false} tick={axisTick} />
-          <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => compact.format(v / 100)} />
+          <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => compact.format(v / MINOR[currency])} />
           <Tooltip
             cursor={{ fill: "var(--muted)", opacity: 0.4 }}
             contentStyle={tooltipStyle}
             formatter={(_, __, item) => {
               const d = item.payload as ComponentDatum;
               const v = d.signedCents ?? 0;
-              return [`${v < 0 ? "- " : "+ "}${brl(Math.abs(v))}`, d.label];
+              const sign = d.tone === "neutral" ? (v < 0 ? "- " : "") : v < 0 ? "- " : "+ ";
+              return [`${sign}${money(Math.abs(v), currency)}`, d.label];
             }}
             labelFormatter={() => ""}
           />
           <Bar dataKey="abs" radius={[4, 4, 0, 0]} isAnimationActive={false}>
             {data.map((d) => (
-              <Cell key={d.key} fill={(d.signedCents ?? 0) < 0 ? DOWN : UP} />
+              <Cell key={d.key} fill={barColor(d)} />
             ))}
             <LabelList
               dataKey="abs"
@@ -169,7 +190,7 @@ export function ComponentBars({ items }: { items: ComponentDatum[] }) {
                   textAnchor="middle"
                   style={{ fill: "var(--foreground)", fontSize: 11, fontWeight: 600 }}
                 >
-                  {brl(Number(value))}
+                  {money(Number(value), currency)}
                 </text>
               )}
             />
@@ -181,13 +202,14 @@ export function ComponentBars({ items }: { items: ComponentDatum[] }) {
 }
 
 /** Participação de cada componente sobre a soma dos valores absolutos (não é o saldo líquido). */
-export function ComponentPie({ items }: { items: ComponentDatum[] }) {
+export function ComponentPie({ items, currency = "BRL" }: { items: ComponentDatum[]; currency?: RefCurrency }) {
   const colors = componentColors(items);
   const sorted = [...items].sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
   return (
     <PieLegend
       labelInside
       empty="Sem valores para distribuir"
+      format={(v) => money(v, currency)}
       slices={sorted.map((c) => ({ name: c.label, cents: Math.abs(c.signedCents ?? 0), share: c.share ?? 0, color: colors[c.key] }))}
     />
   );

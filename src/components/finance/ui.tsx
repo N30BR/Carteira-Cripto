@@ -1,11 +1,13 @@
 // Peças visuais comuns de Lançamentos, Faturas, Transações e Resumo (tema escuro do app).
 import type { LucideIcon } from "lucide-react";
-import { ArrowDown, ArrowUp } from "lucide-react";
-import { formatMoney } from "@/lib/currency";
+import { ArrowDown, ArrowUp, Scale } from "lucide-react";
+import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import { DOWN, UP } from "@/components/dashboard/palette";
 
 export const BLUE = "#4C66DD";
+/** Saldos patrimoniais no Resumo: nem entrada nem saída. */
+export const NEUTRAL = "#60A5FA";
 export { DOWN, UP };
 
 /** Cores das contas de cartão (até 4). */
@@ -29,31 +31,56 @@ export function accountColors(accounts: { id: number }[]): Record<number, string
 
 export const brl = (cents: number) => formatMoney(cents / 100, "BRL");
 
+/** Unidades mínimas por moeda: centavos (BRL, USDT) e satoshis (BTC). */
+export const MINOR: Record<RefCurrency, number> = { BRL: 100, USDT: 100, BTC: 100_000_000 };
+/** Formata um valor em unidades mínimas da moeda. */
+export const money = (minor: number, currency: RefCurrency = "BRL") => formatMoney(minor / MINOR[currency], currency);
+
 /** "2025-05-10" → "10/05/2025" */
 export const dateBr = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 
-/** Valor com sinal: verde e "+" se positivo, vermelho e "-" se negativo, neutro se zero. */
-export function SignedMoney({ cents, className, testId }: { cents: number; className?: string; testId?: string }) {
-  if (cents === 0) {
+/**
+ * Valor com sinal: verde e "+" se positivo, vermelho e "-" se negativo, sem cor se zero.
+ * `neutral`: saldo patrimonial, na cor neutra e sem "+". `cents` em unidades mínimas de `currency`.
+ */
+export function SignedMoney({
+  cents,
+  className,
+  testId,
+  currency = "BRL",
+  neutral,
+}: {
+  cents: number;
+  className?: string;
+  testId?: string;
+  currency?: RefCurrency;
+  neutral?: boolean;
+}) {
+  if (cents === 0 || neutral) {
     return (
-      <span className={cn("tabular-nums", className)} data-testid={testId}>
-        {brl(0)}
+      <span
+        className={cn("whitespace-nowrap tabular-nums", neutral && "font-semibold", className)}
+        style={neutral ? { color: NEUTRAL } : undefined}
+        data-testid={testId}
+      >
+        {cents < 0 ? "- " : ""}
+        {money(Math.abs(cents), currency)}
       </span>
     );
   }
   const up = cents > 0;
   return (
     <span className={cn("font-semibold whitespace-nowrap tabular-nums", className)} style={{ color: up ? UP : DOWN }} data-testid={testId}>
-      {up ? "+" : "-"} {brl(Math.abs(cents))}
+      {up ? "+" : "-"} {money(Math.abs(cents), currency)}
     </span>
   );
 }
 
-/** Etiqueta "↑ Entrada" (verde) ou "↓ Saída" (vermelha). */
-export function KindBadge({ kind, label }: { kind: "in" | "out"; label?: string }) {
+/** Etiqueta "↑ Entrada" (verde), "↓ Saída" (vermelha) ou neutra (saldo). */
+export function KindBadge({ kind, label }: { kind: "in" | "out" | "neutral"; label?: string }) {
   const up = kind === "in";
-  const Icon = up ? ArrowUp : ArrowDown;
-  const color = up ? UP : DOWN;
+  const Icon = kind === "neutral" ? Scale : up ? ArrowUp : ArrowDown;
+  const color = kind === "neutral" ? NEUTRAL : up ? UP : DOWN;
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium"

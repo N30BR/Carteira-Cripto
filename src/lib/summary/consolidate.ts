@@ -1,27 +1,33 @@
 // Função central do Resumo: indicadores, painel, gráficos, tabela e faixa de totais usam só este resultado.
 //
-// Saldo cripto e saldo em reais são posições (fotografia do patrimônio); faturas e transações são
-// movimentos do mês. Sem conciliação entre eles, o resultado é uma composição nominal
-// (estimativa): uma despesa que já baixou o saldo da conta seria contada de novo.
+// Saldo cripto (no início do período) e saldo em reais são posições: entram neutros, nem entrada nem saída.
+// No período: entradas de transações e valorização cripto somam; faturas, saídas e desvalorização subtraem.
+// Sem conciliação entre saldos e movimentos, o resultado é uma composição nominal (estimativa).
+// Valores em unidades mínimas da moeda escolhida (centavos; satoshis em BTC).
 
-export type ComponentKey = "crypto" | "fiat" | "invoices" | "inflow" | "outflow";
+export type ComponentKey = "crypto" | "fiat" | "invoices" | "inflow" | "outflow" | "variation";
+export type Tone = "neutral" | "in" | "out";
 
 export type SummaryInput = {
-  /** Saldo cripto em centavos de real; null quando não há cotação para converter. */
+  /** Saldo cripto no início do período; null sem preço/cotação. */
   cryptoCents: number | null;
-  /** Saldo das contas em reais, em centavos; null quando não há contas. */
+  /** Saldo das contas em reais; null quando indisponível. */
   fiatCents: number | null;
-  /** Faturas do mês (parcelas do mês), em centavos. */
+  /** Faturas (parcelas) dos meses do período. */
   invoicesCents: number;
   inflowCents: number;
   outflowCents: number;
+  /** Valorização (+) ou desvalorização (−) da carteira cripto no período; null sem histórico. */
+  cryptoVariationCents?: number | null;
 };
 
 export type SummaryComponent = {
   key: ComponentKey;
   label: string;
-  /** Valor com sinal (+ soma, − subtrai); null quando indisponível. */
+  /** Valor com sinal; null quando indisponível. */
   signedCents: number | null;
+  /** Neutro (saldo), entrada (+) ou saída (−). */
+  tone: Tone;
   /** Participação sobre a soma dos valores absolutos; null sem base ou indisponível. */
   share: number | null;
   classification: string;
@@ -30,46 +36,54 @@ export type SummaryComponent = {
 
 export type Summary = {
   components: SummaryComponent[];
+  /** Soma dos saldos (neutros). */
+  neutral: number;
   positive: number;
   negative: number;
+  /** neutral + positive − negative */
   result: number;
-  /** Componentes que ficaram fora da conta por falta de dado. */
   missing: ComponentKey[];
 };
 
-const META: Record<ComponentKey, { label: string; kind: "balance" | "invoice" | "flow"; note: string }> = {
-  crypto: { label: "Saldo Cripto", kind: "balance", note: "Saldo patrimonial" },
-  fiat: { label: "Saldo Fiduciário", kind: "balance", note: "Saldo em reais" },
-  invoices: { label: "Faturas", kind: "invoice", note: "Compromissos do mês" },
-  inflow: { label: "Entradas de Transações", kind: "flow", note: "Movimentações positivas" },
-  outflow: { label: "Saídas de Transações", kind: "flow", note: "Movimentações negativas" },
+const META: Record<ComponentKey, { label: string; note: string }> = {
+  crypto: { label: "Saldo Cripto", note: "Saldo no início do período" },
+  fiat: { label: "Saldo Fiduciário", note: "Saldo em reais" },
+  invoices: { label: "Faturas", note: "Compromissos do período" },
+  inflow: { label: "Entradas de Transações", note: "Movimentações positivas" },
+  outflow: { label: "Saídas de Transações", note: "Movimentações negativas" },
+  variation: { label: "Variação Cripto", note: "Valorização no período" },
 };
 
-function classify(key: ComponentKey, signed: number | null): string {
-  const kind = META[key].kind;
-  const sign = signed !== null && signed < 0 ? "(−)" : "(+)";
-  if (kind === "balance") return `Saldo patrimonial ${sign}`;
-  if (kind === "invoice") return "Fatura do mês (−)";
-  return key === "inflow" ? "Entrada de transação (+)" : "Saída de transação (−)";
+function describe(key: ComponentKey, v: number | null): { tone: Tone; classification: string } {
+  if (key === "crypto" || key === "fiat") return { tone: "neutral", classification: "Saldo patrimonial (neutro)" };
+  if (key === "invoices") return { tone: "out", classification: "Fatura do período (−)" };
+  if (key === "inflow") return { tone: "in", classification: "Entrada de transação (+)" };
+  if (key === "outflow") return { tone: "out", classification: "Saída de transação (−)" };
+  return (v ?? 0) < 0 ? { tone: "out", classification: "Desvalorização (−)" } : { tone: "in", classification: "Valorização (+)" };
 }
 
 export function consolidate(input: SummaryInput): Summary {
+  const round = (v: number | null | undefined) => (v === null || v === undefined ? null : Math.round(v));
   const signed: Record<ComponentKey, number | null> = {
-    crypto: input.cryptoCents === null ? null : Math.round(input.cryptoCents),
-    fiat: input.fiatCents === null ? null : Math.round(input.fiatCents),
-    invoices: -input.invoicesCents,
-    inflow: input.inflowCents,
-    outflow: -input.outflowCents,
+    crypto: round(input.cryptoCents),
+    fiat: round(input.fiatCents),
+    invoices: -Math.round(input.invoicesCents),
+    inflow: Math.round(input.inflowCents),
+    outflow: -Math.round(input.outflowCents),
+    variation: input.cryptoVariationCents === undefined ? 0 : round(input.cryptoVariationCents),
   };
   const keys = Object.keys(META) as ComponentKey[];
   const absTotal = keys.reduce((s, k) => s + Math.abs(signed[k] ?? 0), 0);
 
+  let neutral = 0;
   let positive = 0;
   let negative = 0;
   for (const k of keys) {
     const v = signed[k];
     if (v === null) continue;
-    if (v > 0) positive += v;
+    const { tone } = describe(k, v);
+    if (tone === "neutral") neutral += v;
+    else if (v > 0) positive += v;
     else negative += -v;
   }
 
@@ -81,13 +95,14 @@ export function consolidate(input: SummaryInput): Summary {
         label: META[key].label,
         signedCents: v,
         share: v === null || absTotal <= 0 ? null : Math.abs(v) / absTotal,
-        classification: classify(key, v),
-        note: META[key].note,
+        ...describe(key, v),
+        note: key === "variation" && (v ?? 0) < 0 ? "Desvalorização no período" : META[key].note,
       };
     }),
+    neutral,
     positive,
     negative,
-    result: positive - negative,
+    result: neutral + positive - negative,
     missing: keys.filter((k) => signed[k] === null),
   };
 }

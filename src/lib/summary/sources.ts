@@ -1,19 +1,18 @@
 import type { Db } from "@/db/client";
-import { factor } from "@/lib/currency";
 import { listAccounts, listBalances } from "@/lib/fiat/accounts";
 import { computeFiat } from "@/lib/fiat/calc";
 import { listHoldings } from "@/lib/holdings/holdings";
-import { computePortfolio } from "@/lib/portfolio/calc";
-import { getCurrentPrices } from "@/lib/prices";
-import { getRates } from "@/lib/prices/rates";
+import { getCurrentPrices, getHistory } from "@/lib/prices";
+import { portfolioValueAt } from "./window";
 
-export type CryptoBalance = {
-  /** Saldo em centavos de real; null sem preço ou sem cotação USDT/BRL. */
-  cents: number | null;
-  usdt: number | null;
-  /** Cotação USDT → BRL usada (Binance). */
-  usdtBrl: number | null;
-  /** Horário mais antigo entre os preços e a cotação usados. */
+export type CryptoPeriod = {
+  /** Valor da carteira (USDT) no início do período; null sem preço/histórico nessa data. */
+  startUsdt: number | null;
+  /** Valor no fim do período (ou agora, se o período ainda não acabou), com as mesmas moedas. */
+  endUsdt: number | null;
+  /** Fim usado na comparação (agora, se o período ainda não terminou). */
+  endMs: number;
+  /** Horário mais antigo entre os preços usados. */
   asOf: Date | null;
   /** Binance indisponível: valores vieram do cache antigo. */
   stale: boolean;
@@ -21,30 +20,49 @@ export type CryptoBalance = {
   reason: string | null;
 };
 
+const DAY = 86_400_000;
 const oldest = (...dates: (Date | null)[]) =>
   dates.filter((d): d is Date => d instanceof Date).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
 
-/** Saldo cripto atual (mesmo cálculo da aba Cripto, em USDT) convertido pela cotação USDT/BRL da Binance. */
-export async function cryptoBalanceBrl(db: Db, userId: number, now = new Date()): Promise<CryptoBalance> {
+/**
+ * Carteira cripto no período: valor no início (quantidades atuais × preço da época) e no fim,
+ * com as mesmas moedas nos dois lados. A diferença é a valorização/desvalorização do período.
+ */
+export async function cryptoPeriod(db: Db, userId: number, startMs: number, endMs: number, now = new Date()): Promise<CryptoPeriod> {
   const holdings = listHoldings(db, userId);
-  if (!holdings.length) return { cents: 0, usdt: 0, usdtBrl: null, asOf: null, stale: false, empty: true, reason: null };
-  const [current, rates] = await Promise.all([
-    getCurrentPrices(
-      db,
-      holdings.map((h) => h.coinId),
-      now,
-    ),
-    getRates(db, now),
-  ]);
-  const asOf = oldest(current.fetchedAt, rates.fetchedAt);
-  const stale = current.stale || rates.stale;
-  const usdt = computePortfolio(holdings, current.prices).total;
-  if (usdt === null) return { cents: null, usdt: null, usdtBrl: null, asOf, stale, empty: false, reason: "Preços indisponíveis" };
-  const f = factor("USDT", "BRL", rates);
-  if (f === null) {
-    return { cents: null, usdt, usdtBrl: null, asOf, stale, empty: false, reason: "Cotação USDT/BRL indisponível" };
+  const end = Math.min(endMs, now.getTime());
+  if (!holdings.length) return { startUsdt: 0, endUsdt: 0, endMs: end, asOf: null, stale: false, empty: true, reason: null };
+
+  const current = await getCurrentPrices(
+    db,
+    holdings.map((h) => h.coinId),
+    now,
+  );
+  const priced = holdings.filter((h) => current.prices[h.coinId]).map((h) => h.coinId);
+  if (!priced.length) {
+    return { startUsdt: null, endUsdt: null, endMs: end, asOf: current.fetchedAt, stale: current.stale, empty: false, reason: "Preços indisponíveis" };
   }
-  return { cents: Math.round(usdt * f * 100), usdt, usdtBrl: f, asOf, stale, empty: false, reason: null };
+  const nowValue = holdings.filter((h) => priced.includes(h.coinId)).reduce((s, h) => s + Number(h.quantity) * current.prices[h.coinId].usd, 0);
+  // Período que ainda não começou: vale o saldo de agora, sem variação.
+  if (startMs >= now.getTime()) {
+    return { startUsdt: nowValue, endUsdt: nowValue, endMs: now.getTime(), asOf: current.fetchedAt, stale: current.stale, empty: false, reason: null };
+  }
+  const age = now.getTime() - startMs;
+  if (age > 365 * DAY) {
+    return { startUsdt: null, endUsdt: null, endMs: end, asOf: current.fetchedAt, stale: current.stale, empty: false, reason: "Sem histórico de preços tão antigo" };
+  }
+  // Até 29 dias: velas de 1 hora; antes disso: diárias (mesmo histórico da aba Cripto).
+  const hist = await getHistory(db, priced, age <= 29 * DAY ? "1M" : "1A", now);
+  const coins = priced.filter((id) => (hist.history[id] ?? []).some(([t]) => t <= startMs));
+  const asOf = oldest(current.fetchedAt, hist.oldestFetchedAt);
+  const stale = current.stale || hist.stale;
+  if (!coins.length) return { startUsdt: null, endUsdt: null, endMs: end, asOf, stale, empty: false, reason: "Sem preço no início do período" };
+  const startUsdt = portfolioValueAt(holdings, hist.history, startMs, coins);
+  const endUsdt =
+    endMs >= now.getTime()
+      ? holdings.filter((h) => coins.includes(h.coinId)).reduce((s, h) => s + Number(h.quantity) * current.prices[h.coinId].usd, 0)
+      : portfolioValueAt(holdings, hist.history, endMs, coins);
+  return { startUsdt, endUsdt, endMs: end, asOf, stale, empty: false, reason: null };
 }
 
 /**

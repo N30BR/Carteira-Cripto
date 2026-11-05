@@ -142,13 +142,26 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByTestId("tx-balance")).toHaveText("+ R$ 1.720,00");
   await expect(page.getByRole("button", { name: "Saídas (1)" })).toBeVisible();
 
-  // Resumo: cripto 150.000 + reais 5.000 + entradas 2.500 − faturas 400 − saídas 780
+  // Resumo: saldo cripto no início do mês + variação no mês = 150.000 (saldo de hoje);
+  // + reais 5.000 (neutros) + entradas 2.500 − faturas 400 − saídas 780
   await page.getByRole("link", { name: "Resumo" }).click();
-  await expect(page.getByTestId("sum-crypto").first()).toHaveText("+ R$ 150.000,00");
-  await expect(page.getByTestId("sum-fiat").first()).toHaveText("+ R$ 5.000,00");
+  await expect(page.getByTestId("sum-fiat").first()).toHaveText("R$ 5.000,00");
+  await expect(page.getByTestId("sum-crypto").first()).not.toContainText("+");
+  await expect(page.getByTestId("sum-variation").first()).toBeVisible();
   await expect(page.getByTestId("sum-invoices").first()).toHaveText("- R$ 400,00");
   await expect(page.getByTestId("sum-result")).toHaveText("+ R$ 156.320,00");
   await expect(page.getByText("Consolidação estimada (sem conciliação)")).toBeVisible();
+  // Em USDT (1 USDT = R$ 5) e com período de 1 ano a partir do mês
+  await page.getByRole("button", { name: /Moeda de referência/ }).click();
+  await page.getByRole("menuitemradio", { name: /USDT/ }).click();
+  await expect(page).toHaveURL(/moeda=USDT/);
+  await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.264,00");
+  await page.getByRole("link", { name: "1A", exact: true }).click();
+  await expect(page).toHaveURL(/periodo=1A/);
+  // Em 1 ano entram as 3 parcelas da cadeira (R$ 1.200 = US$ 240), não só a do mês (US$ 80).
+  await expect(page.getByTestId("sum-invoices").first()).toHaveText("- US$ 240,00");
+  await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.104,00");
+  await expect(page.getByText(/Totais do período \(01\//)).toBeVisible();
 
   // Pendências: tarefa com checklist, progresso, concluir e nota rápida que vira tarefa
   await page.getByRole("link", { name: "Pendências" }).click();
