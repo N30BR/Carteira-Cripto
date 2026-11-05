@@ -12,8 +12,8 @@ export function AppHeader({ user }: { user: SessionUser }) {
     { href: "/transacoes", label: "Transações" },
     { href: "/resumo", label: "Resumo" },
     { href: "/lancamentos", label: "Lançamentos" },
-    { href: "/pendencias", label: "Pendências" },
     { href: "/ativos", label: "Ativos" },
+    { href: "/pendencias", label: "Pendências" },
     ...(user.isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];
   return (
