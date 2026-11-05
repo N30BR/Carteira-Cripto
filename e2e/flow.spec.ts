@@ -87,6 +87,32 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByTestId("card-PF-total")).toHaveText("R$ 0,00");
   await expect(page.getByText("1 compra parcelada ativa")).toBeVisible();
 
+  // Pendências: tarefa com checklist, progresso, concluir e nota rápida que vira tarefa
+  await page.getByRole("link", { name: "Pendências" }).click();
+  await expect(page.getByText("Nenhuma tarefa ainda")).toBeVisible();
+  await page.getByRole("button", { name: "Nova tarefa" }).click();
+  await page.getByLabel("Título da nova tarefa").fill("Enviar orçamento");
+  await page.getByRole("button", { name: "Criar", exact: true }).click();
+  const tasks = page.getByRole("list", { name: "Tarefas" });
+  await expect(tasks.locator("li")).toHaveCount(1);
+  for (const item of ["Separar documentos", "Revisar valores"]) {
+    await page.getByLabel("Novo item do checklist").fill(item);
+    await page.getByRole("button", { name: "Adicionar item" }).click();
+    await expect(page.getByLabel(`Marcar ${item}`)).toBeVisible();
+  }
+  await page.getByLabel("Marcar Separar documentos").check();
+  await expect(page.getByTestId("detail-progress")).toHaveText("50%");
+  await expect(page.getByTestId("ind-inProgress")).toHaveText("1");
+  await page.getByLabel("Concluir Enviar orçamento").check();
+  await expect(page.getByTestId("ind-done")).toHaveText("1");
+  await expect(page.getByTestId("detail-progress")).toHaveText("100%");
+  await page.getByRole("button", { name: "Nova nota rápida" }).click();
+  await page.getByLabel("Texto da nota rápida").fill("Pesquisar cursos de IA");
+  await page.getByRole("button", { name: "Salvar", exact: true }).click();
+  await page.getByRole("button", { name: "Virar tarefa" }).click();
+  await expect(tasks.locator("li").first()).toContainText("Pesquisar cursos de IA");
+  await expect(tasks.locator("li").last()).toContainText("Enviar orçamento");
+
   // Sair
   await page.getByRole("button", { name: /admin/ }).click();
   await page.getByRole("menuitem", { name: "Sair" }).click();

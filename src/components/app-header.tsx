@@ -10,6 +10,7 @@ export function AppHeader({ user }: { user: SessionUser }) {
     { href: "/fiduciario", label: "R$", title: "Dashboard fiduciário" },
     { href: "/faturas", label: "Faturas" },
     { href: "/lancamentos", label: "Lançamentos" },
+    { href: "/pendencias", label: "Pendências" },
     { href: "/ativos", label: "Ativos" },
     ...(user.isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];

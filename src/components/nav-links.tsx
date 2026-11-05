@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -9,10 +10,15 @@ export type NavItem = { href: string; label: string; title?: string };
 /** Abas do menu; a aba da página atual fica destacada. */
 export function NavLinks({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
+  // No celular o menu rola de lado: mantém a aba atual visível.
+  useEffect(() => {
+    navRef.current?.querySelector<HTMLElement>("[aria-current=page]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [pathname]);
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
 
   return (
-    <nav className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm" aria-label="Principal">
+    <nav ref={navRef} className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm" aria-label="Principal">
       {items.map((l) => {
         const active = isActive(l.href);
         return (
