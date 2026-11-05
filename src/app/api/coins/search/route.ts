@@ -16,5 +16,9 @@ export async function GET(request: Request) {
   limiter.hit(key);
 
   const q = new URL(request.url).searchParams.get("q") ?? "";
-  return Response.json(await searchCoins(getDb(), q));
+  const results = await searchCoins(getDb(), q);
+  if (results === null) {
+    return Response.json({ error: "Lista de moedas indisponível no momento. Tente de novo em instantes." }, { status: 503 });
+  }
+  return Response.json(results);
 }

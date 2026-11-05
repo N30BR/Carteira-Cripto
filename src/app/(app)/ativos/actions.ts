@@ -23,7 +23,9 @@ export async function addHoldingAction(coinId: string, rawQuantity: string): Pro
   const q = parseQuantity(String(rawQuantity ?? ""));
   if (!q.ok) return q;
   const db = getDb();
-  if (!(await isListedAsset(db, coinId))) return { ok: false, error: "Moeda não encontrada na Binance" };
+  const listed = await isListedAsset(db, coinId);
+  if (listed === null) return { ok: false, error: "Não foi possível consultar a Binance agora. Tente de novo em instantes." };
+  if (!listed) return { ok: false, error: "Moeda não encontrada na Binance" };
 
   // Símbolo e nome definidos aqui, não pelo navegador.
   const r = upsertHolding(db, user.id, { coinId, symbol: coinId, name: coinName(coinId), quantity: q.value });

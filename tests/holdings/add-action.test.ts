@@ -33,3 +33,18 @@ describe("addHoldingAction", () => {
     expect((await addHoldingAction("btc; drop", "1")).ok).toBe(false);
   });
 });
+
+describe("addHoldingAction com a Binance fora do ar", () => {
+  test("não diz que a moeda não existe quando a lista está indisponível", async () => {
+    const prices = await import("@/lib/prices");
+    const spy = vi.spyOn(prices, "isListedAsset").mockResolvedValueOnce(null);
+    const db = testDb();
+    state.db = db;
+    state.userId = db.insert(users).values({ username: "bia", passwordHash: "x", isAdmin: false, createdAt: new Date() }).returning().all()[0].id;
+    expect(await addHoldingAction("BTC", "1")).toEqual({
+      ok: false,
+      error: "Não foi possível consultar a Binance agora. Tente de novo em instantes.",
+    });
+    spy.mockRestore();
+  });
+});

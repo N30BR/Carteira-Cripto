@@ -1,3 +1,5 @@
+const SWEEP_ABOVE = 1000;
+
 /** Conta eventos por chave numa janela deslizante, em memória. */
 export function createWindowLimiter(max: number, windowMs: number) {
   const events = new Map<string, number[]>();
@@ -12,6 +14,8 @@ export function createWindowLimiter(max: number, windowMs: number) {
 
   return {
     hit(key: string, now = new Date()): void {
+      // Chaves que nunca voltam (ex.: IPs) seriam guardadas para sempre; limpa quando cresce.
+      if (events.size > SWEEP_ABOVE) for (const k of [...events.keys()]) recent(k, now);
       const list = recent(key, now);
       list.push(now.getTime());
       events.set(key, list);
@@ -21,6 +25,9 @@ export function createWindowLimiter(max: number, windowMs: number) {
     },
     reset(): void {
       events.clear();
+    },
+    size(): number {
+      return events.size;
     },
   };
 }

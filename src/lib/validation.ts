@@ -14,10 +14,10 @@ export function validatePassword(pw: string): string | null {
 
 export type ParsedQuantity = { ok: true; value: string } | { ok: false; error: string };
 
-/** Aceita "0,5" ou "0.5"; sem separador de milhar; até 18 casas decimais; maior que zero. */
+/** Aceita "0,5" ou "0.5"; sem separador de milhar; até 15 dígitos inteiros e 18 casas decimais; maior que zero. */
 export function parseQuantity(raw: string): ParsedQuantity {
   const s = raw.replace(/\s+/g, "").replace(",", ".");
-  if (!/^-?\d+(\.\d{1,18})?$/.test(s)) return { ok: false, error: "Quantidade inválida" };
+  if (!/^-?\d{1,15}(\.\d{1,18})?$/.test(s)) return { ok: false, error: "Quantidade inválida" };
   if (s.startsWith("-") || Number(s) <= 0) return { ok: false, error: "Informe uma quantidade maior que zero" };
   return { ok: true, value: s };
 }

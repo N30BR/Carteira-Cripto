@@ -47,13 +47,27 @@ async function get<T>(path: string, params: Record<string, string>, timeoutMs = 
         await sleep(RETRY_DELAY_MS);
         res = await request();
       }
-      if (!res.ok) throw new Error(`Binance ${res.status} em ${path}`);
+      if (!res.ok) throw new BinanceError(res.status, path);
       return (await res.json()) as T;
     } catch (e) {
-      pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS;
+      // Erro do pedido (ex.: símbolo inválido) não significa que a Binance está fora: não pausa.
+      if (!(e instanceof BinanceError && e.isRequestError)) pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS;
       throw e;
     }
   });
+}
+
+export class BinanceError extends Error {
+  constructor(
+    readonly status: number,
+    path: string,
+  ) {
+    super(`Binance ${status} em ${path}`);
+  }
+  /** 4xx que não é limite de requisições: o problema está no pedido, não na API. */
+  get isRequestError(): boolean {
+    return this.status >= 400 && this.status < 500 && this.status !== 429 && this.status !== 418;
+  }
 }
 
 /** Moedas negociadas contra USDT no mercado à vista (ex.: "BTC", "SOL"). */
@@ -86,9 +100,13 @@ export async function fetchTickers(ids: string[]): Promise<Record<string, Curren
   return out;
 }
 
-/** Velas de fechamento: 30 dias de hora em hora ou 365 dias diários. Usa o horário de fechamento de cada vela. */
+/**
+ * Velas de fechamento: 30 dias de hora em hora ou 365 dias diários. Usa o horário de fechamento de cada vela.
+ * Pede 2 velas a mais que o período: a primeira fecha um intervalo depois de abrir e a última ainda está aberta,
+ * e sem essa folga o começo da curva ficaria sem preço (pico em zero no primeiro ponto).
+ */
 export async function fetchKlines(id: string, days: 30 | 365): Promise<PricePoint[]> {
-  const params = days === 30 ? { interval: "1h", limit: "720" } : { interval: "1d", limit: "365" };
+  const params = days === 30 ? { interval: "1h", limit: String(30 * 24 + 2) } : { interval: "1d", limit: String(365 + 2) };
   const body = await get<unknown[][]>("/api/v3/klines", { symbol: id + QUOTE, ...params });
   if (!Array.isArray(body)) throw new Error(`Binance: sem histórico para ${id}`);
   return body

@@ -58,10 +58,10 @@ describe("lista de moedas", () => {
 
   test("busca por símbolo e nome: exato primeiro, depois prefixo, com nome amigável", async () => {
     stubFetch(() => json([]));
-    const r = await searchCoins(testDb(), "bit");
+    const r = (await searchCoins(testDb(), "bit"))!;
     expect(r.map((c) => c.id)).toEqual(["BIT", "BTC"]);
     expect(r[1]).toEqual({ id: "BTC", symbol: "BTC", name: "Bitcoin" });
-    expect((await searchCoins(testDb(), "sol"))[0]).toEqual({ id: "SOL", symbol: "SOL", name: "Solana" });
+    expect((await searchCoins(testDb(), "sol"))![0]).toEqual({ id: "SOL", symbol: "SOL", name: "Solana" });
   });
 
   test("termo curto não busca", async () => {
@@ -166,7 +166,7 @@ describe("getHistory", () => {
     expect(reqs).toHaveLength(1);
     expect(reqs[0].searchParams.get("symbol")).toBe("BTCUSDT");
     expect(reqs[0].searchParams.get("interval")).toBe("1h");
-    expect(reqs[0].searchParams.get("limit")).toBe("720");
+    expect(reqs[0].searchParams.get("limit")).toBe("722");
     expect(a.history).toEqual({ BTC: [[1000, 5]] });
     expect(b.history).toEqual(a.history);
   });
@@ -177,7 +177,7 @@ describe("getHistory", () => {
     const reqs = calls(fn, "/api/v3/klines");
     expect(reqs).toHaveLength(1);
     expect(reqs[0].searchParams.get("interval")).toBe("1d");
-    expect(reqs[0].searchParams.get("limit")).toBe("365");
+    expect(reqs[0].searchParams.get("limit")).toBe("367");
     expect(Object.keys(r.history)).toEqual(["BTC"]);
   });
 

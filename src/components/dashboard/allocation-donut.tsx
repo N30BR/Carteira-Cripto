@@ -67,7 +67,7 @@ export function AllocationDonut({ rows }: { rows: Slice[] }) {
         {slices.map((s) => (
           <li key={s.symbol} className="flex items-center gap-2">
             <span className="size-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
-            <span className="font-medium uppercase">{s.symbol}</span>
+            <span className="font-medium">{s.symbol}</span>
             <span className="ml-auto tabular-nums text-muted-foreground">{formatPct(s.share)}</span>
           </li>
         ))}

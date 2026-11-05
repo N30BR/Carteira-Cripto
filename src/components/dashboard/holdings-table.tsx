@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatPct, formatQty, formatUsd } from "@/lib/format";
+import { formatPct, formatPrice, formatQty, formatUsd } from "@/lib/format";
 import type { PortfolioRow } from "@/lib/portfolio/calc";
 import { DOWN, UP } from "./palette";
 
@@ -62,8 +62,8 @@ export function HoldingsTable({ rows }: { rows: PortfolioRow[] }) {
           {sorted.map((r) => (
             <TableRow key={r.id}>
               <TableCell>
-                <span className="font-medium uppercase">{r.symbol}</span>{" "}
-                <span className="text-muted-foreground">{r.name}</span>
+                <span className="font-medium uppercase">{r.symbol}</span>
+                {r.name !== r.symbol && <span className="ml-1 text-muted-foreground">{r.name}</span>}
                 {r.price === null && (
                   <Badge variant="outline" className="ml-2">
                     sem preço
@@ -71,7 +71,7 @@ export function HoldingsTable({ rows }: { rows: PortfolioRow[] }) {
                 )}
               </TableCell>
               <TableCell className="text-right tabular-nums">{formatQty(r.quantity)}</TableCell>
-              <TableCell className="text-right tabular-nums">{r.price === null ? "—" : formatUsd(r.price)}</TableCell>
+              <TableCell className="text-right tabular-nums">{r.price === null ? "—" : formatPrice(r.price)}</TableCell>
               <TableCell className="text-right tabular-nums">{r.value === null ? "—" : formatUsd(r.value)}</TableCell>
               <TableCell className="text-right tabular-nums">{r.share === null ? "—" : formatPct(r.share)}</TableCell>
               <TableCell

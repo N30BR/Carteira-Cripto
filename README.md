@@ -43,7 +43,7 @@ Não precisa de chave. O app usa a API pública de dados de mercado da Binance (
 |---|---|---|
 | `ADMIN_USERNAME` | ex.: `pedro` | só no 1º deploy |
 | `ADMIN_PASSWORD` | senha forte (mín. 8) | só no 1º deploy |
-| `APP_DOMAIN` | ex.: `carteira.seudominio.com` | opcional: use se as ações de formulário derem erro de origem |
+| `APP_DOMAIN` | ex.: `carteira.seudominio.com` | opcional: use se as ações de formulário derem erro de origem. É lido **no build**: defina também em *Build Args* |
 | `TRUSTED_PROXY_HOPS` | `1` (padrão) ou `2` com Cloudflare na frente | opcional |
 | `APP_TIMEZONE` | `America/Sao_Paulo` (padrão) | opcional |
 | `BINANCE_BASE_URL` | `https://data-api.binance.vision` (padrão) | opcional |

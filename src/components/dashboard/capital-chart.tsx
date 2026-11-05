@@ -56,11 +56,11 @@ export function CapitalChart({
               dataKey="value"
               orientation="right"
               domain={["auto", "auto"]}
-              tickFormatter={(v: number) => `$${compact.format(v)}`}
+              tickFormatter={(v: number) => `US$ ${compact.format(v)}`}
               tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
               axisLine={false}
               tickLine={false}
-              width={56}
+              width={88}
             />
             <Tooltip
               cursor={{ stroke: "var(--border)" }}

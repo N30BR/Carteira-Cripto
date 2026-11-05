@@ -31,40 +31,35 @@ export async function createUser(
   const username = normalizeUsername(input.username);
   const invalid = validateUsername(username) ?? validatePassword(input.password);
   if (invalid) return fail(invalid);
+  // O hash vem antes: a checagem e o insert rodam juntos, sem await no meio,
+  // então duas criações simultâneas do mesmo nome não passam as duas.
+  const passwordHash = await hashPassword(input.password);
   if (db.select({ id: users.id }).from(users).where(eq(users.username, username)).get()) {
     return fail("Usuário já existe");
   }
-  db.insert(users)
-    .values({
-      username,
-      passwordHash: await hashPassword(input.password),
-      isAdmin: input.isAdmin,
-      createdAt: new Date(),
-    })
-    .run();
+  db.insert(users).values({ username, passwordHash, isAdmin: input.isAdmin, createdAt: new Date() }).run();
   return { ok: true };
 }
 
 export async function resetPassword(db: Db, userId: number, newPassword: string): Promise<Result> {
   const invalid = validatePassword(newPassword);
   if (invalid) return fail(invalid);
-  db.update(users)
-    .set({ passwordHash: await hashPassword(newPassword), failedAttempts: 0, lockedUntil: null })
-    .where(eq(users.id, userId))
-    .run();
+  const passwordHash = await hashPassword(newPassword);
+  const r = db.update(users).set({ passwordHash, failedAttempts: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
+  if (!r.changes) return fail("Usuário não encontrado");
   deleteUserSessions(db, userId);
   return { ok: true };
 }
 
 export function unlockUser(db: Db, userId: number): Result {
-  db.update(users).set({ failedAttempts: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
-  return { ok: true };
+  const r = db.update(users).set({ failedAttempts: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
+  return r.changes ? { ok: true } : fail("Usuário não encontrado");
 }
 
 export function deleteUser(db: Db, actorId: number, targetId: number): Result {
   if (actorId === targetId) return fail("Você não pode remover a si mesmo");
   const target = db.select({ isAdmin: users.isAdmin }).from(users).where(eq(users.id, targetId)).get();
-  if (!target) return { ok: true };
+  if (!target) return fail("Usuário não encontrado");
   if (target.isAdmin) {
     const [{ n }] = db.select({ n: count() }).from(users).where(eq(users.isAdmin, true)).all();
     if (n <= 1) return fail("Não é possível remover o último administrador");

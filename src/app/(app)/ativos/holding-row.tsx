@@ -39,8 +39,8 @@ export function HoldingRow({ h }: { h: Holding }) {
   return (
     <TableRow>
       <TableCell>
-        <span className="font-medium">{h.name}</span>{" "}
-        <span className="text-muted-foreground uppercase">{h.symbol}</span>
+        <span className="font-medium uppercase">{h.symbol}</span>
+        {h.name !== h.symbol && <span className="ml-1 text-muted-foreground">{h.name}</span>}
       </TableCell>
       <TableCell className="text-right tabular-nums">
         {editing ? (

@@ -6,11 +6,15 @@ COPY package.json package-lock.json ./
 # Os módulos nativos (better-sqlite3, argon2) já vêm compilados; sem scripts o npm
 # não tenta recompilar com node-gyp (que exigiria python/g++ na imagem).
 RUN npm ci --ignore-scripts \
- && (node -e "require('@node-rs/argon2')" || npm i --no-save --ignore-scripts @node-rs/argon2-linux-x64-gnu)
+ && (node -e "require('@node-rs/argon2')" \
+     || npm i --no-save --ignore-scripts "@node-rs/argon2-linux-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')-gnu")
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# O next.config é lido no build: o domínio precisa estar disponível aqui (Build Args no Easypanel).
+ARG APP_DOMAIN
+ENV APP_DOMAIN=$APP_DOMAIN
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

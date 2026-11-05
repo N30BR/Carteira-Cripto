@@ -104,7 +104,7 @@ Fluxo do dashboard: `requireUser()` → `listHoldings(userId)` → `getCurrentPr
 ### Regras de entrada
 - Username: 3–32 caracteres, `a-z 0-9 . _ -`, salvo com `trim()` e em minúsculas.
 - Senha: 8–256 caracteres.
-- Quantidade: número > 0, aceita vírgula ou ponto como separador decimal, sem separador de milhar, até 18 casas.
+- Quantidade: número > 0, aceita vírgula ou ponto como separador decimal, sem separador de milhar, até 15 dígitos inteiros e 18 casas decimais.
 - Termo de busca: `trim()`, minúsculo, 2–50 caracteres.
 
 ### Primeiro administrador
@@ -126,7 +126,7 @@ Fluxo do dashboard: `requireUser()` → `listHoldings(userId)` → `getCurrentPr
 - Base `BINANCE_BASE_URL` (padrão `https://data-api.binance.vision`), sem chave. Preço em USDT tratado como US$; o próprio USDT vale 1, com variação 0 e histórico fixo em 1.
 - Lista de moedas: `/api/v3/exchangeInfo` (pares `*USDT` com status TRADING), cache de 24 h. Preço e histórico só são pedidos para moedas dessa lista, porque um símbolo inválido faz a Binance recusar o pedido inteiro.
 - Preço atual: `/api/v3/ticker/24hr?symbols=[...]` (`lastPrice`, `priceChangePercent`).
-- Histórico: `/api/v3/klines` com velas de 1 h (`limit=720`; serve 7D e 30D) e diárias (`limit=365`; serve 1A). Cada ponto usa o horário e o preço de fechamento da vela.
+- Histórico: `/api/v3/klines` com velas de 1 h (`limit=722`; serve 7D e 30D) e diárias (`limit=367`; serve 1A) — 2 velas de folga para cobrir o início do período. Cada ponto usa o horário e o preço de fechamento da vela.
 - No máximo 2 requisições simultâneas; timeout de 8 s (20 s para a lista); em 429, uma nova tentativa após 2 s; depois de qualquer falha, a API não é chamada por 60 s.
 - A Binance bloqueia alguns países (ex.: EUA): a VPS precisa estar numa região atendida.
 
@@ -145,7 +145,8 @@ Fluxo do dashboard: `requireUser()` → `listHoldings(userId)` → `getCurrentPr
 
 ### Formatação
 - pt-BR: `US$ 48.230,12`, percentuais com 2 casas.
-- Quantidades: até 8 casas decimais, sem zeros à direita, sem notação científica.
+- Quantidades: até 8 casas decimais, sem zeros à direita, sem notação científica; valores positivos menores aparecem como `< 0,00000001`.
+- Preço unitário abaixo de US$ 1: até 4 dígitos significativos (ex.: `US$ 0,00001234`).
 
 ## 8. Tratamento de erros
 
