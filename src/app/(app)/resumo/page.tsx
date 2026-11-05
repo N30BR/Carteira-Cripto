@@ -135,7 +135,13 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
     return c.signedCents === null ? (
       <span className="text-base text-muted-foreground">Indisponível</span>
     ) : (
-      <SignedMoney cents={c.signedCents} currency={currency} neutral={c.tone === "neutral"} testId={`sum-${key}`} />
+      <SignedMoney
+        cents={c.signedCents}
+        currency={currency}
+        neutral={c.tone === "neutral"}
+        showSign={key === "variation"}
+        testId={`sum-${key}`}
+      />
     );
   };
   const items = summary.components.map((c) => ({ ...c, short: SHORT[c.key] }));
@@ -159,7 +165,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {summary.components.map((c) => (
-          <StatCard compact key={c.key} icon={c.key === "variation" && c.tone === "out" ? TrendingDown : ICONS[c.key]} color={toneColor(c.tone)} title={c.label} hint={hints[c.key]}>
+          <StatCard compact key={c.key} icon={c.key === "variation" && (c.signedCents ?? 0) < 0 ? TrendingDown : ICONS[c.key]} color={toneColor(c.tone)} title={c.label} hint={hints[c.key]}>
             {valueOf(c.key)}
           </StatCard>
         ))}
@@ -177,7 +183,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                 <Info className="size-3.5" /> Consolidação estimada (sem conciliação)
               </span>
               <p>
-                Saldos (cripto no início do período e reais) + entradas e valorização − faturas, saídas e desvalorização de{" "}
+                Patrimônio (saldo cripto no início do período + variação cripto + saldo em reais) + entradas − faturas e saídas de{" "}
                 {periodLabel}. Não é o patrimônio efetivo: um gasto que já baixou o saldo de uma conta aparece de novo como fatura ou
                 saída.
               </p>
@@ -190,7 +196,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
           <dl className="flex flex-col justify-center gap-2 text-sm">
             <div className="flex items-center justify-between gap-4 border-b py-2">
               <dt className="flex items-center gap-2">
-                <span className="size-3 rounded-sm" style={{ background: NEUTRAL }} /> Saldos patrimoniais (neutros)
+                <span className="size-3 rounded-sm" style={{ background: NEUTRAL }} /> Patrimônio (saldos e variação cripto)
               </dt>
               <dd>
                 <SignedMoney cents={summary.neutral} currency={currency} neutral testId="sum-neutral" />
@@ -293,7 +299,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
             }
           >
             <TotalChip color={NEUTRAL}>
-              Saldos (neutros): <SignedMoney cents={summary.neutral} currency={currency} neutral />
+              Patrimônio (neutro): <SignedMoney cents={summary.neutral} currency={currency} neutral />
             </TotalChip>
             <TotalChip color={UP}>
               Entradas totais: <SignedMoney cents={summary.positive} currency={currency} />

@@ -8,10 +8,10 @@ describe("consolidação do resumo", () => {
   // Saldos neutros; variação cripto positiva.
   const input = { ...example, cryptoVariationCents: 520000 };
 
-  test("saldos são neutros; entradas = transações + valorização; resultado = saldos + entradas − saídas", () => {
+  test("saldos e variação cripto são neutros (patrimônio); entradas = transações; resultado = neutros + entradas − saídas", () => {
     const s = consolidate(input);
-    expect(s.neutral).toBe(2485000 + 1243000);
-    expect(s.positive).toBe(635000 + 520000);
+    expect(s.neutral).toBe(2485000 + 1243000 + 520000);
+    expect(s.positive).toBe(635000);
     expect(s.negative).toBe(137745 + 318000);
     expect(s.result).toBe(2485000 + 1243000 + 635000 + 520000 - 137745 - 318000);
     expect(s.components.map((c) => [c.key, c.signedCents, c.tone])).toEqual([
@@ -20,14 +20,15 @@ describe("consolidação do resumo", () => {
       ["invoices", -137745, "out"],
       ["inflow", 635000, "in"],
       ["outflow", -318000, "out"],
-      ["variation", 520000, "in"],
+      ["variation", 520000, "neutral"],
     ]);
   });
 
-  test("desvalorização cripto entra como saída", () => {
+  test("desvalorização cripto reduz o patrimônio, sem virar saída", () => {
     const s = consolidate({ ...example, cryptoVariationCents: -100000 });
-    expect(s.components.find((c) => c.key === "variation")).toMatchObject({ tone: "out", classification: "Desvalorização (−)" });
-    expect(s.negative).toBe(137745 + 318000 + 100000);
+    expect(s.components.find((c) => c.key === "variation")).toMatchObject({ tone: "neutral", classification: "Variação patrimonial (−)" });
+    expect(s.neutral).toBe(2485000 + 1243000 - 100000);
+    expect(s.negative).toBe(137745 + 318000);
   });
 
   test("participação sobre a soma dos valores absolutos; soma 100%", () => {
@@ -37,14 +38,14 @@ describe("consolidação do resumo", () => {
     expect(s.components.reduce((x, c) => x + (c.share ?? 0), 0)).toBeCloseTo(1, 12);
   });
 
-  test("classificações: saldo neutro, entrada, saída, valorização", () => {
+  test("classificações: saldo neutro, entrada, saída, variação patrimonial", () => {
     const byKey = Object.fromEntries(consolidate(input).components.map((c) => [c.key, c]));
     expect(byKey.crypto.classification).toBe("Saldo patrimonial (neutro)");
     expect(byKey.fiat.classification).toBe("Saldo patrimonial (neutro)");
     expect(byKey.inflow.classification).toBe("Entrada de transação (+)");
     expect(byKey.outflow.classification).toBe("Saída de transação (−)");
     expect(byKey.invoices.classification).toBe("Fatura do período (−)");
-    expect(byKey.variation.classification).toBe("Valorização (+)");
+    expect(byKey.variation.classification).toBe("Variação patrimonial (+)");
   });
 
   test("saldo cripto ou variação indisponíveis ficam fora da conta e são sinalizados", () => {

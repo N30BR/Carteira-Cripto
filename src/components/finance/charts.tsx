@@ -143,7 +143,7 @@ export type ComponentDatum = {
 };
 
 // Saldos em tons de azul (neutros), entradas em verdes e saídas em vermelhos, para separar os componentes.
-const BLUES = [NEUTRAL, "#93c5fd"];
+const BLUES = [NEUTRAL, "#93c5fd", "#1d4ed8"];
 const GREENS = ["#16a34a", "#86efac", "#2dd4bf"];
 const REDS = ["#ef4444", "#fda4af", "#f97316"];
 
@@ -171,7 +171,7 @@ export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDat
             formatter={(_, __, item) => {
               const d = item.payload as ComponentDatum;
               const v = d.signedCents ?? 0;
-              const sign = d.tone === "neutral" ? (v < 0 ? "- " : "") : v < 0 ? "- " : "+ ";
+              const sign = v < 0 ? "- " : d.tone === "neutral" && d.key !== "variation" ? "" : "+ ";
               return [`${sign}${money(Math.abs(v), currency)}`, d.label];
             }}
             labelFormatter={() => ""}

@@ -1,7 +1,8 @@
 // Função central do Resumo: indicadores, painel, gráficos, tabela e faixa de totais usam só este resultado.
 //
-// Saldo cripto (no início do período) e saldo em reais são posições: entram neutros, nem entrada nem saída.
-// No período: entradas de transações e valorização cripto somam; faturas, saídas e desvalorização subtraem.
+// Saldo cripto (no início do período), saldo em reais e a variação cripto do período são patrimônio:
+// entram neutros, nem entrada nem saída (saldo inicial + variação = saldo cripto no fim).
+// Entradas de transações somam; faturas e saídas de transações subtraem.
 // Sem conciliação entre saldos e movimentos, o resultado é uma composição nominal (estimativa).
 // Valores em unidades mínimas da moeda escolhida (centavos; satoshis em BTC).
 
@@ -59,7 +60,7 @@ function describe(key: ComponentKey, v: number | null): { tone: Tone; classifica
   if (key === "invoices") return { tone: "out", classification: "Fatura do período (−)" };
   if (key === "inflow") return { tone: "in", classification: "Entrada de transação (+)" };
   if (key === "outflow") return { tone: "out", classification: "Saída de transação (−)" };
-  return (v ?? 0) < 0 ? { tone: "out", classification: "Desvalorização (−)" } : { tone: "in", classification: "Valorização (+)" };
+  return { tone: "neutral", classification: `Variação patrimonial ${(v ?? 0) < 0 ? "(−)" : "(+)"}` };
 }
 
 export function consolidate(input: SummaryInput): Summary {
