@@ -1,0 +1,167 @@
+import { and, asc, between, count, eq } from "drizzle-orm";
+import type { Db } from "@/db/client";
+import { cardCategories, cardExpenses, cardInstallments } from "@/db/schema";
+import { ownsCategory, type Result } from "./categories";
+import { buildInstallments } from "./installments";
+
+export const MAX_EXPENSES = 2000;
+
+export type Side = "PF" | "PJ";
+
+export type ExpenseInput = {
+  description: string;
+  totalCents: number;
+  installments: number;
+  firstInvoice: string;
+  purchaseDate: string;
+  nature: Side;
+  card: Side;
+  categoryId: number | null;
+  notes: string;
+  /** Parcelas que nascem pagas (na edição, só valem para números que ainda não existiam). */
+  paidNumbers: number[];
+};
+
+export type InstallmentRow = {
+  installmentId: number;
+  expenseId: number;
+  number: number;
+  installments: number;
+  invoiceMonth: string;
+  amountCents: number;
+  paid: boolean;
+  description: string;
+  nature: Side;
+  card: Side;
+  categoryId: number | null;
+  categoryName: string | null;
+  notes: string;
+  purchaseDate: string;
+  firstInvoice: string;
+  totalCents: number;
+};
+
+const NOT_FOUND: Result = { ok: false, error: "Lançamento não encontrado" };
+const BAD_CATEGORY: Result = { ok: false, error: "Categoria inválida" };
+
+function ownsExpense(db: Db, userId: number, id: number): boolean {
+  return !!db
+    .select({ id: cardExpenses.id })
+    .from(cardExpenses)
+    .where(and(eq(cardExpenses.id, id), eq(cardExpenses.userId, userId)))
+    .get();
+}
+
+function fields(e: ExpenseInput) {
+  return {
+    description: e.description,
+    totalCents: e.totalCents,
+    installments: e.installments,
+    firstInvoice: e.firstInvoice,
+    purchaseDate: e.purchaseDate,
+    nature: e.nature,
+    card: e.card,
+    categoryId: e.categoryId,
+    notes: e.notes,
+  };
+}
+
+function writeInstallments(db: Db, expenseId: number, e: ExpenseInput, keepPaid: Map<number, boolean>): void {
+  db.delete(cardInstallments).where(eq(cardInstallments.expenseId, expenseId)).run();
+  const paidNew = new Set(e.paidNumbers);
+  db.insert(cardInstallments)
+    .values(
+      buildInstallments(e.totalCents, e.installments, e.firstInvoice).map((p) => ({
+        expenseId,
+        number: p.number,
+        invoiceMonth: p.invoiceMonth,
+        amountCents: p.amountCents,
+        paid: keepPaid.get(p.number) ?? paidNew.has(p.number),
+      })),
+    )
+    .run();
+}
+
+export function createExpense(db: Db, userId: number, e: ExpenseInput): Result {
+  if (e.categoryId !== null && !ownsCategory(db, userId, e.categoryId)) return BAD_CATEGORY;
+  const [{ n }] = db.select({ n: count() }).from(cardExpenses).where(eq(cardExpenses.userId, userId)).all();
+  if (n >= MAX_EXPENSES) return { ok: false, error: `Limite de ${MAX_EXPENSES} lançamentos atingido` };
+  db.transaction((tx) => {
+    const [row] = tx.insert(cardExpenses).values({ userId, ...fields(e), createdAt: new Date() }).returning().all();
+    writeInstallments(tx as unknown as Db, row.id, e, new Map());
+  });
+  return { ok: true };
+}
+
+/** Recalcula as parcelas mantendo o status de pago de cada número que continua existindo. */
+export function updateExpense(db: Db, userId: number, id: number, e: ExpenseInput): Result {
+  if (!ownsExpense(db, userId, id)) return NOT_FOUND;
+  if (e.categoryId !== null && !ownsCategory(db, userId, e.categoryId)) return BAD_CATEGORY;
+  const previous = db
+    .select({ number: cardInstallments.number, paid: cardInstallments.paid })
+    .from(cardInstallments)
+    .where(eq(cardInstallments.expenseId, id))
+    .all();
+  db.transaction((tx) => {
+    tx.update(cardExpenses).set(fields(e)).where(eq(cardExpenses.id, id)).run();
+    writeInstallments(tx as unknown as Db, id, e, new Map(previous.map((p) => [p.number, p.paid])));
+  });
+  return { ok: true };
+}
+
+export function deleteExpense(db: Db, userId: number, id: number): Result {
+  if (!ownsExpense(db, userId, id)) return NOT_FOUND;
+  db.delete(cardExpenses).where(eq(cardExpenses.id, id)).run();
+  return { ok: true };
+}
+
+export function setInstallmentPaid(db: Db, userId: number, installmentId: number, paid: boolean): Result {
+  const row = db
+    .select({ id: cardInstallments.id })
+    .from(cardInstallments)
+    .innerJoin(cardExpenses, eq(cardExpenses.id, cardInstallments.expenseId))
+    .where(and(eq(cardInstallments.id, installmentId), eq(cardExpenses.userId, userId)))
+    .get();
+  if (!row) return NOT_FOUND;
+  db.update(cardInstallments).set({ paid }).where(eq(cardInstallments.id, installmentId)).run();
+  return { ok: true };
+}
+
+export function getExpense(db: Db, userId: number, id: number) {
+  return (
+    db
+      .select()
+      .from(cardExpenses)
+      .where(and(eq(cardExpenses.id, id), eq(cardExpenses.userId, userId)))
+      .get() ?? null
+  );
+}
+
+/** Parcelas da pessoa com fatura entre os meses indicados (inclusive), com os dados da compra. */
+export function listInstallments(db: Db, userId: number, fromMonth: string, toMonth: string): InstallmentRow[] {
+  return db
+    .select({
+      installmentId: cardInstallments.id,
+      expenseId: cardExpenses.id,
+      number: cardInstallments.number,
+      installments: cardExpenses.installments,
+      invoiceMonth: cardInstallments.invoiceMonth,
+      amountCents: cardInstallments.amountCents,
+      paid: cardInstallments.paid,
+      description: cardExpenses.description,
+      nature: cardExpenses.nature,
+      card: cardExpenses.card,
+      categoryId: cardExpenses.categoryId,
+      categoryName: cardCategories.name,
+      notes: cardExpenses.notes,
+      purchaseDate: cardExpenses.purchaseDate,
+      firstInvoice: cardExpenses.firstInvoice,
+      totalCents: cardExpenses.totalCents,
+    })
+    .from(cardInstallments)
+    .innerJoin(cardExpenses, eq(cardExpenses.id, cardInstallments.expenseId))
+    .leftJoin(cardCategories, eq(cardCategories.id, cardExpenses.categoryId))
+    .where(and(eq(cardExpenses.userId, userId), between(cardInstallments.invoiceMonth, fromMonth, toMonth)))
+    .orderBy(asc(cardInstallments.invoiceMonth), asc(cardExpenses.description), asc(cardInstallments.number))
+    .all() as InstallmentRow[];
+}

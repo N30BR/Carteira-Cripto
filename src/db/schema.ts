@@ -69,3 +69,54 @@ export const fiatBalances = sqliteTable(
   },
   (t) => [uniqueIndex("fiat_balances_account_date").on(t.accountId, t.date)],
 );
+
+export const cardCategories = sqliteTable(
+  "card_categories",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("card_categories_user_name").on(t.userId, t.name)],
+);
+
+/** Compra de origem (à vista ou parcelada). */
+export const cardExpenses = sqliteTable("card_expenses", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  totalCents: integer("total_cents").notNull(),
+  installments: integer("installments").notNull(),
+  /** AAAA-MM */
+  firstInvoice: text("first_invoice").notNull(),
+  /** AAAA-MM-DD */
+  purchaseDate: text("purchase_date").notNull(),
+  /** Natureza da despesa: PF ou PJ */
+  nature: text("nature").notNull(),
+  /** Cartão usado: PF ou PJ */
+  card: text("card").notNull(),
+  categoryId: integer("category_id").references(() => cardCategories.id, { onDelete: "set null" }),
+  notes: text("notes").notNull().default(""),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const cardInstallments = sqliteTable(
+  "card_installments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    expenseId: integer("expense_id")
+      .notNull()
+      .references(() => cardExpenses.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    /** AAAA-MM */
+    invoiceMonth: text("invoice_month").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    paid: integer("paid", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => [uniqueIndex("card_installments_expense_number").on(t.expenseId, t.number)],
+);
