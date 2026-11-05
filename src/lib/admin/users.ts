@@ -3,7 +3,7 @@ import type { Db } from "@/db/client";
 import { users } from "@/db/schema";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { deleteUserSessions } from "@/lib/auth/sessions";
-import { isLocked, recordFailure } from "@/lib/auth/login";
+import { isLocked, recordFailure, serializeAuth } from "@/lib/auth/login";
 import { normalizeUsername, validatePassword, validateUsername } from "@/lib/validation";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -83,6 +83,17 @@ export async function changeOwnPassword(
 ): Promise<Result> {
   const invalid = validatePassword(next);
   if (invalid) return fail(invalid);
+  return serializeAuth(() => checkAndChange(db, userId, currentHash, current, next, now));
+}
+
+async function checkAndChange(
+  db: Db,
+  userId: number,
+  currentHash: string,
+  current: string,
+  next: string,
+  now: Date,
+): Promise<Result> {
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user) return fail("Usuário não encontrado");
   if (isLocked(user.lockedUntil, now)) return fail("Muitas tentativas. Tente novamente em 15 minutos.");

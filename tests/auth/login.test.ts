@@ -1,9 +1,10 @@
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { eq } from "drizzle-orm";
 import { testDb } from "../helpers/db";
 import { users } from "@/db/schema";
 import { hashPassword } from "@/lib/auth/password";
 import { LOCK_MS, attemptLogin } from "@/lib/auth/login";
+import { resetIpLimits } from "@/lib/auth/ip-limit";
 
 async function setup() {
   const db = testDb();
@@ -31,8 +32,8 @@ describe("attemptLogin", () => {
 
   test("senha errada e usuário inexistente falham do mesmo jeito", async () => {
     const { db } = await setup();
-    expect(await attemptLogin(db, "pedro", "errada", t0)).toEqual({ ok: false });
-    expect(await attemptLogin(db, "ninguem", "errada", t0)).toEqual({ ok: false });
+    expect(await attemptLogin(db, "pedro", "errada", t0)).toEqual({ ok: false, reason: "invalid" });
+    expect(await attemptLogin(db, "ninguem", "errada", t0)).toEqual({ ok: false, reason: "invalid" });
   });
 
   test("5 erros bloqueiam; senha certa durante o bloqueio falha e não conta", async () => {
@@ -40,7 +41,7 @@ describe("attemptLogin", () => {
     for (let i = 0; i < 5; i++) await attemptLogin(db, "pedro", "errada", t0);
     expect(user().lockedUntil?.getTime()).toBe(t0.getTime() + LOCK_MS);
     const before = user().failedAttempts;
-    expect(await attemptLogin(db, "pedro", "senha-certa", t0)).toEqual({ ok: false });
+    expect(await attemptLogin(db, "pedro", "senha-certa", t0)).toEqual({ ok: false, reason: "invalid" });
     expect(user().failedAttempts).toBe(before);
   });
 
@@ -60,5 +61,32 @@ describe("attemptLogin", () => {
     for (let i = 0; i < 4; i++) await attemptLogin(db, "pedro", "errada", t0);
     expect(user().lockedUntil).toBeNull();
     expect((await attemptLogin(db, "pedro", "senha-certa", t0)).ok).toBe(true);
+  });
+});
+
+describe("tentativas simultâneas", () => {
+  beforeEach(() => resetIpLimits());
+
+  test("não furam o bloqueio: 5 erros e a senha certa juntos → a certa é recusada", async () => {
+    const { db } = await setup();
+    const tries = [...Array(5)].map(() => attemptLogin(db, "pedro", "errada", t0));
+    tries.push(attemptLogin(db, "pedro", "senha-certa", t0));
+    const results = await Promise.all(tries);
+    expect(results[5]).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  test("não furam o limite por IP: 21 falhas juntas do mesmo IP → a última é barrada", async () => {
+    const { db } = await setup();
+    const results = await Promise.all(
+      [...Array(21)].map((_, i) => attemptLogin(db, `ninguem${i}`, "x", t0, "9.9.9.9")),
+    );
+    expect(results[20]).toEqual({ ok: false, reason: "ip" });
+  });
+
+  test("IP limitado não chega a testar a senha", async () => {
+    const { db } = await setup();
+    for (let i = 0; i < 20; i++) await attemptLogin(db, "ninguem", "x", t0, "8.8.8.8");
+    expect(await attemptLogin(db, "pedro", "senha-certa", t0, "8.8.8.8")).toEqual({ ok: false, reason: "ip" });
+    expect((await attemptLogin(db, "pedro", "senha-certa", t0, "7.7.7.7")).ok).toBe(true);
   });
 });
