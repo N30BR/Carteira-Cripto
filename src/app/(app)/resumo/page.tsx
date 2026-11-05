@@ -57,13 +57,27 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   });
   const byKey = Object.fromEntries(summary.components.map((c) => [c.key, c]));
 
-  const hints: Record<ComponentKey, string> = {
-    crypto: crypto.empty
-      ? "Nenhum ativo cadastrado"
-      : crypto.cents === null
-        ? `${crypto.reason}; fora da conta`
-        : `Posição atual • 1 USDT = R$ ${crypto.usdtBrl!.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`,
-    fiat: fiat.empty ? "Nenhuma conta em R$" : `Último saldo em ${dateBr(fiat.asOf!)}`,
+  // Data/hora da posição cripto (preços e cotação da Binance), no fuso do app.
+  const when = crypto.asOf
+    ? new Intl.DateTimeFormat("pt-BR", { timeZone: appTimeZone(), day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(crypto.asOf)
+    : null;
+  const rate = crypto.usdtBrl?.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  const hints: Record<ComponentKey, React.ReactNode> = {
+    crypto: crypto.empty ? (
+      "Nenhum ativo cadastrado"
+    ) : crypto.cents === null ? (
+      `${crypto.reason}; fora da conta`
+    ) : (
+      <>
+        Cotação de {when} • 1 USDT = R$ {rate}
+        {crypto.stale && <span className="block font-medium text-amber-400">Binance indisponível: valores desatualizados</span>}
+      </>
+    ),
+    fiat: fiat.empty
+      ? "Nenhuma conta em R$"
+      : fiat.oldest === fiat.newest
+        ? `Saldo de ${dateBr(fiat.oldest!)}`
+        : `Saldos de ${dateBr(fiat.oldest!)} a ${dateBr(fiat.newest!)}`,
     invoices: `Parcelas de ${monthLabel(month)}`,
     inflow: `Transações de ${monthLabel(month)}`,
     outflow: `Transações de ${monthLabel(month)}`,
@@ -101,6 +115,9 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                 efetivo: um gasto que já baixou o saldo de uma conta aparece de novo como fatura ou saída.
               </p>
               {summary.missing.includes("crypto") && <p className="text-amber-400">Saldo cripto fora da conta: {crypto.reason?.toLowerCase()}.</p>}
+              {crypto.stale && crypto.cents !== null && (
+                <p className="text-amber-400">Saldo cripto com preços desatualizados (cotação de {when}): a Binance não respondeu.</p>
+              )}
             </div>
           </div>
           <div className="hidden w-px bg-border lg:block" />

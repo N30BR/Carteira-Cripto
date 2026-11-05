@@ -13,15 +13,21 @@ export type CryptoBalance = {
   usdt: number | null;
   /** Cotação USDT → BRL usada (Binance). */
   usdtBrl: number | null;
+  /** Horário mais antigo entre os preços e a cotação usados. */
   asOf: Date | null;
+  /** Binance indisponível: valores vieram do cache antigo. */
+  stale: boolean;
   empty: boolean;
   reason: string | null;
 };
 
+const oldest = (...dates: (Date | null)[]) =>
+  dates.filter((d): d is Date => d instanceof Date).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+
 /** Saldo cripto atual (mesmo cálculo da aba Cripto, em USDT) convertido pela cotação USDT/BRL da Binance. */
 export async function cryptoBalanceBrl(db: Db, userId: number, now = new Date()): Promise<CryptoBalance> {
   const holdings = listHoldings(db, userId);
-  if (!holdings.length) return { cents: 0, usdt: 0, usdtBrl: null, asOf: null, empty: true, reason: null };
+  if (!holdings.length) return { cents: 0, usdt: 0, usdtBrl: null, asOf: null, stale: false, empty: true, reason: null };
   const [current, rates] = await Promise.all([
     getCurrentPrices(
       db,
@@ -30,20 +36,29 @@ export async function cryptoBalanceBrl(db: Db, userId: number, now = new Date())
     ),
     getRates(db, now),
   ]);
+  const asOf = oldest(current.fetchedAt, rates.fetchedAt);
+  const stale = current.stale || rates.stale;
   const usdt = computePortfolio(holdings, current.prices).total;
-  if (usdt === null) return { cents: null, usdt: null, usdtBrl: null, asOf: current.fetchedAt, empty: false, reason: "Preços indisponíveis" };
+  if (usdt === null) return { cents: null, usdt: null, usdtBrl: null, asOf, stale, empty: false, reason: "Preços indisponíveis" };
   const f = factor("USDT", "BRL", rates);
   if (f === null) {
-    return { cents: null, usdt, usdtBrl: null, asOf: current.fetchedAt, empty: false, reason: "Cotação USDT/BRL indisponível" };
+    return { cents: null, usdt, usdtBrl: null, asOf, stale, empty: false, reason: "Cotação USDT/BRL indisponível" };
   }
-  return { cents: Math.round(usdt * f * 100), usdt, usdtBrl: f, asOf: current.fetchedAt, empty: false, reason: null };
+  return { cents: Math.round(usdt * f * 100), usdt, usdtBrl: f, asOf, stale, empty: false, reason: null };
 }
 
-/** Soma dos saldos mais recentes das contas em reais e a data do saldo mais recente. */
-export function fiatBalanceBrl(db: Db, userId: number, today: string): { cents: number; asOf: string | null; empty: boolean } {
+/**
+ * Soma dos saldos atuais das contas em reais. Datas: a do saldo mais antigo e a do mais recente
+ * entre os usados (o total mistura contas atualizadas em dias diferentes).
+ */
+export function fiatBalanceBrl(
+  db: Db,
+  userId: number,
+  today: string,
+): { cents: number; oldest: string | null; newest: string | null; empty: boolean } {
   const accounts = listAccounts(db, userId);
-  if (!accounts.length) return { cents: 0, asOf: null, empty: true };
+  if (!accounts.length) return { cents: 0, oldest: null, newest: null, empty: true };
   const { total } = computeFiat(accounts, listBalances(db, userId), today);
-  const asOf = accounts.map((a) => a.date).sort().at(-1) ?? null;
-  return { cents: Math.round(total * 100), asOf, empty: false };
+  const dates = accounts.map((a) => a.date).sort();
+  return { cents: Math.round(total * 100), oldest: dates[0], newest: dates.at(-1)!, empty: false };
 }

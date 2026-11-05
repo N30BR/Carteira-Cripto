@@ -9,10 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { categoryColor, tagStyle } from "@/components/cards/colors";
-import { FilterTabs, SectionTitle, TotalChip, TotalsBar, accountColor, brl } from "@/components/finance/ui";
+import { FilterTabs, SectionTitle, TotalChip, TotalsBar, accountColors, brl } from "@/components/finance/ui";
 import { TransactionFormRow, TransactionsTable, emptyDraft } from "@/components/finance/transactions";
 import { MonthPicker } from "@/components/month-picker";
-import { MAX_CARD_ACCOUNTS, type CardAccount, type Side } from "@/lib/cards/accounts";
+import type { CardAccount } from "@/lib/cards/accounts";
+import { MAX_CARD_ACCOUNTS, type Side } from "@/lib/cards/account-limits";
 import type { Category } from "@/lib/cards/categories";
 import { monthLabel } from "@/lib/cards/months";
 import type { InstallmentRow } from "@/lib/cards/store";
@@ -99,7 +100,8 @@ export function LaunchesView({
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<InstallmentRow | null>(null);
   const [pending, start] = useTransition();
-  const colorOf = (id: number) => accountColor(Math.max(0, accounts.findIndex((a) => a.id === id)));
+  const colors = accountColors(accounts);
+  const colorOf = (id: number) => colors[id] ?? "#94A3B8";
   // Dia padrão do formulário de transações: hoje, se estiver no mês escolhido; senão, o dia 1 do mês.
   const txDefaultDate = today.slice(0, 7) === month ? today : `${month}-01`;
 
@@ -232,7 +234,12 @@ export function LaunchesView({
                         <Tag color={categoryColor(r.categoryId)}>{r.categoryName ?? NO_CATEGORY}</Tag>
                       </TableCell>
                       <TableCell className="text-center">
-                        <Tag color={colorOf(r.accountId)}>{r.accountName}</Tag>
+                        <span className="inline-flex items-center gap-1">
+                          <Tag color={colorOf(r.accountId)}>{r.accountName}</Tag>
+                          <span className="text-[10px] font-semibold text-muted-foreground" title={`Natureza da despesa: ${r.nature}`}>
+                            {r.nature}
+                          </span>
+                        </span>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{brl(r.amountCents)}</TableCell>
                       <TableCell className="text-center tabular-nums">
@@ -281,8 +288,8 @@ export function LaunchesView({
             label={`Totais do mês (${monthLabel(month)})`}
             final={<span data-testid="month-total">Total: {brl(totals.total)}</span>}
           >
-            {accounts.map((a, i) => (
-              <TotalChip key={a.id} color={accountColor(i)}>
+            {accounts.map((a) => (
+              <TotalChip key={a.id} color={colors[a.id]}>
                 {a.name}: {brl(totals.byAccount[a.id] ?? 0)}
               </TotalChip>
             ))}
@@ -352,6 +359,7 @@ function AccountsDialog({ accounts }: { accounts: CardAccount[] }) {
   const { pending, run } = useRunToast();
   const draftOf = (a: CardAccount) => drafts[a.id] ?? { name: a.name, kind: a.kind };
   const full = accounts.length >= MAX_CARD_ACCOUNTS;
+  const colors = accountColors(accounts);
 
   return (
     <Dialog>
@@ -369,12 +377,12 @@ function AccountsDialog({ accounts }: { accounts: CardAccount[] }) {
           lançamentos; conta com lançamentos não pode ser excluída.
         </p>
         <ul className="flex flex-col gap-2">
-          {accounts.map((a, i) => {
+          {accounts.map((a) => {
             const d = draftOf(a);
             const changed = d.name !== a.name || d.kind !== a.kind;
             return (
               <li key={a.id} className="flex items-center gap-2">
-                <span className="size-2.5 shrink-0 rounded-full" style={{ background: accountColor(i) }} />
+                <span className="size-2.5 shrink-0 rounded-full" style={{ background: colors[a.id] }} />
                 <Input
                   aria-label={`Nome da conta ${a.name}`}
                   value={d.name}

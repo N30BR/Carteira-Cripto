@@ -105,6 +105,14 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByLabel("Nome da conta Nubank")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("#exp-account option")).toHaveText(["Cartão PF", "Cartão PJ", "Nubank"]);
+  // Excluir a conta escolhida no formulário: ele volta para a primeira conta
+  await page.selectOption("#exp-account", { label: "Nubank" });
+  await page.getByRole("button", { name: "Gerenciar contas" }).click();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("listitem").filter({ has: page.getByLabel("Nome da conta Nubank") }).getByRole("button", { name: "Excluir" }).click();
+  await expect(page.getByLabel("Nome da conta Nubank")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#exp-account option:checked")).toHaveText("Cartão PF");
 
   // Lançamento de Transações: uma entrada e uma saída
   const tx = async (kind: "in" | "out", description: string, amount: string) => {

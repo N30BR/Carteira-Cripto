@@ -124,7 +124,7 @@ export type ComponentDatum = { key: string; label: string; short: string; signed
 
 // Verdes para os positivos e vermelhos para os negativos, em tons diferentes para separar os componentes.
 const GREENS = ["#16a34a", "#2dd4bf", "#86efac"];
-const REDS = ["#ef4444", "#fda4af"];
+const REDS = ["#ef4444", "#fda4af", "#f97316"];
 
 function componentColors(items: ComponentDatum[]): Record<string, string> {
   let g = 0;

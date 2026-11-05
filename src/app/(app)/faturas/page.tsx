@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NATURE_COLOR } from "@/components/cards/colors";
-import { accountColor } from "@/components/finance/ui";
+import { accountColors } from "@/components/finance/ui";
 import { CategoryPie, InvoiceBars, NaturePie } from "@/components/cards/invoice-charts";
 import { MonthPicker } from "@/components/month-picker";
 
@@ -46,6 +46,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
   const month = parseMonth((await searchParams).mes) ?? todayIn(appTimeZone()).slice(0, 7);
   const rows = listInstallments(getDb(), user.id, addMonths(month, -11), "2099-12");
   const accounts = listCardAccounts(getDb(), user.id);
+  const colors = accountColors(accounts);
   const kindLabel = (a: CardAccount) => (a.kind === "PF" ? "Pessoa Física (PF)" : "Pessoa Jurídica (PJ)");
 
   const header = (
@@ -87,7 +88,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
 
   const cardSection = (account: CardAccount, index: number) => {
     const s = cardSummary(monthRows, account.id);
-    const color = accountColor(index);
+    const color = colors[account.id];
     return (
       <Card>
         <CardContent className="flex flex-col gap-4">
@@ -154,8 +155,8 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
 
       <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
         <Indicator title="Fatura consolidada" value={totals.total} hint="todas as contas • mês" color="#4C66DD" testId="invoice-total" />
-        {accounts.map((a, i) => (
-          <Indicator key={a.id} title={a.name} value={totals.byAccount[a.id] ?? 0} hint={kindLabel(a)} color={accountColor(i)} />
+        {accounts.map((a) => (
+          <Indicator key={a.id} title={a.name} value={totals.byAccount[a.id] ?? 0} hint={kindLabel(a)} color={colors[a.id]} />
         ))}
       </div>
       <div className="grid gap-4 md:grid-cols-3">
@@ -171,7 +172,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
             <p className="text-sm text-muted-foreground">Comparação entre os cartões / contas</p>
           </CardHeader>
           <CardContent>
-            <InvoiceBars data={monthlySeries(rows, last6)} accounts={accounts.map((a, i) => ({ id: a.id, name: a.name, color: accountColor(i) }))} />
+            <InvoiceBars data={monthlySeries(rows, last6)} accounts={accounts.map((a) => ({ id: a.id, name: a.name, color: colors[a.id] }))} />
           </CardContent>
         </Card>
         <Card>

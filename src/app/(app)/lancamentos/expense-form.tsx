@@ -75,6 +75,8 @@ export function ExpenseFormFields({
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
   const set = <K extends keyof ExpenseForm>(k: K, v: ExpenseForm[K]) => setF((s) => ({ ...s, [k]: v }));
+  // Conta escolhida que deixou de existir (excluída em "Adicionar"): vale a primeira da lista.
+  const accountId = accounts.some((a) => a.id === f.accountId) ? f.accountId : (accounts[0]?.id ?? f.accountId);
 
   const cents = brlToCents(f.amount);
   const plan = cents.ok
@@ -88,11 +90,11 @@ export function ExpenseFormFields({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     start(async () => {
-      const r = await safeAction(() => onSubmit(f));
+      const r = await safeAction(() => onSubmit({ ...f, accountId }));
       if (r.ok) {
         setError(undefined);
         // Novo lançamento: limpa o formulário, mas mantém o mês e a conta para o próximo.
-        if (!editing) setF({ ...initial, refMonth: f.refMonth, accountId: f.accountId });
+        if (!editing) setF({ ...initial, refMonth: f.refMonth, accountId });
         onDone?.();
       } else setError(r.error);
     });
@@ -161,7 +163,7 @@ export function ExpenseFormFields({
             <select
               id="exp-account"
               className={selectClass}
-              value={f.accountId}
+              value={accountId}
               onChange={(e) => set("accountId", Number(e.target.value))}
             >
               {accounts.map((a) => (

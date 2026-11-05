@@ -46,7 +46,8 @@ export function TransactionFormRow({
         setError(undefined);
         // Nova transação: limpa os campos, mas mantém a data e o tipo para a próxima.
         if (editId === null) setF({ ...initial, date: f.date, kind: f.kind });
-        toast.success(editId === null ? "Transação lançada" : "Transação atualizada");
+        // Avisa a data: lançada em outro mês, ela aparece quando esse mês for escolhido.
+        toast.success(`${editId === null ? "Transação lançada" : "Transação atualizada"} em ${dateBr(f.date)}`);
         onDone?.();
       } else setError(r.error);
     });

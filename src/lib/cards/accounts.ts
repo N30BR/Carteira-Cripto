@@ -3,10 +3,10 @@ import type { Db } from "@/db/client";
 import { cardAccounts, cardExpenses } from "@/db/schema";
 import type { Result } from "./categories";
 
-export type Side = "PF" | "PJ";
-export type CardAccount = { id: number; name: string; kind: Side };
+import { MAX_CARD_ACCOUNTS, type Side } from "./account-limits";
 
-export const MAX_CARD_ACCOUNTS = 4;
+export { MAX_CARD_ACCOUNTS, type Side } from "./account-limits";
+export type CardAccount = { id: number; name: string; kind: Side };
 export const DEFAULT_ACCOUNTS: { name: string; kind: Side }[] = [
   { name: "Cartão PF", kind: "PF" },
   { name: "Cartão PJ", kind: "PJ" },
@@ -44,8 +44,10 @@ export function ensureDefaultAccounts(db: Db, userId: number): void {
     .run();
 }
 
+// "Nubank" e "nubank" contam como o mesmo nome.
+const sameName = (a: string, b: string) => a.toLocaleLowerCase("pt-BR") === b.toLocaleLowerCase("pt-BR");
 const nameTaken = (db: Db, userId: number, name: string, exceptId?: number) =>
-  listCardAccounts(db, userId).some((a) => a.name === name && a.id !== exceptId);
+  listCardAccounts(db, userId).some((a) => sameName(a.name, name) && a.id !== exceptId);
 
 export function createCardAccount(db: Db, userId: number, a: { name: string; kind: Side }): Result {
   const accounts = listCardAccounts(db, userId);

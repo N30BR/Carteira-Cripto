@@ -8,9 +8,24 @@ import { DOWN, UP } from "@/components/dashboard/palette";
 export const BLUE = "#4C66DD";
 export { DOWN, UP };
 
-/** Cores das contas de cartão, pela ordem (até 4). */
+/** Cores das contas de cartão (até 4). */
 export const ACCOUNT_COLORS = ["#28A38C", "#9470E7", "#F59E0B", "#38BDF8"];
-export const accountColor = (index: number) => ACCOUNT_COLORS[((index % 4) + 4) % 4];
+
+/**
+ * Cor de cada conta pelo id (não pela posição): excluir uma conta não muda a cor das outras.
+ * Se duas contas caírem na mesma cor, a de id maior pega a próxima livre.
+ */
+export function accountColors(accounts: { id: number }[]): Record<number, string> {
+  const used = new Set<number>();
+  const out: Record<number, string> = {};
+  for (const a of [...accounts].sort((x, y) => x.id - y.id)) {
+    let i = (((a.id - 1) % 4) + 4) % 4;
+    for (let n = 0; n < 4 && used.has(i); n++) i = (i + 1) % 4;
+    used.add(i);
+    out[a.id] = ACCOUNT_COLORS[i];
+  }
+  return out;
+}
 
 export const brl = (cents: number) => formatMoney(cents / 100, "BRL");
 
