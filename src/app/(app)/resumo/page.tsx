@@ -3,16 +3,17 @@ import type { LucideIcon } from "lucide-react";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
-import { monthLabel, parseMonth } from "@/lib/cards/months";
+import { addMonths, monthLabel, parseMonth } from "@/lib/cards/months";
+import { listCardAccounts } from "@/lib/cards/accounts";
+import { invoicesDueBetween } from "@/lib/cards/due";
 import { listInstallments } from "@/lib/cards/store";
-import { monthTotals } from "@/lib/cards/summary";
 import { pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { formatPct } from "@/lib/format";
 import { parsePeriod } from "@/lib/portfolio/calc";
 import { consolidate, type ComponentKey, type Tone } from "@/lib/summary/consolidate";
 import { cryptoPeriod, fiatBalanceBrl } from "@/lib/summary/sources";
-import { analysisWindow, invoicePeriodLabel, zonedMidnight } from "@/lib/summary/window";
+import { analysisWindow, zonedMidnight } from "@/lib/summary/window";
 import { staleRateWarning } from "@/lib/currency-display";
 import { getCurrentPrices } from "@/lib/prices";
 import { transactionTotals } from "@/lib/transactions/calc";
@@ -90,7 +91,10 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   const cryptoStart = toRef(crypto.startUsdt, startMs);
   const cryptoEnd = toRef(crypto.endUsdt, crypto.endMs);
   const fiat = fiatBalanceBrl(db, user.id, today);
-  const invoices = monthTotals(listInstallments(db, user.id, win.invoiceMonths[0], win.invoiceMonths.at(-1)!)).total;
+  // Faturas pela data em que vencem: a de um mês vence no mês seguinte, no dia do cartão.
+  const dueDays = Object.fromEntries(listCardAccounts(db, user.id).map((a) => [a.id, a.dueDay]));
+  const invoiceRows = listInstallments(db, user.id, addMonths(win.fromDate.slice(0, 7), -1), addMonths(win.toDate.slice(0, 7), -1));
+  const invoices = invoicesDueBetween(invoiceRows, dueDays, win.fromDate, win.toDate);
   const tx = transactionTotals(listTransactions(db, user.id, win.fromDate, win.toDate));
   const summary = consolidate({
     cryptoCents: cryptoNow,
@@ -103,7 +107,6 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   const byKey = Object.fromEntries(summary.components.map((c) => [c.key, c]));
 
   const periodLabel = period === "1M" ? monthLabel(month) : `${dateBr(win.fromDate)} a ${dateBr(win.toDate)}`;
-  const invoiceLabel = invoicePeriodLabel(month, period);
   const notStarted = startMs >= now.getTime();
   const staleSince = [viewBrl.staleSince, viewUsdt.staleSince].filter((d): d is Date => d instanceof Date).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
   const variationEnd = todayIn(tz, new Date(Math.min(endMs, now.getTime()) - 1));
@@ -128,7 +131,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
       : fiat.oldest === fiat.newest
         ? `Saldo de ${dateBr(fiat.oldest!)}`
         : `Saldos de ${dateBr(fiat.oldest!)} a ${dateBr(fiat.newest!)}`,
-    invoices: `Parcelas de ${invoiceLabel}`,
+    invoices: `Que vencem em ${periodLabel} (a fatura de um mês vence no seguinte)`,
     inflow: `Transações de ${periodLabel}`,
     outflow: `Transações de ${periodLabel}`,
     variation: crypto.empty ? (

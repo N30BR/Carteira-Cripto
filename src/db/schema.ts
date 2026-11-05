@@ -100,6 +100,8 @@ export const cardAccounts = sqliteTable(
     name: text("name").notNull(),
     /** PF ou PJ */
     kind: text("kind").notNull(),
+    /** Dia de vencimento da fatura (1–31), pago no mês seguinte ao da fatura; null = não informado. */
+    dueDay: integer("due_day"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [uniqueIndex("card_accounts_user_name").on(t.userId, t.name)],
@@ -128,6 +130,8 @@ export const cardExpenses = sqliteTable(
   accountId: integer("account_id").references(() => cardAccounts.id),
   categoryId: integer("category_id").references(() => cardCategories.id, { onDelete: "set null" }),
   notes: text("notes").notNull().default(""),
+  /** Como o valor foi informado: "parcela" ou "total" (null em compras antigas). */
+  amountMode: text("amount_mode"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [

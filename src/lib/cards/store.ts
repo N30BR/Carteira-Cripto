@@ -19,6 +19,8 @@ export type ExpenseInput = {
   accountId: number;
   categoryId: number | null;
   notes: string;
+  /** Como o valor foi informado no formulário (para a edição mostrar igual). */
+  amountMode?: "parcela" | "total";
   /** Parcelas que nascem pagas (na edição, só valem para números que ainda não existiam). */
   paidNumbers: number[];
 };
@@ -42,6 +44,7 @@ export type InstallmentRow = {
   purchaseDate: string;
   firstInvoice: string;
   totalCents: number;
+  amountMode: string | null;
 };
 
 const NOT_FOUND: Result = { ok: false, error: "Lançamento não encontrado" };
@@ -69,6 +72,7 @@ function fields(e: ExpenseInput, nature: Side, kind: Side) {
     nature,
     categoryId: e.categoryId,
     notes: e.notes,
+    ...(e.amountMode ? { amountMode: e.amountMode } : {}),
   };
 }
 
@@ -184,6 +188,7 @@ export function listInstallments(db: Db, userId: number, fromMonth: string, toMo
       purchaseDate: cardExpenses.purchaseDate,
       firstInvoice: cardExpenses.firstInvoice,
       totalCents: cardExpenses.totalCents,
+      amountMode: cardExpenses.amountMode,
     })
     .from(cardInstallments)
     .innerJoin(cardExpenses, eq(cardExpenses.id, cardInstallments.expenseId))

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
-import { createCardAccount, deleteCardAccount, updateCardAccount, type Side } from "@/lib/cards/accounts";
+import { createCardAccount, deleteCardAccount, setCardDueDay, updateCardAccount, type Side } from "@/lib/cards/accounts";
 import { createCategory, deleteCategory, renameCategory, type Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
 import { parseMonth } from "@/lib/cards/months";
@@ -79,6 +79,7 @@ export async function saveExpenseAction(id: number | null, f: ExpenseForm): Prom
     accountId: f.accountId,
     categoryId: f.categoryId,
     notes: notes.value,
+    amountMode: f.mode,
     paidNumbers: plan.paidNumbers,
   };
   const r = id === null ? createExpense(getDb(), user.id, input) : updateExpense(getDb(), user.id, id, input);
@@ -162,6 +163,17 @@ export async function deleteCardAccountAction(id: number): Promise<Result> {
   if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = deleteCardAccount(getDb(), user.id, id);
+  refresh();
+  return r;
+}
+
+/** Dia de vencimento da fatura de uma conta (1–31); null limpa. */
+export async function setCardDueDayAction(id: number, day: number | null): Promise<Result> {
+  const user = await requireUser();
+  if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  if (day !== null && typeof day !== "number") return { ok: false, error: "O vencimento deve ser um dia de 1 a 31" };
+  const r = setCardDueDay(getDb(), user.id, id, day);
   refresh();
   return r;
 }

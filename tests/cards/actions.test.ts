@@ -19,6 +19,7 @@ import {
   deleteExpenseAction,
   renameCategoryAction,
   saveExpenseAction,
+  setCardDueDayAction,
   toggleInstallmentAction,
   updateCardAccountAction,
   type ExpenseForm,
@@ -119,13 +120,30 @@ describe("lançamentos", () => {
     expect(await createCardAccountAction("Quinta", "PF")).toEqual({ ok: false, error: "Limite de 4 contas atingido" });
     const nubank = listCardAccounts(state.db as Db, state.userId).find((a) => a.name === "Nubank")!;
     expect(await updateCardAccountAction(nubank.id, "Nubank Roxo", "PJ")).toEqual({ ok: true });
-    expect(listCardAccounts(state.db as Db, state.userId).find((a) => a.id === nubank.id)).toEqual({ id: nubank.id, name: "Nubank Roxo", kind: "PJ" });
+    expect(listCardAccounts(state.db as Db, state.userId).find((a) => a.id === nubank.id)).toEqual({ id: nubank.id, name: "Nubank Roxo", kind: "PJ", dueDay: null });
     await saveExpenseAction(null, form({ accountId: nubank.id }));
     expect(mine()[0]).toMatchObject({ nature: "PJ", accountName: "Nubank Roxo" });
     expect((await deleteCardAccountAction(nubank.id)).ok).toBe(false);
     expect(await updateCardAccountAction(3, "Hack", "PF")).toEqual({ ok: false, error: "Conta não encontrada" });
     expect(await deleteCardAccountAction(3)).toEqual({ ok: false, error: "Conta não encontrada" });
     expect(await deleteCardAccountAction(1.5)).toEqual({ ok: false, error: "Conta não encontrada" });
+  });
+
+  test("guarda se o valor foi informado como parcela ou total (para a edição)", async () => {
+    await saveExpenseAction(null, form());
+    expect(mine()[0].amountMode).toBe("parcela");
+    await saveExpenseAction(mine()[0].expenseId, form({ mode: "total", amount: "4.200,00" }));
+    expect(mine()[0].amountMode).toBe("total");
+  });
+
+  test("vencimento por conta: 1 a 31, vazio limpa; só nas próprias contas", async () => {
+    expect(await setCardDueDayAction(1, 10)).toEqual({ ok: true });
+    expect(listCardAccounts(state.db as Db, state.userId)[0].dueDay).toBe(10);
+    expect(await setCardDueDayAction(1, null)).toEqual({ ok: true });
+    expect((await setCardDueDayAction(1, 32)).ok).toBe(false);
+    expect((await setCardDueDayAction(1, "10" as unknown as number)).ok).toBe(false);
+    expect(await setCardDueDayAction(3, 10)).toEqual({ ok: false, error: "Conta não encontrada" });
+    expect(await setCardDueDayAction(1.5, 10)).toEqual({ ok: false, error: "Conta não encontrada" });
   });
 
   test("categorias: criar e renomear com validação de nome", async () => {

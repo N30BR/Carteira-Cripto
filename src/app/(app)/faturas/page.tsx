@@ -118,6 +118,9 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
                   {account.name}
                 </p>
                 <p className="text-lg font-semibold">{kindLabel(account)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {account.dueDay ? `Vence todo dia ${account.dueDay}, no mês seguinte ao da fatura` : "Vencimento não informado (defina em Lançamentos)"}
+                </p>
               </div>
             </div>
             <div className="text-right">

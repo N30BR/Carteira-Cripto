@@ -15,7 +15,7 @@ export type SummaryInput = {
   cryptoCents: number | null;
   /** Saldo das contas em reais; null quando indisponível. */
   fiatCents: number | null;
-  /** Faturas (parcelas) dos meses do período. */
+  /** Faturas (parcelas) que vencem no período. */
   invoicesCents: number;
   inflowCents: number;
   outflowCents: number;
@@ -50,7 +50,7 @@ export type Summary = {
 const META: Record<ComponentKey, { label: string; note: string }> = {
   crypto: { label: "Saldo Cripto", note: "Saldo total atual" },
   fiat: { label: "Saldo Fiduciário", note: "Saldo em reais" },
-  invoices: { label: "Faturas", note: "Compromissos do período" },
+  invoices: { label: "Faturas", note: "Faturas que vencem no período" },
   inflow: { label: "Entradas de Transações", note: "Movimentações positivas" },
   outflow: { label: "Saídas de Transações", note: "Movimentações negativas" },
   variation: { label: "Variação Cripto", note: "Comparação no período; já incluída no saldo cripto" },

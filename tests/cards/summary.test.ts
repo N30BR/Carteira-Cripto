@@ -22,6 +22,7 @@ const row = (o: Partial<InstallmentRow>): InstallmentRow => ({
   purchaseDate: "2026-11-01",
   firstInvoice: "2026-11",
   totalCents: 1000,
+  amountMode: null,
   ...o,
 });
 

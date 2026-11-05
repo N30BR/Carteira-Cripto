@@ -93,6 +93,14 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   const cadeira = page.getByRole("row", { name: /Cadeira/ });
   await expect(cadeira).toContainText("R$ 400,00");
   await expect(cadeira).toContainText("1 / 3");
+  // Vencimento do Cartão PJ: dia 10; a fatura do mês vence no mês seguinte
+  await page.getByLabel("Dia de vencimento de Cartão PJ").fill("10");
+  await page.getByLabel("Dia de vencimento de Cartão PJ").press("Enter");
+  await expect(page.getByRole("row", { name: /Cadeira/ })).toContainText("vence 10/");
+  // Editar abre com o valor do jeito que foi lançado (aqui, o total)
+  await page.getByRole("button", { name: "Editar Cadeira" }).click();
+  await expect(page.getByRole("dialog").getByRole("radio", { name: "o total" })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
   await expect(cadeira).toContainText("Cartão PJ");
   await expect(page.getByTestId("month-total")).toHaveText("Total: R$ 400,00");
   await cadeira.getByRole("button", { name: "Pendente" }).click();
@@ -157,23 +165,23 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page).toHaveURL(/periodo=3M/);
   await expect(page.getByTestId("tx-balance")).toHaveText("+ US$ 344,00");
 
-  // Resumo: saldo cripto no início do mês + variação no mês = 150.000 (saldo de hoje);
-  // + reais 5.000 (neutros) + entradas 2.500 − faturas 400 − saídas 780
+  // Resumo: saldo cripto 150.000 + reais 5.000 (neutros) + entradas 2.500 − saídas 780.
+  // A fatura deste mês da cadeira só vence no mês que vem: não entra no Resumo deste mês.
   await page.getByRole("link", { name: "Resumo" }).click();
   await expect(page.getByTestId("sum-fiat").first()).toHaveText("R$ 5.000,00");
   await expect(page.getByTestId("sum-crypto").first()).not.toContainText("+");
   await expect(page.getByTestId("sum-variation").first()).toBeVisible();
-  await expect(page.getByTestId("sum-invoices").first()).toHaveText("- R$ 400,00");
-  await expect(page.getByTestId("sum-result")).toHaveText("+ R$ 156.320,00");
+  await expect(page.getByTestId("sum-invoices").first()).toHaveText("R$ 0,00");
+  await expect(page.getByTestId("sum-result")).toHaveText("+ R$ 156.720,00");
   await expect(page.getByText("Consolidação estimada (sem conciliação)")).toBeVisible();
   // Em USDT (1 USDT = R$ 5) e com período de 1 ano a partir do mês
   await page.getByRole("button", { name: /Moeda de referência/ }).click();
   await page.getByRole("menuitemradio", { name: /USDT/ }).click();
   await expect(page).toHaveURL(/moeda=USDT/);
-  await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.264,00");
+  await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.344,00");
   await page.getByRole("link", { name: "1A", exact: true }).click();
   await expect(page).toHaveURL(/periodo=1A/);
-  // Em 1 ano entram as 3 parcelas da cadeira (R$ 1.200 = US$ 240), não só a do mês (US$ 80).
+  // Em 1 ano vencem as 3 parcelas da cadeira (R$ 1.200 = US$ 240).
   await expect(page.getByTestId("sum-invoices").first()).toHaveText("- US$ 240,00");
   await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.104,00");
   await expect(page.getByText(/Totais do período \(01\//)).toBeVisible();

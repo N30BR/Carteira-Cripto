@@ -9,13 +9,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { categoryColor, tagStyle } from "@/components/cards/colors";
-import { FilterTabs, SectionTitle, TotalChip, TotalsBar, accountColors, brl } from "@/components/finance/ui";
+import { FilterTabs, SectionTitle, TotalChip, TotalsBar, accountColors, brl, dateBr } from "@/components/finance/ui";
 import { TransactionFormRow, TransactionsTable, emptyDraft } from "@/components/finance/transactions";
 import { MonthPicker } from "@/components/month-picker";
 import type { CardAccount } from "@/lib/cards/accounts";
 import { MAX_CARD_ACCOUNTS, type Side } from "@/lib/cards/account-limits";
 import type { Category } from "@/lib/cards/categories";
 import { monthLabel } from "@/lib/cards/months";
+import { dueDate, editAmount } from "@/lib/cards/due";
 import type { InstallmentRow } from "@/lib/cards/store";
 import { NO_CATEGORY, monthTotals } from "@/lib/cards/summary";
 import { safeAction, type ActionResult } from "@/lib/safe-action";
@@ -32,6 +33,7 @@ import {
   updateCardAccountAction,
   type ExpenseForm,
 } from "./actions";
+import { DueDays } from "./due-days";
 import { ExpenseFormFields } from "./expense-form";
 
 const centsToInput = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
@@ -62,12 +64,13 @@ function emptyForm(month: string, today: string, accountId: number): ExpenseForm
   };
 }
 
-/** Preenche o formulário de edição a partir da parcela do mês (valor total, parcela atual = esta). */
+/** Preenche o formulário de edição a partir da parcela do mês, com o valor do jeito que foi lançado (parcela ou total). */
 function formFromRow(r: InstallmentRow): ExpenseForm {
+  const amount = editAmount(r);
   return {
     description: r.description,
-    amount: centsToInput(r.totalCents),
-    mode: "total",
+    amount: centsToInput(amount.amountCents),
+    mode: amount.mode,
     current: r.number,
     total: r.installments,
     refMonth: r.invoiceMonth,
@@ -150,6 +153,7 @@ export function LaunchesView({
               </div>
             }
           />
+          <DueDays accounts={accounts} colors={colors} />
           <div className="border-t pt-5">
             <ExpenseFormFields
               initial={emptyForm(month, today, accounts[0]?.id ?? 0)}
@@ -247,7 +251,12 @@ export function LaunchesView({
                           {r.number} / {r.installments}
                         </span>
                       </TableCell>
-                      <TableCell className="text-center">{monthLabel(r.invoiceMonth)}</TableCell>
+                      <TableCell className="text-center">
+                        {monthLabel(r.invoiceMonth)}
+                        <span className="block text-[11px] text-muted-foreground">
+                          vence {dateBr(dueDate(r.invoiceMonth, accounts.find((a) => a.id === r.accountId)?.dueDay ?? null))}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-center">
                         <button
                           type="button"
