@@ -96,3 +96,33 @@ export function parseBalanceDate(raw: string, today: string): ParsedQuantity {
   if (s > today) return { ok: false, error: "A data não pode ser no futuro" };
   return { ok: true, value: s };
 }
+
+/** Texto curto (descrição, nome): NFC, sem caracteres invisíveis/de controle, de 1 a `max` caracteres. */
+export function validateLabel(raw: string, max: number, what: string): ParsedQuantity {
+  const s = raw.normalize("NFC").trim();
+  if (/[\p{Cc}\p{Cf}]/u.test(s)) return { ok: false, error: "O texto tem caracteres não permitidos" };
+  return s.length >= 1 && s.length <= max
+    ? { ok: true, value: s }
+    : { ok: false, error: `Informe ${what} de 1 a ${max} caracteres` };
+}
+
+/** Observações: opcionais, até `max` caracteres; quebras de linha permitidas, outros caracteres de controle removidos. */
+export function cleanNotes(raw: string, max: number): ParsedQuantity {
+  const s = raw
+    .normalize("NFC")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\p{Cf}]|[^\P{Cc}\n]/gu, "")
+    .trim();
+  return s.length <= max ? { ok: true, value: s } : { ok: false, error: `As observações podem ter até ${max} caracteres` };
+}
+
+/** Valor em reais (mesmas regras de parseBrl) → centavos inteiros, maior que zero. */
+export function brlToCents(raw: string): { ok: true; value: number } | { ok: false; error: string } {
+  const r = parseBrl(raw);
+  if (!r.ok) return r;
+  const negative = r.value.startsWith("-");
+  const [int, dec] = r.value.replace("-", "").split(".");
+  const cents = Number(int) * 100 + Number(dec);
+  if (negative || cents <= 0) return { ok: false, error: "Informe um valor maior que zero" };
+  return { ok: true, value: cents };
+}

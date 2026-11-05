@@ -1,0 +1,267 @@
+import Link from "next/link";
+import { getDb } from "@/db/client";
+import { requireUser } from "@/lib/auth/current";
+import { addMonths, monthLabel, monthShort, parseMonth } from "@/lib/cards/months";
+import { listInstallments, type Side } from "@/lib/cards/store";
+import { cardSummary, monthTotals, monthlySeries, projection, topCategories } from "@/lib/cards/summary";
+import { formatMoney } from "@/lib/currency";
+import { cn } from "@/lib/utils";
+import { appTimeZone, todayIn } from "@/lib/validation";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CARD_COLOR, NATURE_COLOR } from "@/components/cards/colors";
+import { CategoryPie, InvoiceBars, NaturePie } from "@/components/cards/invoice-charts";
+import { MonthPicker } from "@/components/month-picker";
+
+export const metadata = { title: "Faturas · Carteira Cripto" };
+
+const brl = (cents: number) => formatMoney(cents / 100, "BRL");
+
+function Indicator({ title, value, hint, color, testId }: { title: string; value: number; hint?: string; color: string; testId?: string }) {
+  return (
+    <div className="flex gap-3 rounded-xl border bg-card p-4">
+      <span className="w-1 shrink-0 rounded-full" style={{ background: color }} />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</span>
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <span className="text-2xl font-semibold tabular-nums" data-testid={testId}>
+            {brl(value)}
+          </span>
+          {hint && (
+            <span className="text-xs font-medium" style={{ color }}>
+              {hint}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default async function InvoicesPage({ searchParams }: PageProps<"/faturas">) {
+  const user = await requireUser();
+  const month = parseMonth((await searchParams).mes) ?? todayIn(appTimeZone()).slice(0, 7);
+  const rows = listInstallments(getDb(), user.id, addMonths(month, -11), "2099-12");
+
+  const header = (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">Finanças / Fiduciário</p>
+        <h1 className="text-2xl font-semibold">Dashboard de controle financeiro</h1>
+        <p className="mt-1 text-xs tracking-widest text-muted-foreground uppercase">Visão geral • {monthLabel(month)}</p>
+      </div>
+      <MonthPicker month={month} />
+    </div>
+  );
+
+  if (!rows.length) {
+    return (
+      <div className="flex flex-col gap-6">
+        {header}
+        <Card className="mx-auto max-w-md text-center">
+          <CardHeader>
+            <CardTitle>Nenhum lançamento ainda</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center gap-4 text-sm text-muted-foreground">
+            Lance os gastos dos cartões e o dashboard mostra as faturas, a distribuição e as parcelas futuras.
+            <Button asChild>
+              <Link href={`/lancamentos?mes=${month}`}>Ir para Lançamentos</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const monthRows = rows.filter((r) => r.invoiceMonth === month);
+  const totals = monthTotals(monthRows);
+  const last6 = Array.from({ length: 6 }, (_, i) => addMonths(month, i - 5));
+  const last12 = Array.from({ length: 12 }, (_, i) => addMonths(month, -i));
+  const series12 = monthlySeries(rows, last12);
+  const proj = projection(rows, month, 6);
+
+  const cardSection = (card: Side) => {
+    const s = cardSummary(monthRows, card);
+    const color = CARD_COLOR[card];
+    return (
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex gap-3">
+              <span className="w-1 rounded-full" style={{ background: color }} />
+              <div>
+                <p className="text-xs font-semibold tracking-widest uppercase" style={{ color }}>
+                  Cartão {card}
+                </p>
+                <p className="text-lg font-semibold">{card === "PF" ? "Pessoa Física (PF)" : "Pessoa Jurídica (PJ)"}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xs tracking-widest text-muted-foreground uppercase">Fatura atual</p>
+              <p className="text-xl font-semibold tabular-nums" data-testid={`card-${card}-total`}>
+                {brl(s.total)}
+              </p>
+            </div>
+          </div>
+          <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+            {[
+              ["Despesas PF", s.pf],
+              ["Despesas PJ", s.pj],
+              ["Pago", s.paid],
+              ["Pendente", s.pending],
+            ].map(([label, v]) => (
+              <div key={label as string} className="rounded-lg bg-muted/50 px-3 py-2">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="font-semibold tabular-nums">{brl(v as number)}</dd>
+              </div>
+            ))}
+          </dl>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mês</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead>Descrição dos custos</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {last6.map((m) => {
+                const mr = rows.filter((r) => r.invoiceMonth === m && r.card === card);
+                const total = mr.reduce((x, r) => x + r.amountCents, 0);
+                return (
+                  <TableRow key={m} style={m === month ? { backgroundColor: `${color}1f` } : undefined}>
+                    <TableCell className={cn("font-medium", m === month && "font-semibold")}>{monthShort(m)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{brl(total)}</TableCell>
+                    <TableCell className="text-muted-foreground">{topCategories(mr, 3).join(" • ") || "—"}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      {header}
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Indicator title="Fatura consolidada" value={totals.total} hint="PF + PJ • mês" color="#4C66DD" testId="invoice-total" />
+        <Indicator title="Cartão PF" value={totals.cardPF} hint="Cartão pessoa física" color={CARD_COLOR.PF} />
+        <Indicator title="Cartão PJ" value={totals.cardPJ} hint="Cartão pessoa jurídica" color={CARD_COLOR.PJ} />
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Indicator title="Despesas PF" value={totals.pf} hint="pela natureza" color={NATURE_COLOR.PF} />
+        <Indicator title="Despesas PJ" value={totals.pj} hint="pela natureza" color={NATURE_COLOR.PJ} />
+        <Indicator title="Parcelas futuras" value={proj.pendingFuture} hint="comprometido" color="#F2A45F" />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1.8fr_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Evolução mensal das faturas</CardTitle>
+            <p className="text-sm text-muted-foreground">Comparação dos dois cartões de crédito</p>
+          </CardHeader>
+          <CardContent>
+            <InvoiceBars data={monthlySeries(rows, last6)} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Distribuição dos custos</CardTitle>
+            <p className="text-sm text-muted-foreground">Composição de despesas • {monthLabel(month)}</p>
+          </CardHeader>
+          <CardContent>
+            <CategoryPie items={monthRows.map((r) => ({ nature: r.nature, category: r.categoryName, cents: r.amountCents }))} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {cardSection("PF")}
+        {cardSection("PJ")}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_1.8fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>PF × PJ</CardTitle>
+            <p className="text-sm text-muted-foreground">Natureza das despesas • {monthLabel(month)}</p>
+          </CardHeader>
+          <CardContent>
+            <NaturePie pf={totals.pf} pj={totals.pj} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Projeção de faturas futuras</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Parcelas já cadastradas • {proj.activePurchases} compra{proj.activePurchases === 1 ? "" : "s"} parcelada
+              {proj.activePurchases === 1 ? "" : "s"} ativa{proj.activePurchases === 1 ? "" : "s"} • pendente {brl(proj.pendingFuture)}
+            </p>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Mês</TableHead>
+                  <TableHead className="text-right">Cartão PF</TableHead>
+                  <TableHead className="text-right">Cartão PJ</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {proj.months.map((p) => (
+                  <TableRow key={p.month}>
+                    <TableCell className="font-medium">{monthShort(p.month)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{brl(p.cardPF)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{brl(p.cardPJ)}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{brl(p.total)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Consolidado mensal</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Cartão PF + Cartão PJ = Total = Despesas PF + Despesas PJ (duas classificações dos mesmos gastos)
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mês</TableHead>
+                <TableHead className="text-right">Cartão PF</TableHead>
+                <TableHead className="text-right">Cartão PJ</TableHead>
+                <TableHead className="text-right">Despesas PF</TableHead>
+                <TableHead className="text-right">Despesas PJ</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {series12.map((m) => (
+                <TableRow key={m.month} className={m.month === month ? "bg-muted/50 font-semibold" : undefined}>
+                  <TableCell>{monthLabel(m.month)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{brl(m.cardPF)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{brl(m.cardPJ)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{brl(m.pf)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{brl(m.pj)}</TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">{brl(m.total)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
