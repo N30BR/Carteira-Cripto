@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** App Next.js local onde usuários criados por um admin fazem login e veem o dashboard da própria carteira cripto (saldo total, curva de capital, donut de alocação, tabela de ativos).
+**Goal:** App Next.js hospedado no Easypanel onde usuários criados por um admin fazem login e veem o dashboard da própria carteira cripto (saldo total, curva de capital, donut de alocação, tabela de ativos).
 
-**Architecture:** Projeto Next.js único (App Router, Server Components + Server Actions). Lógica de domínio em módulos puros/testáveis em `src/lib/*` que recebem `db` e `now` como parâmetro; páginas em `src/app` só orquestram. SQLite via Drizzle; CoinGecko acessada apenas por `src/lib/prices`, com cache em tabela.
+**Architecture:** Projeto Next.js único (App Router, Server Components + Server Actions). Lógica de domínio em módulos testáveis em `src/lib/*` que recebem `db` e `now` como parâmetro; páginas em `src/app` só orquestram e sempre chamam `requireUser`/`requireAdmin`. SQLite via Drizzle; CoinGecko acessada apenas por `src/lib/prices`, com cache em tabela. Docker `standalone` com volume em `/app/data`.
 
 **Tech Stack:** Next.js (App Router) + TypeScript, Tailwind CSS + shadcn/ui, Recharts, Drizzle ORM + better-sqlite3, @node-rs/argon2, Vitest, Playwright, Docker (Easypanel).
 
@@ -12,28 +12,28 @@
 
 ## Global Constraints
 
-- Banco: arquivo SQLite em `data/app.db` (sobrescrevível por env `DATABASE_PATH`); `data/` no `.gitignore`.
-- Senhas: hash argon2 (`@node-rs/argon2`, sem build nativo no Windows). Mínimo 8 caracteres.
-- Sessão: cookie `session`, `httpOnly`, `sameSite=lax`, `secure` só quando `process.env.COOKIE_SECURE === "true"`; id aleatório de 32 bytes (hex); validade 7 dias.
-- Bloqueio: 5 falhas consecutivas → bloqueado por 15 minutos.
-- Limite por IP: máx. 20 tentativas de login por IP a cada 15 minutos (em memória); IP = primeiro valor de `x-forwarded-for`, senão `"unknown"`.
-- Deploy: Easypanel via `Dockerfile` (Next.js `output: "standalone"`), volume em `/app/data`, env `DATABASE_PATH=/app/data/app.db` e `COOKIE_SECURE=true`.
-- Mensagem de erro de login: exatamente `Usuário ou senha inválidos`.
-- CoinGecko: base URL em `COINGECKO_BASE_URL` (padrão `https://api.coingecko.com/api/v3`).
-- Cache: preço atual 60 s, histórico 1 h, busca 24 h. Falha da API → usar último valor em cache mesmo expirado.
-- Períodos: `7D` (pontos por hora), `30D` (a cada 4 h), `1A` e `Tudo` (por dia); `Tudo` = 365 dias, começando na data mais antiga em que todas as moedas têm preço.
-- Formatação pt-BR: `US$ 48.230,12`; percentuais 2 casas; quantidades até 8 casas sem zeros à direita.
-- Usernames: armazenados com `trim()` e em minúsculas; comparação sempre em minúsculas.
+- Banco: `DATABASE_PATH` (padrão `data/app.db`, relativo ao cwd); `PRAGMA journal_mode=WAL`, `busy_timeout=5000`, `foreign_keys=ON`; `data/` no `.gitignore`. Conexão aberta só no primeiro uso (`getDb()`), nunca na importação.
+- Senhas: `@node-rs/argon2`; 8–256 caracteres.
+- Username: 3–32 chars `^[a-z0-9._-]+$` após `trim().toLowerCase()`.
+- Sessão: id aleatório 32 bytes hex no cookie; no banco só `sha256(id)` hex; validade 7 dias. `secure = NODE_ENV === "production" && COOKIE_SECURE !== "false"`; nome `__Host-session` se secure, senão `session`; `httpOnly`, `sameSite=lax`, `path=/`.
+- Bloqueio: 5 falhas consecutivas → 15 min; tentativas durante bloqueio não contam.
+- Mensagens exatas: credencial inválida **ou bloqueada** → `Usuário ou senha inválidos`; limite de IP → `Muitas tentativas. Tente novamente em 15 minutos.`
+- Limite por IP: 20 falhas / 15 min, em memória; IP = N-ésimo valor da direita do `x-forwarded-for`, N = `TRUSTED_PROXY_HOPS` (padrão 1); sem cabeçalho → limite não se aplica.
+- CoinGecko: `COINGECKO_BASE_URL` (padrão `https://api.coingecko.com/api/v3`), header `x-cg-demo-api-key: $COINGECKO_API_KEY` quando definido; máx. 2 requisições simultâneas; 429 → 1 nova tentativa após 2 s.
+- Cache: preço atual 60 s, histórico 1 h, busca 24 h; falha → cache expirado com `stale: true`.
+- Períodos: `7D` (passo 1 h, dados de `days=30`), `30D` (passo 4 h, `days=30`), `1A` (passo 24 h, `days=365`); padrão `30D`.
+- Formatação pt-BR: `US$ 48.230,12`; percentuais 2 casas; quantidades até 8 casas, sem zeros à direita, sem notação científica.
+- Limites: 100 ativos por usuário; 30 buscas por usuário por minuto; termo de busca 2–50 chars.
 - Toda a UI em português; tema escuro.
-- Lógica de domínio recebe `now: Date` como parâmetro (padrão `new Date()`) para ser testável.
+- Lógica de domínio recebe `now: Date` (padrão `new Date()`).
 
 ## Review Focus
 
-1. Quantidade digitada com vírgula (`0,5`) → aceita como 0.5 (Task 5, `parseQuantity`).
-2. Username com espaços/maiúsculas (` Pedro `) → login funciona como `pedro`; criar `PEDRO` quando `pedro` existe → erro de duplicado (Task 4).
-3. Adicionar moeda que o usuário já tem → atualiza a quantidade, não duplica (Task 5, `upsertHolding`).
-4. Primeira execução sem internet / CoinGecko 429 sem cache → dashboard renderiza com `—`, sem erro 500 (Task 7 e Task 11).
-5. Quantidades minúsculas (`0.00000001`) e totais grandes → formatação correta, sem notação científica (Task 6, `formatQty`).
+1. Quantidade com vírgula (`0,5`) → aceita como 0.5 (Task 5, `parseQuantity`).
+2. Username com espaços/maiúsculas (` Pedro `) → login funciona como `pedro`; criar `PEDRO` com `pedro` existente → `Usuário já existe` (Task 4).
+3. Adicionar moeda que o usuário já tem → atualiza, não duplica (Task 5).
+4. CoinGecko 429/sem internet e sem cache → dashboard renderiza com `—`, sem erro 500 (Tasks 7 e 11).
+5. `x-forwarded-for` forjado (`1.2.3.4, 10.0.0.1`) → limite usa `10.0.0.1`, não `1.2.3.4` (Task 3).
 
 ---
 
@@ -41,30 +41,38 @@
 
 ```
 src/
-  db/schema.ts            tabelas Drizzle
-  db/client.ts            createDb(path) + db singleton, aplica migrações
-  lib/auth/password.ts    hashPassword / verifyPassword
-  lib/auth/sessions.ts    createSession / validateSession / deleteSession / deleteUserSessions
-  lib/auth/login.ts       attemptLogin (bloqueio)
-  lib/auth/current.ts     getCurrentUser / requireUser / requireAdmin (cookies)
-  lib/admin/users.ts      listUsers / createUser / resetPassword / deleteUser / changeOwnPassword
-  lib/validation.ts       parseQuantity / validatePassword / normalizeUsername
+  db/schema.ts             tabelas Drizzle
+  db/client.ts             createDb(path) / getDb()
+  instrumentation.ts       ensureBootstrapAdmin no start
+  lib/auth/password.ts     hashPassword / verifyPassword
+  lib/auth/sessions.ts     createSession / validateSession / deleteSession / deleteUserSessions
+  lib/auth/login.ts        attemptLogin / recordFailure (bloqueio)
+  lib/auth/ip-limit.ts     clientIp / ipLimited / recordIpFailure
+  lib/auth/cookie.ts       sessionCookieName / sessionCookieOptions
+  lib/auth/current.ts      getCurrentUser / requireUser / requireAdmin
+  lib/admin/users.ts       listUsers / createUser / resetPassword / unlockUser / deleteUser / changeOwnPassword / ensureBootstrapAdmin
+  lib/validation.ts        normalizeUsername / validateUsername / validatePassword / parseQuantity / normalizeSearch
+  lib/rate-limit.ts        createWindowLimiter (genérico, em memória)
   lib/holdings/holdings.ts listHoldings / upsertHolding / updateQuantity / deleteHolding
-  lib/prices/cache.ts     cached()
-  lib/prices/coingecko.ts chamadas HTTP cruas
-  lib/prices/index.ts     getCurrentPrices / getHistory / searchCoins
-  lib/portfolio/calc.ts   computePortfolio / buildCurve
-  lib/format.ts           formatUsd / formatPct / formatQty
-  app/login/              página + action de login
-  app/(app)/layout.tsx    cabeçalho, exige login
-  app/(app)/page.tsx      dashboard
-  app/(app)/ativos/       página + actions
-  app/(app)/admin/        página + actions
-  app/(app)/conta/senha/  trocar senha
-  components/dashboard/   BalanceCard, CapitalChart, AllocationDonut, HoldingsTable, StaleBanner
-scripts/create-admin.ts
-tests/                    Vitest (espelha src/lib)
-e2e/                      Playwright + mock da CoinGecko
+  lib/prices/cache.ts      cached / pruneExpired
+  lib/prices/coingecko.ts  HTTP cru + fila de concorrência
+  lib/prices/index.ts      getCurrentPrices / getHistory / searchCoins
+  lib/portfolio/calc.ts    computePortfolio / buildCurve
+  lib/format.ts            formatUsd / formatPct / formatQty
+  app/login/               página + action
+  app/(app)/layout.tsx     cabeçalho
+  app/(app)/page.tsx       dashboard
+  app/(app)/ativos/        página + actions
+  app/(app)/admin/         página + actions
+  app/(app)/conta/senha/   trocar senha
+  app/api/coins/search/    rota de busca
+  components/dashboard/    BalanceCard, CapitalChart, AllocationDonut, HoldingsTable, StaleBanner
+scripts/create-admin.ts    (dev)
+scripts/backup.mjs         (produção)
+docker/entrypoint.sh
+Dockerfile, .dockerignore, README.md
+tests/                     Vitest
+e2e/                       Playwright + mock CoinGecko
 ```
 
 ---
@@ -72,36 +80,33 @@ e2e/                      Playwright + mock da CoinGecko
 ### Task 1: Scaffold, banco e infraestrutura de testes
 
 **Files:**
-- Create: projeto Next.js na raiz, `src/db/schema.ts`, `src/db/client.ts`, `drizzle.config.ts`, `drizzle/` (migrações geradas), `vitest.config.ts`, `tests/helpers/db.ts`, `tests/db/schema.test.ts`
+- Create: projeto Next.js na raiz, `src/db/schema.ts`, `src/db/client.ts`, `drizzle.config.ts`, `drizzle/`, `vitest.config.ts`, `tests/helpers/db.ts`, `tests/db/schema.test.ts`
+- Modify: `next.config.ts`
 
 **Interfaces:**
 - Produces:
-  - `createDb(path: string): Db` — abre SQLite, aplica migrações de `drizzle/`, retorna instância Drizzle tipada. `path` pode ser `":memory:"`.
-  - `db: Db` — singleton com `process.env.DATABASE_PATH ?? "data/app.db"` (cria `data/` se não existir).
+  - `createDb(path: string): Db` — abre SQLite, aplica pragmas e migrações de `path.join(process.cwd(), "drizzle")`. Aceita `":memory:"`. Cria a pasta do arquivo se faltar.
+  - `getDb(): Db` — singleton preguiçoso com `process.env.DATABASE_PATH ?? "data/app.db"`.
   - `type Db`
-  - Tabelas `users`, `sessions`, `holdings`, `priceCache` (colunas conforme spec §5; `holdings.quantity` é `text`; unique em `(userId, coinId)`; `sessions` e `holdings` com `onDelete: "cascade"` para `users`). Datas como `integer` em ms (`mode: "timestamp_ms"`).
+  - Tabelas: `users` (`id`, `username` unique, `passwordHash`, `isAdmin`, `createdAt`, `failedAttempts` default 0, `lockedUntil` nullable), `sessions` (`idHash` pk, `userId`, `expiresAt`), `holdings` (`id`, `userId`, `coinId`, `symbol`, `name`, `quantity` text, `updatedAt`; unique `(userId, coinId)`), `priceCache` (`key` pk, `payload` text, `fetchedAt`, `expiresAt`). FKs com `onDelete: "cascade"`. Datas `integer` `mode: "timestamp_ms"`.
   - `tests/helpers/db.ts`: `testDb(): Db` → `createDb(":memory:")`.
 
-- [ ] **Step 1: Scaffold.** A pasta já tem `docs/`, então gere em pasta temporária e copie:
-  `npx create-next-app@latest ../_scaffold --ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --no-turbopack`, depois mova o conteúdo (exceto `.git`) para a raiz e apague `../_scaffold`.
-- [ ] **Step 2: Dependências.**
-  `npm i drizzle-orm better-sqlite3 @node-rs/argon2 recharts` e `npm i -D drizzle-kit @types/better-sqlite3 vitest tsx @playwright/test`.
-  `npx shadcn@latest init` (tema escuro, base neutral); adicionar componentes `button input label card table dialog dropdown-menu tabs sonner`.
-  Adicionar ao `package.json`: `"test": "vitest run"`, `"test:e2e": "playwright test"`, `"db:generate": "drizzle-kit generate"`, `"create-admin": "tsx scripts/create-admin.ts"`. Adicionar `data/` ao `.gitignore`. Forçar `<html className="dark" lang="pt-BR">` em `src/app/layout.tsx`.
-- [ ] **Step 3: Teste que falha** em `tests/db/schema.test.ts`:
+- [ ] **Step 1: Scaffold.** A pasta já tem `docs/` e `.git`; gerar em pasta temporária e mover: `npx create-next-app@latest ../_scaffold --ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --no-turbopack`, mover tudo exceto `.git` para a raiz, apagar `../_scaffold`.
+- [ ] **Step 2: Dependências.** `npm i drizzle-orm better-sqlite3 @node-rs/argon2 recharts` e `npm i -D drizzle-kit @types/better-sqlite3 vitest tsx @playwright/test`. `npx shadcn@latest init` (neutral) + `npx shadcn@latest add button input label card table dialog dropdown-menu sonner badge checkbox`. Scripts: `"test": "vitest run"`, `"test:e2e": "playwright test"`, `"db:generate": "drizzle-kit generate"`, `"create-admin": "tsx scripts/create-admin.ts"`. `.gitignore` += `data/`. `src/app/layout.tsx`: `<html lang="pt-BR" className="dark">`. `next.config.ts`: `output: "standalone"`, `serverExternalPackages: ["better-sqlite3", "@node-rs/argon2"]`, e `experimental.serverActions.allowedOrigins = process.env.APP_DOMAIN ? [process.env.APP_DOMAIN] : undefined`.
+- [ ] **Step 3: Testes que falham** em `tests/db/schema.test.ts`:
 ```ts
-test("cria usuário e holding com cascade", () => {
+test("remover usuário apaga holdings e sessões (cascade)", () => {
   const db = testDb();
-  const [u] = db.insert(users).values({ username: "a", passwordHash: "x", isAdmin: false }).returning().all();
-  db.insert(holdings).values({ userId: u.id, coinId: "bitcoin", symbol: "btc", name: "Bitcoin", quantity: "0.5" }).run();
+  const [u] = db.insert(users).values({ username: "a", passwordHash: "x", isAdmin: false, createdAt: new Date() }).returning().all();
+  db.insert(holdings).values({ userId: u.id, coinId: "bitcoin", symbol: "btc", name: "Bitcoin", quantity: "0.5", updatedAt: new Date() }).run();
   db.delete(users).where(eq(users.id, u.id)).run();
   expect(db.select().from(holdings).all()).toHaveLength(0);
 });
-test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ mesmo user → toThrow */ });
+test("holding é única por (userId, coinId)", () => { /* 2º insert de bitcoin p/ mesmo user → toThrow */ });
 ```
-- [ ] **Step 4:** `npx vitest run tests/db` → FAIL (módulos inexistentes).
-- [ ] **Step 5:** Implementar `schema.ts`, `client.ts` (ativar `PRAGMA foreign_keys = ON`), `drizzle.config.ts`; `npm run db:generate`.
-- [ ] **Step 6:** `npx vitest run tests/db` → PASS. `npm run build` → sucesso.
+- [ ] **Step 4:** `npx vitest run tests/db` → FAIL.
+- [ ] **Step 5:** Implementar `schema.ts`, `client.ts`, `drizzle.config.ts`; `npm run db:generate`.
+- [ ] **Step 6:** `npx vitest run tests/db` → PASS; `npm run build` → sucesso, sem criar `data/app.db` durante o build.
 - [ ] **Step 7: Commit** `feat: scaffold Next.js, schema SQLite e Vitest`
 
 ---
@@ -109,79 +114,76 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 ### Task 2: Senhas e sessões
 
 **Files:**
-- Create: `src/lib/auth/password.ts`, `src/lib/auth/sessions.ts`
+- Create: `src/lib/auth/password.ts`, `src/lib/auth/sessions.ts`, `src/lib/auth/cookie.ts`
 - Test: `tests/auth/password.test.ts`, `tests/auth/sessions.test.ts`
 
 **Interfaces:**
-- Consumes: `Db`, tabelas `users`, `sessions`.
 - Produces:
-  - `hashPassword(plain: string): Promise<string>`, `verifyPassword(hash: string, plain: string): Promise<boolean>`
+  - `hashPassword(plain: string): Promise<string>`, `verifyPassword(hash: string, plain: string): Promise<boolean>`, `DUMMY_HASH: Promise<string>` (hash fixo calculado uma vez, para tempo constante).
   - `SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000`
-  - `createSession(db: Db, userId: number, now?: Date): { id: string; expiresAt: Date }`
-  - `validateSession(db: Db, id: string, now?: Date): { id: number; username: string; isAdmin: boolean } | null` — sessão expirada é apagada e retorna `null`.
-  - `deleteSession(db: Db, id: string): void`
-  - `deleteUserSessions(db: Db, userId: number, exceptSessionId?: string): void`
+  - `createSession(db, userId: number, now?): { token: string; expiresAt: Date }` — `token` vai no cookie; grava `sha256(token)`.
+  - `validateSession(db, token: string, now?): { id: number; username: string; isAdmin: boolean; sessionHash: string } | null` — expirada é apagada.
+  - `deleteSession(db, token: string): void`
+  - `deleteUserSessions(db, userId: number, exceptHash?: string): void`
+  - `cookie.ts`: `sessionCookieName(): string`, `sessionCookieOptions(expiresAt: Date)` conforme Global Constraints.
 
-- [ ] **Step 1: Testes que falham:**
-  - `verifyPassword(await hashPassword("segredo123"), "segredo123")` → `true`; com `"errada"` → `false`; hash ≠ texto.
-  - `createSession` gera id hex de 64 chars; `validateSession` com `now` = criação + 1 h → retorna usuário; com `now` = criação + 7 dias + 1 ms → `null` e a linha some da tabela.
-  - `deleteUserSessions(db, u, keepId)` apaga todas exceto `keepId`.
-- [ ] **Step 2:** `npx vitest run tests/auth` → FAIL.
-- [ ] **Step 3:** Implementar (id via `crypto.randomBytes(32).toString("hex")`).
-- [ ] **Step 4:** `npx vitest run tests/auth` → PASS.
-- [ ] **Step 5: Commit** `feat: hash de senha e sessões`
+- [ ] **Step 1: Testes que falham:** verify certo/errado; `createSession` → token hex de 64 chars e a tabela **não** contém o token puro (contém `sha256(token)`); válido em +1 h; `null` e linha apagada em +7 dias +1 ms; `deleteUserSessions(db, u, keepHash)` mantém só aquela; `sessionCookieName()` com `NODE_ENV=production` → `__Host-session`, com `COOKIE_SECURE=false` → `session`.
+- [ ] **Step 2:** `npx vitest run tests/auth` → FAIL. **Step 3:** implementar. **Step 4:** PASS.
+- [ ] **Step 5: Commit** `feat: hash de senha e sessões com id em hash`
 
 ---
 
-### Task 3: Login com bloqueio
+### Task 3: Validação, login com bloqueio e limite por IP
 
 **Files:**
-- Create: `src/lib/auth/login.ts`, `src/lib/auth/ip-limit.ts`, `src/lib/validation.ts` (só `normalizeUsername` e `validatePassword` nesta task)
-- Test: `tests/auth/login.test.ts`, `tests/auth/ip-limit.test.ts`, `tests/validation.test.ts`
+- Create: `src/lib/validation.ts`, `src/lib/rate-limit.ts`, `src/lib/auth/login.ts`, `src/lib/auth/ip-limit.ts`
+- Test: `tests/validation.test.ts`, `tests/auth/login.test.ts`, `tests/auth/ip-limit.test.ts`
 
 **Interfaces:**
-- Consumes: `verifyPassword`, `createSession`.
+- Consumes: `verifyPassword`, `DUMMY_HASH`, `createSession`.
 - Produces:
-  - `normalizeUsername(raw: string): string` → `raw.trim().toLowerCase()`
-  - `validatePassword(pw: string): string | null` → mensagem `"A senha precisa ter pelo menos 8 caracteres"` ou `null`
+  - `normalizeUsername(raw): string`; `validateUsername(u): string | null` (`"Usuário deve ter 3 a 32 caracteres: letras, números, . _ -"`); `validatePassword(pw): string | null` (`"A senha precisa ter entre 8 e 256 caracteres"`).
+  - `createWindowLimiter(max: number, windowMs: number): { hit(key: string, now?: Date): void; limited(key: string, now?: Date): boolean; reset(): void }` — conta eventos por chave numa janela deslizante.
   - `MAX_FAILED_ATTEMPTS = 5`, `LOCK_MS = 15 * 60 * 1000`
-  - `attemptLogin(db: Db, username: string, password: string, now?: Date): Promise<{ ok: true; sessionId: string; expiresAt: Date } | { ok: false; reason: "invalid" | "locked" }>`
-    - usuário inexistente → `invalid`; `lockedUntil > now` → `locked` (sem checar senha); senha errada → incrementa `failedAttempts`, ao chegar em 5 define `lockedUntil = now + 15min` e zera contador; sucesso → zera `failedAttempts` e `lockedUntil`, cria sessão.
-
-  - Em `src/lib/auth/ip-limit.ts`: `IP_MAX_ATTEMPTS = 20`, `IP_WINDOW_MS = 15 * 60 * 1000`, `checkIpLimit(ip: string, now?: Date): boolean` (registra a tentativa e retorna `false` se passou de 20 na janela), `resetIpLimits(): void` (para testes). Mapa em memória; entradas fora da janela são descartadas.
+  - `recordFailure(db, userId: number, now?): void` — incrementa; ao chegar em 5 define `lockedUntil = now + LOCK_MS` e zera o contador.
+  - `attemptLogin(db, username, password, now?): Promise<{ ok: true; token: string; expiresAt: Date } | { ok: false }>` — inexistente → roda `verifyPassword(await DUMMY_HASH, password)` e falha; bloqueado → falha sem verificar e sem contar; senha errada → `recordFailure`; sucesso → zera contador/bloqueio e cria sessão.
+  - `ip-limit.ts`: `clientIp(xff: string | null, hops = Number(process.env.TRUSTED_PROXY_HOPS ?? 1)): string | null` (divide por vírgula com `trim`; retorna o N-ésimo valor a partir da direita; se houver menos de N valores, retorna o primeiro; cabeçalho ausente/vazio → `null`); `ipLimited(ip: string | null, now?)`; `recordIpFailure(ip: string | null, now?)` — 20 falhas / 15 min; `ip null` → nunca limitado.
 
 - [ ] **Step 1: Testes que falham:**
-  - `checkIpLimit("1.1.1.1")` 20x → `true`; 21ª → `false`; outro IP → `true`; após `now` + 15 min + 1 ms → `true` (em `tests/auth/ip-limit.test.ts`).
-  - login correto → `ok: true`; login com `" PEDRO "` para usuário `pedro` → `ok: true`.
-  - senha errada → `{ ok: false, reason: "invalid" }`; usuário inexistente → `invalid`.
-  - 5 erros seguidos → 6ª tentativa **com senha certa** → `locked`; mesma tentativa com `now` + 15 min + 1 ms → `ok: true`.
-  - 4 erros, 1 acerto, 4 erros → não bloqueia (contador zerou).
-  - `validatePassword("1234567")` → mensagem; `("12345678")` → `null`.
-- [ ] **Step 2:** rodar → FAIL. **Step 3:** implementar. **Step 4:** `npx vitest run tests/auth tests/validation.test.ts` → PASS.
-- [ ] **Step 5: Commit** `feat: login com bloqueio após 5 falhas`
+  - `clientIp("1.2.3.4, 10.0.0.1", 1)` → `"10.0.0.1"`; `clientIp("9.9.9.9", 1)` → `"9.9.9.9"`; `clientIp("1.1.1.1, 2.2.2.2, 3.3.3.3", 2)` → `"2.2.2.2"`; `clientIp(null)` → `null`.
+  - 20 `recordIpFailure("x")` → `ipLimited("x")` true; outro IP → false; +15 min +1 ms → false; `ipLimited(null)` sempre false.
+  - login certo → ok; `" PEDRO "` → ok; senha errada → `{ ok: false }`; inexistente → `{ ok: false }`.
+  - 5 erros → 6ª **com senha certa** → `{ ok: false }` e `failedAttempts` não muda; em +15 min +1 ms → ok.
+  - 4 erros, 1 acerto, 4 erros → não bloqueia.
+  - `validateUsername("ab")`, `("a b c")` → erro; `("pedro.h")` → null. `validatePassword("1234567")` e `("x".repeat(257))` → erro.
+- [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** `npx vitest run tests/auth tests/validation.test.ts` → PASS.
+- [ ] **Step 5: Commit** `feat: login com bloqueio, tempo constante e limite por IP`
 
 ---
 
-### Task 4: Gestão de usuários + script do primeiro admin
+### Task 4: Gestão de usuários e primeiro admin
 
 **Files:**
-- Create: `src/lib/admin/users.ts`, `scripts/create-admin.ts`
+- Create: `src/lib/admin/users.ts`, `scripts/create-admin.ts`, `src/instrumentation.ts`
 - Test: `tests/admin/users.test.ts`
 
 **Interfaces:**
-- Consumes: `hashPassword`, `verifyPassword`, `deleteUserSessions`, `normalizeUsername`, `validatePassword`.
-- Produces (todas retornam `{ ok: true } | { ok: false; error: string }` exceto `listUsers`):
-  - `listUsers(db): { id; username; isAdmin; createdAt }[]`
-  - `createUser(db, input: { username: string; password: string; isAdmin: boolean })` — erros: `"Usuário já existe"`, `"Usuário obrigatório"`, mensagem de `validatePassword`.
-  - `resetPassword(db, userId: number, newPassword: string)` — encerra todas as sessões do usuário.
-  - `deleteUser(db, actorId: number, targetId: number)` — erros: `"Você não pode remover a si mesmo"`, `"Não é possível remover o último administrador"`.
-  - `changeOwnPassword(db, userId, currentSessionId, current: string, next: string)` — erro `"Senha atual incorreta"`; encerra as outras sessões.
-- `scripts/create-admin.ts`: lê usuário e senha via `readline` (senha sem eco não é exigido), chama `createUser(db, {..., isAdmin: true})`, imprime resultado, `exit(1)` em erro.
+- Consumes: `hashPassword`, `verifyPassword`, `deleteUserSessions`, `recordFailure`, validações.
+- Produces (retornam `{ ok: true } | { ok: false; error: string }`, exceto `listUsers`):
+  - `listUsers(db): { id; username; isAdmin; createdAt; lockedUntil: Date | null }[]`
+  - `createUser(db, { username, password, isAdmin })` — erros: `"Usuário já existe"`, mensagens de `validateUsername`/`validatePassword`.
+  - `resetPassword(db, userId, newPassword)` — também zera `failedAttempts`/`lockedUntil` e encerra todas as sessões.
+  - `unlockUser(db, userId)` — zera `failedAttempts`/`lockedUntil`.
+  - `deleteUser(db, actorId, targetId)` — erros `"Você não pode remover a si mesmo"`, `"Não é possível remover o último administrador"`.
+  - `changeOwnPassword(db, userId, currentHash: string, current, next, now?)` — conta bloqueada → `"Muitas tentativas. Tente novamente em 15 minutos."`; senha atual errada → `recordFailure` + `"Senha atual incorreta"`; sucesso → encerra as outras sessões.
+  - `ensureBootstrapAdmin(db, env = process.env): "created" | "skipped"` — cria admin de `ADMIN_USERNAME`/`ADMIN_PASSWORD` só se não houver nenhum usuário; loga `Administrador inicial criado: <usuario>` (sem a senha).
+  - `src/instrumentation.ts`: `register()` → se `process.env.NEXT_RUNTIME === "nodejs"`, `await import` e chama `ensureBootstrapAdmin(getDb())`.
+  - `scripts/create-admin.ts`: `readline` pergunta usuário e senha, `createUser(..., isAdmin: true)`, imprime `Administrador criado` ou o erro e `exit(1)`.
 
-- [ ] **Step 1: Testes que falham:** duplicado com caixa diferente (`pedro` / `PEDRO`) → erro; senha curta → erro; `resetPassword` apaga sessões; remover a si mesmo → erro; regras de remoção: 2 admins A e B, A remove B → ok; A tenta remover A → erro de si mesmo; com 1 admin A e usuário comum C, A remove C → ok; `deleteUser(db, C, A)` → `"Não é possível remover o último administrador"`; `changeOwnPassword` com senha atual errada → erro, com certa → mantém `currentSessionId` e apaga as outras.
+- [ ] **Step 1: Testes que falham:** `pedro`/`PEDRO` → `Usuário já existe`; senha curta → erro; `resetPassword` apaga sessões e desbloqueia; `unlockUser` desbloqueia; 2 admins A e B: A remove B → ok, A remove A → erro de si mesmo; 1 admin A + comum C: `deleteUser(db, C, A)` → erro de último admin; `changeOwnPassword` errada 5x → 6ª com senha certa → erro de bloqueio; certa → mantém `currentHash`, apaga as outras; `ensureBootstrapAdmin` com banco vazio + envs → `created`; com usuário existente → `skipped`; sem envs → `skipped`.
 - [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** `npx vitest run tests/admin` → PASS.
-- [ ] **Step 5:** `DATABASE_PATH=data/dev.db npm run create-admin` manual → imprime `Administrador criado`.
-- [ ] **Step 6: Commit** `feat: gestão de usuários e script create-admin`
+- [ ] **Step 5:** Manual: `npm run create-admin` com `DATABASE_PATH=data/dev.db` → `Administrador criado`.
+- [ ] **Step 6: Commit** `feat: gestão de usuários, desbloqueio e admin inicial`
 
 ---
 
@@ -193,14 +195,15 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 
 **Interfaces:**
 - Produces:
-  - `parseQuantity(raw: string): { ok: true; value: string } | { ok: false; error: string }` — aceita `0,5` e `0.5`, remove espaços, normaliza para string com ponto; rejeita vazio, não-número, `≤ 0`, mais de 18 casas: erro `"Informe uma quantidade maior que zero"` / `"Quantidade inválida"`.
+  - `parseQuantity(raw): { ok: true; value: string } | { ok: false; error: string }` — aceita `0,5`/`0.5`, remove espaços, normaliza para ponto; erros `"Quantidade inválida"` (não-número, separador de milhar, >18 casas) e `"Informe uma quantidade maior que zero"` (≤ 0).
+  - `normalizeSearch(raw): string | null` — `trim().toLowerCase()`, 2–50 chars senão `null`.
+  - `MAX_HOLDINGS = 100`
   - `type Holding = { id: number; coinId: string; symbol: string; name: string; quantity: string }`
   - `listHoldings(db, userId): Holding[]`
-  - `upsertHolding(db, userId, h: { coinId; symbol; name; quantity: string }): void` — se `(userId, coinId)` existe, atualiza quantidade.
-  - `updateQuantity(db, userId, holdingId, quantity: string): boolean` — `false` se a holding não é do usuário.
-  - `deleteHolding(db, userId, holdingId): boolean` — idem.
+  - `upsertHolding(db, userId, h: { coinId; symbol; name; quantity }): { ok: true } | { ok: false; error: string }` — atualiza se existe; nova acima de 100 → `"Limite de 100 ativos atingido"`.
+  - `updateQuantity(db, userId, holdingId, quantity): boolean`, `deleteHolding(db, userId, holdingId): boolean` — `false` se não for do usuário.
 
-- [ ] **Step 1: Testes que falham:** `parseQuantity("0,5")` → `"0.5"`; `("1.234,5")` → erro `Quantidade inválida` (sem separador de milhar); `("0")`, `("-1")`, `("")`, `("abc")` → erro; `("0.00000001")` → ok. Upsert 2x bitcoin → 1 linha com a última quantidade. Usuário B chamando `updateQuantity`/`deleteHolding` na holding de A → `false` e dado de A intacto; `listHoldings(B)` não traz dados de A.
+- [ ] **Step 1: Testes que falham:** `parseQuantity("0,5")` → `"0.5"`; `("1.234,5")`, `("abc")`, `("")` → `Quantidade inválida`; `("0")`, `("-1")` → maior que zero; `("0.00000001")` → ok. Upsert 2x bitcoin → 1 linha com a última quantidade. 101ª moeda → erro de limite. B atualizando/removendo holding de A → `false`, A intacto; `listHoldings(B)` vazio.
 - [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS.
 - [ ] **Step 5: Commit** `feat: carteira por usuário e validação de quantidade`
 
@@ -215,24 +218,26 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 **Interfaces:**
 - Consumes: `Holding`.
 - Produces:
-  - `formatUsd(n: number): string` → `formatUsd(48230.12) === "US$ 48.230,12"` (`Intl.NumberFormat("pt-BR")` com prefixo manual `US$ `; normalizar espaço não-quebrável para espaço comum).
-  - `formatPct(n: number): string` → `formatPct(0.6234) === "62,34%"`; `formatPct(-0.012) === "-1,20%"`.
-  - `formatQty(q: string | number): string` → `"0.00000001"` → `"0,00000001"`; `"1.50000000"` → `"1,5"`; `"12345.5"` → `"12.345,5"`.
+  - `formatUsd(n)` → `formatUsd(48230.12) === "US$ 48.230,12"` (prefixo manual `US$ `, espaço comum).
+  - `formatPct(n)` → `formatPct(0.6234) === "62,34%"`, `formatPct(-0.012) === "-1,20%"`.
+  - `formatQty(q: string | number)` → `"0.00000001"` → `"0,00000001"`; `"1.50000000"` → `"1,5"`; `"12345.5"` → `"12.345,5"`; `"0.123456789"` → `"0,12345679"`.
   - `type CurrentPrice = { usd: number; change24h: number | null }`
   - `type PortfolioRow = Holding & { price: number | null; value: number | null; share: number | null; change24h: number | null }`
-  - `computePortfolio(holdings: Holding[], prices: Record<string, CurrentPrice>): { rows: PortfolioRow[]; total: number; change24hUsd: number; change24hPct: number | null }` — linhas sem preço têm `price/value/share = null` e não entram no total; `rows` ordenadas por `value` desc (nulos no fim); variação 24h do total = `Σ value - Σ value/(1+change24h/100)`.
-  - `type Period = "7D" | "30D" | "1A" | "Tudo"`; `PERIOD_DAYS: Record<Period, number> = { "7D": 7, "30D": 30, "1A": 365, "Tudo": 365 }`; `PERIOD_STEP_MS = { "7D": 1h, "30D": 4h, "1A": 24h, "Tudo": 24h }`
+  - `computePortfolio(holdings, prices: Record<string, CurrentPrice>): { rows: PortfolioRow[]; total: number; change24hUsd: number; change24hPct: number | null }` — fórmula de variação da spec §7; `rows` por `value` desc, nulos no fim.
+  - `type Period = "7D" | "30D" | "1A"`; `PERIODS: Record<Period, { days: number; stepMs: number; sourceDays: 30 | 365 }>` = 7D `{7, 1h, 30}`, 30D `{30, 4h, 30}`, 1A `{365, 24h, 365}`; `parsePeriod(raw: unknown): Period` (inválido → `"30D"`).
   - `type PricePoint = [timestampMs: number, price: number]`
-  - `buildCurve(holdings: Holding[], history: Record<string, PricePoint[]>, period: Period, now?: Date): { t: number; value: number }[]`
+  - `buildCurve(holdings, history: Record<string, PricePoint[]>, current: Record<string, CurrentPrice>, period, now?): { points: { t: number; value: number }[]; missingHistory: string[] }`
 
-  Algoritmo de `buildCurve` (moedas sem histórico são ignoradas):
+  Algoritmo de `buildCurve` (só moedas com preço atual; `missingHistory` = símbolos dessas moedas sem histórico):
   ```
-  start = max( now - PERIOD_DAYS*dia , max_i(primeiro timestamp da moeda i) )
-  for t = start; t <= now; t += step:
-     value(t) = Σ_i quantidade_i × (último preço da moeda i com timestamp ≤ t)
+  step = PERIODS[p].stepMs
+  start = ceil((now - days*24h) / step) * step
+  for t = start; t < now; t += step:
+     value(t) = Σ_i qty_i × (último preço da moeda i com ts ≤ t, ou 0 se não houver)
+  ponto final: (now, Σ_i qty_i × current[i].usd)   // = total do card
   ```
 
-- [ ] **Step 1: Testes que falham:** formatação com os exemplos acima; `computePortfolio` com BTC 0.5 @ 60000 e ETH 2 @ 3000 → total 36000, shares 0.8333…/0.1666…, ordem BTC, ETH; moeda sem preço → `value: null`, fora do total; carteira vazia → `total 0`, `rows []`; `buildCurve` com 2 moedas onde a 2ª começa depois → primeiro ponto ≥ início da 2ª; passo do `30D` = 4 h; valor em um ponto = soma esperada.
+- [ ] **Step 1: Testes que falham:** formatação com os exemplos acima. `computePortfolio`: BTC 0.5 @ 60000 (change 10) e ETH 2 @ 3000 (change null) → total 36000; shares 0.8333…/0.1666…; ordem BTC, ETH; `change24hUsd ≈ 30000 − 30000/1.1 ≈ 2727,27`; `change24hPct ≈ 2727,27 / 33272,73`; change −100 → ignorado; moeda sem preço → `value null`, fora do total; vazio → total 0. `buildCurve`: último ponto `t === now` e `value === total`; moeda cujo histórico começa no meio vale 0 antes; passo do `30D` = 4 h; moeda com preço mas sem histórico → em `missingHistory`.
 - [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS.
 - [ ] **Step 5: Commit** `feat: formatação pt-BR e cálculos do portfólio`
 
@@ -245,40 +250,41 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 - Test: `tests/prices/cache.test.ts`, `tests/prices/prices.test.ts`
 
 **Interfaces:**
-- Consumes: `Db`, `priceCache`, `CurrentPrice`, `PricePoint`, `Period`, `PERIOD_DAYS`.
+- Consumes: `Db`, `priceCache`, `CurrentPrice`, `PricePoint`, `Period`, `PERIODS`.
 - Produces:
-  - `cached<T>(db, key: string, ttlMs: number, loader: () => Promise<T>, now?: Date): Promise<{ data: T; fetchedAt: Date; stale: boolean } | null>` — válido → retorna cache; expirado/ausente → chama loader e grava; loader lança e há cache → retorna cache com `stale: true`; loader lança sem cache → `null`.
-  - `coingecko.ts` (usa `fetch` global e `COINGECKO_BASE_URL`; lança em status ≠ 200):
-    - `fetchSimplePrices(ids: string[]): Promise<Record<string, CurrentPrice>>` → `GET /simple/price?ids=a,b&vs_currencies=usd&include_24hr_change=true`
-    - `fetchMarketChart(id: string, days: number): Promise<PricePoint[]>` → `GET /coins/{id}/market_chart?vs_currency=usd&days={days}`, campo `prices`
-    - `fetchSearch(query: string): Promise<{ id; symbol; name; thumb }[]>` → `GET /search?query=`, campo `coins` (máx. 10)
+  - `cached<T>(db, key, ttlMs, loader: () => Promise<T>, now?): Promise<{ data: T; fetchedAt: Date; stale: boolean } | null>` — válido → cache; expirado/ausente → loader e grava; loader lança + cache → `stale: true`; sem cache → `null`.
+  - `pruneExpired(db, prefix: string, now?): void`
+  - `coingecko.ts` — todas passam por uma fila com no máx. 2 em andamento; header da chave quando há `COINGECKO_API_KEY`; 429 → espera 2 s e tenta 1 vez; outro status ≠ 200 lança:
+    - `fetchSimplePrices(ids): Promise<Record<string, CurrentPrice>>` → `/simple/price?ids=a,b&vs_currencies=usd&include_24hr_change=true`
+    - `fetchMarketChart(id, days: 30 | 365): Promise<PricePoint[]>` → `/coins/{id}/market_chart?vs_currency=usd&days={days}` (campo `prices`)
+    - `fetchSearch(query): Promise<{ id; symbol; name; thumb }[]>` → `/search?query=` (campo `coins`, máx. 10)
   - `index.ts`:
-    - `getCurrentPrices(db, ids: string[], now?)` → `{ prices: Record<string, CurrentPrice>; fetchedAt: Date | null; stale: boolean }` (chave `price:${ids.sort().join(",")}`, TTL 60 s; `null` do cache → `prices: {}`)
-    - `getHistory(db, ids: string[], period: Period, now?)` → `{ history: Record<string, PricePoint[]>; stale: boolean }` (uma chave por moeda `chart:${id}:${days}`, TTL 1 h; moeda que falhar sem cache fica ausente)
-    - `searchCoins(db, query: string, now?)` (chave `search:${query.toLowerCase()}`, TTL 24 h; query < 2 chars → `[]`)
+    - `getCurrentPrices(db, ids, now?)` → `{ prices; fetchedAt: Date | null; stale: boolean }` (chave `price:${[...ids].sort().join(",")}`, 60 s; ids vazio → sem chamada)
+    - `getHistory(db, ids, period, now?)` → `{ history: Record<string, PricePoint[]>; oldestFetchedAt: Date | null; stale: boolean }` (chave `chart:${id}:${sourceDays}`, 1 h)
+    - `searchCoins(db, query, now?)` → resultados (chave `search:${q}`, 24 h; `normalizeSearch` null → `[]`; após gravar, `pruneExpired(db, "search:")`)
 
-- [ ] **Step 1: Testes que falham** (mock com `vi.stubGlobal("fetch", ...)`): cache hit não chama loader; expirado chama loader; loader lança com cache → `stale: true`; sem cache → `null`. `getCurrentPrices` com fetch retornando 429 e sem cache → `{ prices: {}, stale: false, fetchedAt: null }` sem lançar. URL montada corretamente para `simple/price`.
-- [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS.
-- [ ] **Step 5: Commit** `feat: cliente CoinGecko com cache e fallback`
+- [ ] **Step 1: Testes que falham** (`vi.stubGlobal("fetch", ...)`): cache hit não chama loader; expirado chama; loader lança com cache → `stale: true`; sem cache → `null`. `getCurrentPrices` com 429 constante e sem cache → `{ prices: {}, fetchedAt: null, stale: false }` sem lançar, e `fetch` chamado 2x (retry). Com `COINGECKO_API_KEY=k` → header `x-cg-demo-api-key: k`. 5 `fetchMarketChart` simultâneos → nunca mais de 2 em andamento. `getHistory("7D")` e `("30D")` usam a mesma chave `chart:bitcoin:30` (1 chamada só). Busca expirada é apagada ao gravar outra.
+- [ ] **Step 2:** FAIL. **Step 3:** implementar (nos testes, usar fake timers para os 2 s). **Step 4:** PASS.
+- [ ] **Step 5: Commit** `feat: cliente CoinGecko com fila, chave Demo, cache e fallback`
 
 ---
 
-### Task 8: Login, sessão na UI, layout e troca de senha
+### Task 8: Login, layout autenticado e troca de senha
 
 **Files:**
-- Create: `src/lib/auth/current.ts`, `src/app/login/page.tsx`, `src/app/login/actions.ts`, `src/app/(app)/layout.tsx`, `src/app/(app)/actions.ts` (logout), `src/components/app-header.tsx`, `src/app/(app)/conta/senha/page.tsx` + `actions.ts`
-- Delete: `src/app/page.tsx` do scaffold (substituída pelo dashboard na Task 11; até lá, colocar placeholder em `src/app/(app)/page.tsx` com o texto `Dashboard`).
+- Create: `src/lib/auth/current.ts`, `src/app/login/page.tsx`, `src/app/login/actions.ts`, `src/app/(app)/layout.tsx`, `src/app/(app)/actions.ts`, `src/components/app-header.tsx`, `src/app/(app)/conta/senha/page.tsx`, `src/app/(app)/conta/senha/actions.ts`, `src/app/(app)/page.tsx` (placeholder `Dashboard`)
+- Delete: `src/app/page.tsx` do scaffold
 
 **Interfaces:**
-- Consumes: `attemptLogin`, `validateSession`, `deleteSession`, `changeOwnPassword`.
+- Consumes: `attemptLogin`, `clientIp`, `ipLimited`, `recordIpFailure`, `validateSession`, `deleteSession`, `changeOwnPassword`, `sessionCookieName`, `sessionCookieOptions`, `getDb`.
 - Produces:
-  - `getCurrentUser(): Promise<{ id; username; isAdmin; sessionId } | null>` (lê cookie `session`)
-  - `requireUser()` → usuário ou `redirect("/login")`; `requireAdmin()` → usuário admin ou `redirect("/")`.
-  - `loginAction(prev, formData)` → chama `checkIpLimit(ip)` antes de `attemptLogin` (IP de `headers().get("x-forwarded-for")`); excedido → `{ error: "Muitas tentativas. Tente novamente em 15 minutos." }`. Em sucesso grava cookie e `redirect("/")`; erro → `{ error: "Usuário ou senha inválidos" }` ou `{ error: "Muitas tentativas. Tente novamente em 15 minutos." }`.
+  - `getCurrentUser(): Promise<{ id; username; isAdmin; sessionHash } | null>`
+  - `requireUser()` → usuário ou `redirect("/login")`; `requireAdmin()` → admin ou `redirect("/")`.
+  - `loginAction(prev, formData)`: `ip = clientIp(headers().get("x-forwarded-for"))`; `ipLimited(ip)` → erro de muitas tentativas; `attemptLogin` falhou → `recordIpFailure(ip)` + `Usuário ou senha inválidos`; sucesso → cookie + `redirect("/")`.
   - `logoutAction()` → apaga sessão e cookie, `redirect("/login")`.
 
-- [ ] **Step 1:** Implementar. Login: card centralizado, campos `Usuário`/`Senha`, botão `Entrar`, erro via `useActionState`. `/login` com sessão válida → `redirect("/")`. Header: logo, links Dashboard / Ativos / Admin (só admin), menu do usuário (Trocar senha, Sair).
-- [ ] **Step 2: Verificação manual:** `npm run dev`; criar admin (Task 4); acessar `/` sem login → vai para `/login`; senha errada → mensagem exata; certa → header aparece; 5 erros → mensagem de bloqueio; Sair → volta ao login; trocar senha com senha atual errada → `Senha atual incorreta`.
+- [ ] **Step 1:** Implementar. Login: card centralizado, `Usuário`/`Senha`, botão `Entrar`, erro via `useActionState`; `/login` logado → `/`. Header: logo, Dashboard / Ativos / Admin (só admin), menu (Trocar senha, Sair). Toda page e action chamam `requireUser`/`requireAdmin` por conta própria.
+- [ ] **Step 2: Verificação manual** (`npm run dev`, admin da Task 4): `/` sem login → `/login`; senha errada → `Usuário ou senha inválidos`; 5 erros e depois senha certa → **mesma** mensagem; desbloquear via `unlockUser` em script/REPL ou esperar → entra; Sair → `/login`; trocar senha com atual errada → `Senha atual incorreta`.
 - [ ] **Step 3:** `npm run build` e `npm test` → sucesso.
 - [ ] **Step 4: Commit** `feat: telas de login, layout autenticado e troca de senha`
 
@@ -290,10 +296,10 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 - Create: `src/app/(app)/admin/page.tsx`, `src/app/(app)/admin/actions.ts`, `src/app/(app)/admin/user-dialogs.tsx`
 
 **Interfaces:**
-- Consumes: `requireAdmin`, `listUsers`, `createUser`, `resetPassword`, `deleteUser`.
+- Consumes: `requireAdmin`, `listUsers`, `createUser`, `resetPassword`, `unlockUser`, `deleteUser`.
 
-- [ ] **Step 1:** Implementar: tabela (Usuário, Admin, Criado em, ações). Diálogo "Novo usuário" (usuário, senha, checkbox admin). Diálogo "Redefinir senha". Botão "Remover" com confirmação. Toda action chama `requireAdmin()` primeiro e `revalidatePath("/admin")`; erros exibidos no diálogo/toast.
-- [ ] **Step 2: Verificação manual:** criar usuário comum, logar com ele em outra janela anônima → não vê link Admin e `/admin` redireciona para `/`; tentar remover a si mesmo → mensagem de erro.
+- [ ] **Step 1:** Implementar: tabela (Usuário, Admin, Criado em, Status — `Ativo` ou `Bloqueado até HH:MM`, ações). Diálogos "Novo usuário" e "Redefinir senha"; botões "Desbloquear" (só quando bloqueado) e "Remover" com confirmação. Toda action chama `requireAdmin()` e `revalidatePath("/admin")`; erros em toast.
+- [ ] **Step 2: Verificação manual:** criar usuário comum → logar em janela anônima → sem link Admin e `/admin` → `/`; bloquear com 5 erros → status `Bloqueado até …` → Desbloquear → entra; remover a si mesmo → erro.
 - [ ] **Step 3:** `npm run build` → sucesso.
 - [ ] **Step 4: Commit** `feat: página de administração de usuários`
 
@@ -305,11 +311,11 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 - Create: `src/app/(app)/ativos/page.tsx`, `src/app/(app)/ativos/actions.ts`, `src/app/(app)/ativos/add-asset-dialog.tsx`, `src/app/api/coins/search/route.ts`
 
 **Interfaces:**
-- Consumes: `requireUser`, `listHoldings`, `upsertHolding`, `updateQuantity`, `deleteHolding`, `parseQuantity`, `searchCoins`, `formatQty`.
-- Produces: `GET /api/coins/search?q=` → JSON `{ id, symbol, name, thumb }[]` (exige sessão, 401 sem ela).
+- Consumes: `requireUser`/`getCurrentUser`, `listHoldings`, `upsertHolding`, `updateQuantity`, `deleteHolding`, `parseQuantity`, `searchCoins`, `createWindowLimiter`, `formatQty`.
+- Produces: `GET /api/coins/search?q=` → JSON `{ id, symbol, name, thumb }[]`; sem sessão → 401; acima de 30/min por usuário → 429 `{ error: "Muitas buscas, aguarde um minuto" }`.
 
-- [ ] **Step 1:** Implementar: lista (ícone/nome/símbolo, quantidade formatada, editar inline, remover com confirmação). Diálogo "Adicionar ativo": campo de busca com debounce 300 ms chamando a rota, lista de resultados, campo quantidade; se a moeda já existe, o diálogo mostra a quantidade atual e salvar atualiza. Erros de `parseQuantity` exibidos no campo. Actions usam sempre `user.id` da sessão, nunca do formulário.
-- [ ] **Step 2: Verificação manual:** buscar `bit` → Bitcoin aparece; adicionar `0,5` → lista mostra `0,5`; adicionar Bitcoin de novo com `1` → continua 1 linha com `1`; quantidade `abc` → erro no campo.
+- [ ] **Step 1:** Implementar: lista (ícone/nome/símbolo, quantidade, editar inline, remover com confirmação). Diálogo "Adicionar ativo" com busca (debounce 300 ms), resultados, quantidade; moeda já existente mostra a quantidade atual e salvar atualiza. Erros de `parseQuantity`/`upsertHolding` no campo. Actions usam `user.id` da sessão.
+- [ ] **Step 2: Verificação manual:** `bit` → Bitcoin; adicionar `0,5` → `0,5`; Bitcoin de novo com `1` → 1 linha com `1`; `abc` → erro.
 - [ ] **Step 3:** `npm run build` → sucesso.
 - [ ] **Step 4: Commit** `feat: página de ativos com busca CoinGecko`
 
@@ -322,52 +328,64 @@ test("holding é única por (userId, coinId)", () => { /* inserir 2x bitcoin p/ 
 - Create: `src/components/dashboard/balance-card.tsx`, `capital-chart.tsx` (client), `allocation-donut.tsx` (client), `holdings-table.tsx` (client), `stale-banner.tsx`
 
 **Interfaces:**
-- Consumes: `requireUser`, `listHoldings`, `getCurrentPrices`, `getHistory`, `computePortfolio`, `buildCurve`, `formatUsd`, `formatPct`, `formatQty`, `Period`.
+- Consumes: `requireUser`, `listHoldings`, `getCurrentPrices`, `getHistory`, `computePortfolio`, `buildCurve`, `parsePeriod`, `formatUsd`, `formatPct`, `formatQty`.
 
-- [ ] **Step 1:** Implementar. Página lê `searchParams.periodo` (`7D|30D|1A|Tudo`, padrão `30D`, valor inválido → `30D`). Seletor de período são links (`?periodo=7D`). Componentes:
-  - BalanceCard: `formatUsd(total)` e variação 24h em verde/vermelho (`▲`/`▼`).
-  - CapitalChart: Recharts `AreaChart` com gradiente, tooltip com data e `formatUsd`; sem pontos → texto `Preços indisponíveis`.
+- [ ] **Step 1:** Implementar. `periodo = parsePeriod(searchParams.periodo)`; seletor 7D / 30D / 1A como links `?periodo=`.
+  - BalanceCard: `formatUsd(total)`, variação 24h verde/vermelha com `▲`/`▼` (`—` se `change24hPct` null).
+  - CapitalChart: `AreaChart` com gradiente, tooltip com data e `formatUsd`; sem pontos → `Preços indisponíveis`; `missingHistory` não vazio → `Sem histórico: BTC, …`.
   - AllocationDonut: `PieChart` com `innerRadius`, legenda com símbolo e `formatPct`; só linhas com `value`.
-  - HoldingsTable: colunas Ativo | Quantidade | Preço | Valor US$ | % | 24h; ordenável por clique no cabeçalho; `—` para nulos; linha sem preço com badge `sem preço`.
-  - StaleBanner: se `stale`, `Preços de X min atrás` (X a partir de `fetchedAt`).
-  - Carteira vazia: card `Adicione seu primeiro ativo` com botão para `/ativos`.
-- [ ] **Step 2: Verificação manual:** com 3 ativos, total = soma da tabela; % somam 100%; trocar períodos muda a curva; com `COINGECKO_BASE_URL=http://localhost:1` e banco novo → página abre com `—` e `Preços indisponíveis`, sem erro 500.
+  - HoldingsTable: Ativo | Quantidade | Preço | Valor US$ | % | 24h; ordenável; `—` para nulos; badge `sem preço`.
+  - StaleBanner: se algum `stale`, `Preços de X min atrás` com X do mais antigo entre `fetchedAt` e `oldestFetchedAt`.
+  - Vazio: `Adicione seu primeiro ativo` + botão para `/ativos`.
+- [ ] **Step 2: Verificação manual:** 3 ativos → total = soma da tabela e = último ponto da curva; % somam 100%; trocar período muda a curva; `COINGECKO_BASE_URL=http://localhost:1` com banco novo → `—` e `Preços indisponíveis`, sem erro 500.
 - [ ] **Step 3:** `npm run build` → sucesso.
 - [ ] **Step 4: Commit** `feat: dashboard com saldo, curva, donut e tabela`
 
 ---
 
-### Task 12: Teste ponta a ponta
+### Task 12: Docker, backup e guia do Easypanel
 
 **Files:**
-- Create: `playwright.config.ts`, `e2e/mock-coingecko.ts`, `e2e/global-setup.ts`, `e2e/flow.spec.ts`
+- Create: `Dockerfile`, `.dockerignore`, `docker/entrypoint.sh`, `scripts/backup.mjs`, `scripts/prepare-standalone.mjs`, `README.md`
+- Modify: `package.json` (script `start:standalone`)
 
 **Interfaces:**
-- Consumes: todas as telas; `createUser`; `createDb`.
+- Consumes: `createDb`, `ensureBootstrapAdmin` (via `instrumentation.ts`).
 
-- [ ] **Step 1:** `e2e/mock-coingecko.ts`: servidor `node:http` na porta 4010 respondendo `/api/v3/simple/price` (bitcoin 60000, change 1.5), `/api/v3/coins/bitcoin/market_chart` (30 pontos diários crescentes) e `/api/v3/search` (Bitcoin). `playwright.config.ts`: dois `webServer` — mock (`npx tsx e2e/mock-coingecko.ts`) e app (`npm run build && npm start` com `DATABASE_PATH=data/e2e.db`, `COINGECKO_BASE_URL=http://localhost:4010/api/v3`, porta 3100). `global-setup.ts`: apaga `data/e2e.db` e cria admin `admin`/`senha-forte-123`.
-- [ ] **Step 2:** Teste `flow.spec.ts`: login errado → vê `Usuário ou senha inválidos`; login certo → dashboard vazio com `Adicione seu primeiro ativo`; `/ativos` → adicionar Bitcoin `0,5`; dashboard → saldo `US$ 30.000,00`, tabela com `BTC` e `100,00%`; clicar `7D` → URL contém `periodo=7D`; Sair → `/login`.
-- [ ] **Step 3:** `npx playwright install chromium` e `npm run test:e2e` → PASS.
-- [ ] **Step 4:** `npm test` → PASS (tudo).
-- [ ] **Step 5: Commit** `test: fluxo ponta a ponta com CoinGecko simulada`
+- [ ] **Step 1:** `package.json`: `"start:standalone": "node scripts/prepare-standalone.mjs && node .next/standalone/server.js"`, com `scripts/prepare-standalone.mjs` copiando `.next/static` → `.next/standalone/.next/static`, `public` → `.next/standalone/public` e `drizzle` → `.next/standalone/drizzle`.
+- [ ] **Step 2:** `Dockerfile` multi-stage `node:22-bookworm-slim`:
+  - `deps`: `npm ci`; se `node -e "require('@node-rs/argon2')"` falhar, `npm i --no-save @node-rs/argon2-linux-x64-gnu`.
+  - `build`: `npm run build`.
+  - `runner`: `WORKDIR /app`; copiar `.next/standalone` → `/app`, `.next/static` → `/app/.next/static`, `public`, `drizzle`, `scripts/backup.mjs`, `docker/entrypoint.sh`; `ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 DATABASE_PATH=/app/data/app.db`; `RUN node -e "require('better-sqlite3');require('@node-rs/argon2')"` (teste de fumaça — se falhar, copiar esses pacotes de `deps/node_modules` explicitamente); `ENTRYPOINT ["/app/docker/entrypoint.sh"]`; `CMD ["node","server.js"]`.
+  - `.dockerignore`: `node_modules`, `.next`, `data`, `.git`, `e2e`, `tests`, `docs`.
+- [ ] **Step 3:** `docker/entrypoint.sh` (LF, executável):
+```sh
+#!/bin/sh
+set -e
+mkdir -p /app/data
+chown -R node:node /app/data
+exec setpriv --reuid=node --regid=node --init-groups "$@"
+```
+- [ ] **Step 4:** `scripts/backup.mjs`: abre `DATABASE_PATH` com better-sqlite3 e chama `db.backup("/app/data/backups/app-AAAA-MM-DD.db")` (cria a pasta; ajusta dono para `node`), imprime o caminho.
+- [ ] **Step 5: Verificação** (se houver Docker local; senão, no primeiro deploy do Easypanel):
+  `docker build -t cripto-dash .` → sucesso;
+  `mkdir -p /tmp/cd && docker run -d --name cd -p 3000:3000 -v /tmp/cd:/app/data -e ADMIN_USERNAME=admin -e ADMIN_PASSWORD=senha-forte-123 -e COOKIE_SECURE=false cripto-dash` (bind mount de pasta root);
+  `docker logs cd` contém `Administrador inicial criado: admin`; login em `http://localhost:3000` funciona; `docker restart cd` → login continua; `docker exec cd node scripts/backup.mjs` → arquivo criado.
+- [ ] **Step 6:** `README.md`: desenvolvimento (spec §10) e passo a passo do Easypanel: criar App a partir do Git, build por Dockerfile, 1 réplica, volume em `/app/data`, variáveis (`COINGECKO_API_KEY`, `ADMIN_USERNAME`/`ADMIN_PASSWORD` só no 1º deploy e depois remover, `APP_DOMAIN`, `TRUSTED_PROXY_HOPS` — 2 se usar Cloudflare), domínio/HTTPS, como criar a chave Demo na CoinGecko, backup (`node scripts/backup.mjs` pelo console, baixar o arquivo, ou backup de volume do Easypanel).
+- [ ] **Step 7: Commit** `feat: Dockerfile, entrypoint, backup e guia do Easypanel`
 
 ---
 
-### Task 13: Docker e deploy no Easypanel
+### Task 13: Teste ponta a ponta
 
 **Files:**
-- Create: `Dockerfile`, `.dockerignore`, `README.md`
-- Modify: `next.config.ts` (`output: "standalone"`), `package.json` (script `build:scripts`)
+- Create: `playwright.config.ts`, `e2e/mock-coingecko.ts`, `e2e/flow.spec.ts`
 
 **Interfaces:**
-- Consumes: `createDb` (aplica migrações de `drizzle/` ao abrir), `scripts/create-admin.ts`.
+- Consumes: todas as telas; `ensureBootstrapAdmin` (admin criado por env); `start:standalone`.
 
-- [ ] **Step 1:** `npm i -D esbuild`; script `"build:scripts": "esbuild scripts/create-admin.ts --bundle --platform=node --external:better-sqlite3 --external:@node-rs/argon2 --outfile=dist-scripts/create-admin.js"`.
-- [ ] **Step 2:** `Dockerfile` multi-stage com `node:22-bookworm-slim`: estágio `deps` (`npm ci`), `build` (`npm run build && npm run build:scripts`), `runner` copiando `.next/standalone`, `.next/static`, `public`, `drizzle/` e `dist-scripts/create-admin.js` → `/app/scripts/create-admin.js`; `ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 DATABASE_PATH=/app/data/app.db`; `RUN mkdir -p /app/data`; usuário não-root `node` dono de `/app/data`; `CMD ["node","server.js"]`. Caminho de migrações em `createDb` resolvido a partir de `process.cwd()` para funcionar no container. `.dockerignore`: `node_modules`, `.next`, `data`, `.git`, `e2e`, `tests`.
-- [ ] **Step 3: Verificação** (se o Docker estiver instalado localmente; senão, verificar no primeiro deploy do Easypanel):
-  `docker build -t cripto-dash .` → sucesso;
-  `docker run -d --name cd -p 3000:3000 -v cd-data:/app/data cripto-dash`;
-  `docker exec -it cd node scripts/create-admin.js` → `Administrador criado`;
-  login em `http://localhost:3000` funciona; `docker restart cd` → login continua funcionando (dados persistiram).
-- [ ] **Step 4:** `README.md`: desenvolvimento (spec §9) e passo a passo do Easypanel — criar App a partir do repositório Git, build por Dockerfile, montar volume em `/app/data`, definir `COOKIE_SECURE=true`, configurar domínio/HTTPS, criar admin pelo console com `node scripts/create-admin.js`.
-- [ ] **Step 5: Commit** `feat: Dockerfile e guia de deploy no Easypanel`
+- [ ] **Step 1:** `e2e/mock-coingecko.ts`: `node:http` na porta 4010 com `/api/v3/simple/price` (bitcoin 60000, change 1.5), `/api/v3/coins/bitcoin/market_chart` (pontos horários crescentes dos últimos 30 dias, ou diários para `days=365`) e `/api/v3/search` (Bitcoin). `playwright.config.ts`: `DATABASE_PATH = data/e2e-${Date.now()}.db` (novo a cada execução, sem apagar arquivos); dois `webServer`: mock (`npx tsx e2e/mock-coingecko.ts`) e app (`npm run build && npm run start:standalone`, porta 3100, envs `DATABASE_PATH`, `COINGECKO_BASE_URL=http://localhost:4010/api/v3`, `ADMIN_USERNAME=admin`, `ADMIN_PASSWORD=senha-forte-123`, `COOKIE_SECURE=false`, `PORT=3100`).
+- [ ] **Step 2:** `flow.spec.ts`: login errado → `Usuário ou senha inválidos`; login certo → `Adicione seu primeiro ativo`; `/ativos` → adicionar Bitcoin `0,5`; dashboard → `US$ 30.000,00`, tabela com `BTC` e `100,00%`; clicar `7D` → URL com `periodo=7D` e gráfico visível; Sair → `/login`.
+- [ ] **Step 3:** `npx playwright install chromium` e `npm run test:e2e` → PASS.
+- [ ] **Step 4:** `npm test` → PASS.
+- [ ] **Step 5: Commit** `test: fluxo ponta a ponta com CoinGecko simulada`
