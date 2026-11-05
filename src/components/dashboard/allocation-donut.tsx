@@ -69,9 +69,10 @@ export function AllocationDonut({ rows, currency, emptyText = "Preços indispon�
           </PieChart>
         </ResponsiveContainer>
       </div>
-      <ul className="grid w-full max-w-2xl grid-cols-1 gap-x-10 gap-y-2 text-sm sm:grid-cols-2" aria-label="Distribuição por ativo">
+      {/* Ordem por coluna: a 1ª coluna desce com os maiores %, a 2ª continua de onde a 1ª parou. */}
+      <ul className="w-full max-w-2xl columns-1 gap-x-10 text-sm sm:columns-2" aria-label="Distribuição por ativo">
         {slices.map((s) => (
-          <li key={s.symbol} className="flex items-center gap-2">
+          <li key={s.symbol} className="mb-2 flex break-inside-avoid items-center gap-2">
             <span className="size-2.5 shrink-0 rounded-full ring-1 ring-border" style={{ background: s.color }} />
             <span className="font-medium">{s.symbol}</span>
             <span className="ml-auto tabular-nums text-muted-foreground">{formatPct(s.share)}</span>

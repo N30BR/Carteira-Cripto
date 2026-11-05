@@ -42,7 +42,7 @@ export function planFromForm(input: {
   if (!Number.isInteger(current) || current < 1) return { ok: false, error: "Parcela atual inválida" };
   if (current > total) return { ok: false, error: "A parcela atual não pode passar do total" };
   const totalCents = mode === "parcela" ? amountCents * total : amountCents;
-  if (Number.isSafeInteger(totalCents) && totalCents > MAX_TOTAL_CENTS) return { ok: false, error: "Valor muito alto" };
+  if (totalCents > MAX_TOTAL_CENTS) return { ok: false, error: "Valor muito alto" };
   if (!Number.isSafeInteger(totalCents) || totalCents < total) {
     return { ok: false, error: "Valor muito baixo para esse número de parcelas" };
   }

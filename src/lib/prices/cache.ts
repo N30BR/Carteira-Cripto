@@ -18,8 +18,12 @@ export function writeCache<T>(db: Db, key: string, data: T, ttlMs: number, now =
     .run();
 }
 
+// Buscas em andamento por banco e chave: quem chega enquanto uma busca roda espera a mesma resposta
+// (várias páginas abertas quando o cache vence não multiplicam as chamadas à Binance).
+const inFlight = new WeakMap<Db, Map<string, Promise<unknown>>>();
+
 /** Lê do cache; se expirou, chama o loader. Se o loader falhar, devolve o valor antigo marcado como `stale`. */
-export async function cached<T>(
+export function cached<T>(
   db: Db,
   key: string,
   ttlMs: number,
@@ -27,7 +31,24 @@ export async function cached<T>(
   now = new Date(),
 ): Promise<Cached<T> | null> {
   const hit = readCache<T>(db, key, now);
-  if (hit && !hit.stale) return hit;
+  if (hit && !hit.stale) return Promise.resolve(hit);
+  let running = inFlight.get(db);
+  if (!running) inFlight.set(db, (running = new Map()));
+  const pending = running.get(key) as Promise<Cached<T> | null> | undefined;
+  if (pending) return pending;
+  const job = refresh(db, key, ttlMs, loader, now, hit).finally(() => running.delete(key));
+  running.set(key, job);
+  return job;
+}
+
+async function refresh<T>(
+  db: Db,
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<T>,
+  now: Date,
+  hit: Cached<T> | null,
+): Promise<Cached<T> | null> {
   try {
     const data = await loader();
     writeCache(db, key, data, ttlMs, now);

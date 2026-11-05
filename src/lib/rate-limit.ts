@@ -23,6 +23,12 @@ export function createWindowLimiter(max: number, windowMs: number) {
     limited(key: string, now = new Date()): boolean {
       return recent(key, now).length >= max;
     },
+    clear(key: string): void {
+      events.delete(key);
+    },
+    clearPrefix(prefix: string): void {
+      for (const k of [...events.keys()]) if (k.startsWith(prefix)) events.delete(k);
+    },
     reset(): void {
       events.clear();
     },

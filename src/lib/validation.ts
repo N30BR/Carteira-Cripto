@@ -59,9 +59,10 @@ export function parseBrl(raw: string): ParsedQuantity {
 }
 
 export function validateAccountName(raw: string): ParsedQuantity {
-  const name = raw.normalize("NFC").trim();
-  // Caracteres de controle e invisíveis (quebra de linha, zero-width, inversão de texto) não entram.
-  if (/[\p{Cc}\p{Cf}]/u.test(name)) return { ok: false, error: "O nome tem caracteres não permitidos" };
+  // Mesmas regras dos outros nomes (controle, invisíveis e inversão de texto não entram).
+  const c = cleanLabel(raw);
+  if (!c.ok) return { ok: false, error: "O nome tem caracteres não permitidos" };
+  const name = c.value;
   return name.length >= 1 && name.length <= 40
     ? { ok: true, value: name }
     : { ok: false, error: "Informe um nome de 1 a 40 caracteres" };
@@ -97,15 +98,26 @@ export function parseBalanceDate(raw: string, today: string): ParsedQuantity {
   return { ok: true, value: s };
 }
 
-// Caracteres de controle e de formatação invisíveis (zero-width, inversão de direção, BOM).
-// A junção de emoji (U+200D, ex.: 👨‍👩‍👧) é permitida; o seletor de variação (U+FE0F) nem é desta classe.
-const FORBIDDEN = /[\p{Cc}]|(?!\u200D)\p{Cf}/u;
-const FORBIDDEN_NOTES = /[^\P{Cc}\n]|(?!\u200D)\p{Cf}/gu;
+// Não entram: caracteres de controle, de formatação invisíveis (zero-width, inversão de direção, BOM),
+// separadores de linha/parágrafo Unicode, preenchimentos invisíveis (Hangul filler) e surrogates soltos.
+// Permitidos: junção de emoji (U+200D) e caracteres de tag das bandeiras (ex.: bandeira da Inglaterra).
+const FORBIDDEN = /[\p{Cc}\p{Zl}\p{Zp}\p{Cs}\u115F\u1160\u3164\uFFA0]|(?![\u200D\u{E0020}-\u{E007F}])\p{Cf}/u;
+const FORBIDDEN_NOTES = /[^\P{Cc}\n]|[\p{Zl}\p{Zp}\p{Cs}\u115F\u1160\u3164\uFFA0]|(?![\u200D\u{E0020}-\u{E007F}])\p{Cf}/gu;
+// Pelo menos um caractere visível (um nome só de ZWJ/espaços seria invisível).
+const VISIBLE = /[^\s\u200D\uFE0E\uFE0F\u{E0020}-\u{E007F}]/u;
+
+/** Texto curto validado: NFC, sem espaços nas pontas, sem caracteres proibidos e com algo visível. */
+function cleanLabel(raw: string): { ok: true; value: string } | { ok: false } {
+  const s = raw.normalize("NFC").trim();
+  if (FORBIDDEN.test(s) || (s.length > 0 && !VISIBLE.test(s))) return { ok: false };
+  return { ok: true, value: s };
+}
 
 /** Texto curto (descrição, nome): NFC, sem caracteres invisíveis/de controle, de 1 a `max` caracteres. */
 export function validateLabel(raw: string, max: number, what: string): ParsedQuantity {
-  const s = raw.normalize("NFC").trim();
-  if (FORBIDDEN.test(s)) return { ok: false, error: "O texto tem caracteres não permitidos" };
+  const c = cleanLabel(raw);
+  if (!c.ok) return { ok: false, error: "O texto tem caracteres não permitidos" };
+  const s = c.value;
   return s.length >= 1 && s.length <= max
     ? { ok: true, value: s }
     : { ok: false, error: `Informe ${what} de 1 a ${max} caracteres` };

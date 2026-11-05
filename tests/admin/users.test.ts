@@ -1,4 +1,5 @@
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { resetIpLimits } from "@/lib/auth/ip-limit";
 import { eq } from "drizzle-orm";
 import { testDb } from "../helpers/db";
 import { sessions, users } from "@/db/schema";
@@ -21,6 +22,8 @@ async function mk(db: ReturnType<typeof testDb>, username: string, isAdmin = fal
   expect(r).toEqual({ ok: true });
   return db.select().from(users).where(eq(users.username, username)).get()!;
 }
+
+beforeEach(() => resetIpLimits());
 
 describe("createUser", () => {
   test("username duplicado com caixa diferente é recusado", async () => {

@@ -4,6 +4,7 @@ import { users } from "@/db/schema";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { deleteUserSessions } from "@/lib/auth/sessions";
 import { isLocked, recordFailure, serializeAuth } from "@/lib/auth/login";
+import { clearUserPairs, pairLimited, recordPairFailure } from "@/lib/auth/ip-limit";
 import { normalizeUsername, validatePassword, validateUsername } from "@/lib/validation";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -46,6 +47,7 @@ export async function resetPassword(db: Db, userId: number, newPassword: string)
   if (invalid) return fail(invalid);
   const passwordHash = await hashPassword(newPassword);
   const r = db.update(users).set({ passwordHash, failedAttempts: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
+  clearUserPairs(userId);
   if (!r.changes) return fail("Usuário não encontrado");
   deleteUserSessions(db, userId);
   return { ok: true };
@@ -53,6 +55,7 @@ export async function resetPassword(db: Db, userId: number, newPassword: string)
 
 export function unlockUser(db: Db, userId: number): Result {
   const r = db.update(users).set({ failedAttempts: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
+  clearUserPairs(userId);
   return r.changes ? { ok: true } : fail("Usuário não encontrado");
 }
 
@@ -81,6 +84,8 @@ export async function changeOwnPassword(
   return serializeAuth(() => checkAndChange(db, userId, currentHash, current, next, now));
 }
 
+const CHANGE_KEY = "troca-de-senha";
+
 async function checkAndChange(
   db: Db,
   userId: number,
@@ -91,9 +96,13 @@ async function checkAndChange(
 ): Promise<Result> {
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user) return fail("Usuário não encontrado");
-  if (isLocked(user.lockedUntil, now)) return fail("Muitas tentativas. Tente novamente em 15 minutos.");
+  // Troca da própria senha (já logado): 5 erros em 15 min bloqueiam a troca, além do bloqueio da conta.
+  if (isLocked(user.lockedUntil, now) || pairLimited(userId, CHANGE_KEY, now)) {
+    return fail("Muitas tentativas. Tente novamente em 15 minutos.");
+  }
   if (!(await verifyPassword(user.passwordHash, current))) {
     recordFailure(db, userId, now);
+    recordPairFailure(userId, CHANGE_KEY, now);
     return fail("Senha atual incorreta");
   }
   db.update(users)

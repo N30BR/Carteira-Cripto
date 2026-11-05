@@ -10,6 +10,8 @@ import { sessionCookieName, sessionCookieOptions } from "@/lib/auth/cookie";
 export type LoginState = { error?: string; username?: string };
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
+  // Chamada forjada sem formulário: responde como login inválido em vez de quebrar.
+  if (!(formData instanceof FormData)) return { error: "Usuário ou senha inválidos" };
   const ip = clientIp((await headers()).get("x-forwarded-for"));
   const username = String(formData.get("username") ?? "");
   const password = String(formData.get("password") ?? "");

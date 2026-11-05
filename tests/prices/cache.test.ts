@@ -37,4 +37,22 @@ describe("cached", () => {
     expect(await cached(db, "k", 60_000, async () => { throw new Error("x"); }, t0)).toBeNull();
   });
 
+
+  test("pedidos simultâneos da mesma chave vencida fazem uma busca só", async () => {
+    const db = testDb();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const loader = vi.fn(async () => {
+      await gate;
+      return 7;
+    });
+    const all = Promise.all([1, 2, 3].map(() => cached(db, "k", 60_000, loader, t0)));
+    release();
+    const results = await all;
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(results.map((r) => r?.data)).toEqual([7, 7, 7]);
+    // Depois de terminar, uma chave vencida volta a buscar.
+    await cached(db, "k", 60_000, loader, at(120_000));
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
 });

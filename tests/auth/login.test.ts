@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { testDb } from "../helpers/db";
 import { users } from "@/db/schema";
 import { hashPassword } from "@/lib/auth/password";
-import { LOCK_MS, attemptLogin } from "@/lib/auth/login";
+import { ACCOUNT_MAX_FAILURES, LOCK_MS, attemptLogin } from "@/lib/auth/login";
 import { resetIpLimits } from "@/lib/auth/ip-limit";
 
 async function setup() {
@@ -18,6 +18,8 @@ async function setup() {
 const t0 = new Date("2026-01-01T00:00:00Z");
 
 describe("attemptLogin", () => {
+  beforeEach(() => resetIpLimits());
+
   test("senha certa cria sessão", async () => {
     const { db } = await setup();
     const r = await attemptLogin(db, "pedro", "senha-certa", t0);
@@ -36,13 +38,26 @@ describe("attemptLogin", () => {
     expect(await attemptLogin(db, "ninguem", "errada", t0)).toEqual({ ok: false, reason: "invalid" });
   });
 
-  test("5 erros bloqueiam; senha certa durante o bloqueio falha e não conta", async () => {
+  test("5 erros do mesmo IP bloqueiam esse IP nessa conta; senha certa dali falha e não conta", async () => {
     const { db, user } = await setup();
-    for (let i = 0; i < 5; i++) await attemptLogin(db, "pedro", "errada", t0);
-    expect(user().lockedUntil?.getTime()).toBe(t0.getTime() + LOCK_MS);
+    for (let i = 0; i < 5; i++) await attemptLogin(db, "pedro", "errada", t0, "6.6.6.6");
     const before = user().failedAttempts;
-    expect(await attemptLogin(db, "pedro", "senha-certa", t0)).toEqual({ ok: false, reason: "invalid" });
+    expect(await attemptLogin(db, "pedro", "senha-certa", t0, "6.6.6.6")).toEqual({ ok: false, reason: "invalid" });
     expect(user().failedAttempts).toBe(before);
+  });
+
+  test("quem erra a senha de outra pessoa não a tranca para fora (outro IP entra)", async () => {
+    const { db, user } = await setup();
+    for (let i = 0; i < 5; i++) await attemptLogin(db, "pedro", "errada", t0, "6.6.6.6");
+    expect(user().lockedUntil).toBeNull();
+    expect((await attemptLogin(db, "pedro", "senha-certa", t0, "1.2.3.4")).ok).toBe(true);
+  });
+
+  test("muitos erros de vários IPs bloqueiam a conta inteira por 15 min", async () => {
+    const { db, user } = await setup();
+    for (let i = 0; i < ACCOUNT_MAX_FAILURES; i++) await attemptLogin(db, "pedro", "errada", t0, `10.0.0.${Math.floor(i / 5)}`);
+    expect(user().lockedUntil?.getTime()).toBe(t0.getTime() + LOCK_MS);
+    expect(await attemptLogin(db, "pedro", "senha-certa", t0, "1.2.3.4")).toEqual({ ok: false, reason: "invalid" });
   });
 
   test("depois do bloqueio, senha certa entra e zera o contador", async () => {

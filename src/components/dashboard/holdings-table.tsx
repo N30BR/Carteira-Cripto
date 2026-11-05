@@ -52,13 +52,17 @@ function Change({ value }: { value: number | null }) {
 }
 
 export function HoldingsTable({ rows, currency }: { rows: HoldingsTableRow[]; currency: RefCurrency }) {
-  const [sort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "value", desc: true });
+  const [chosenSort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "value", desc: true });
   const [shown, setShown] = useShownChanges();
   const columns = COLUMNS.filter((c) => !c.key.startsWith("change") || shown.includes(c.key as ChangeKey));
+
+  // Ordenado por uma variação que foi ocultada: volta a ordenar por valor.
+  const sort = columns.some((c) => c.key === chosenSort.key) ? chosenSort : { key: "value" as Key, desc: true };
 
   const sorted = [...rows].sort((a, b) => {
     const va = sortValue(a, sort.key);
     const vb = sortValue(b, sort.key);
+    if (va === null && vb === null) return 0;
     if (va === null) return 1; // vazios sempre no fim
     if (vb === null) return -1;
     const cmp = va < vb ? -1 : va > vb ? 1 : 0;

@@ -2,11 +2,18 @@ import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users } from "@/db/schema";
 import { normalizeUsername } from "@/lib/validation";
-import { ipLimited, recordIpFailure } from "./ip-limit";
+import { clearPairFailures, ipLimited, pairLimited, recordIpFailure, recordPairFailure } from "./ip-limit";
 import { DUMMY_HASH, verifyPassword } from "./password";
 import { createSession } from "./sessions";
 
-export const MAX_FAILED_ATTEMPTS = 5;
+/**
+ * Bloqueio em duas camadas:
+ * - 5 senhas erradas de um mesmo IP numa conta bloqueiam só aquele IP naquela conta por 15 min
+ *   (quem sabe o usuário de alguém não consegue trancá-lo para fora);
+ * - ACCOUNT_MAX_FAILURES erros seguidos, de vários IPs, bloqueiam a conta inteira por 15 min
+ *   (ataque distribuído). Com 5 por IP, isso exige pelo menos 6 IPs diferentes.
+ */
+export const ACCOUNT_MAX_FAILURES = 30;
 export const LOCK_MS = 15 * 60 * 1000;
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -31,7 +38,7 @@ export function recordFailure(db: Db, userId: number, now = new Date()): void {
   if (!user) return;
   const attempts = user.failedAttempts + 1;
   const update =
-    attempts >= MAX_FAILED_ATTEMPTS
+    attempts >= ACCOUNT_MAX_FAILURES
       ? { failedAttempts: 0, lockedUntil: new Date(now.getTime() + LOCK_MS) }
       : { failedAttempts: attempts };
   db.update(users).set(update).where(eq(users.id, userId)).run();
@@ -56,16 +63,18 @@ export function attemptLogin(
     };
 
     // Usuário inexistente ou bloqueado: roda o argon2 mesmo assim, para levar o mesmo tempo.
-    if (!user || isLocked(user.lockedUntil, now)) {
+    if (!user || isLocked(user.lockedUntil, now) || pairLimited(user.id, ip, now)) {
       await verifyPassword(await DUMMY_HASH, password);
       return fail();
     }
     if (!(await verifyPassword(user.passwordHash, password))) {
       recordFailure(db, user.id, now);
+      recordPairFailure(user.id, ip, now);
       return fail();
     }
 
     db.update(users).set({ failedAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id)).run();
+    clearPairFailures(user.id, ip);
     const { token, expiresAt } = createSession(db, user.id, now);
     return { ok: true, token, expiresAt } as const;
   });

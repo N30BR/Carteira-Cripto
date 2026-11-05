@@ -302,7 +302,7 @@ export function deleteTask(db: Db, userId: number, id: number): Result {
 
 function getItem(db: Db, userId: number, itemId: number) {
   return db
-    .select({ id: todoChecklist.id, taskId: todoChecklist.taskId, position: todoChecklist.position })
+    .select({ id: todoChecklist.id, taskId: todoChecklist.taskId, position: todoChecklist.position, text: todoChecklist.text })
     .from(todoChecklist)
     .innerJoin(todoTasks, eq(todoTasks.id, todoChecklist.taskId))
     .where(and(eq(todoChecklist.id, itemId), eq(todoTasks.userId, userId)))
@@ -332,7 +332,7 @@ export function addItem(db: Db, userId: number, taskId: number, text: string): R
 export function updateItem(db: Db, userId: number, itemId: number, text: string): Result {
   const item = getItem(db, userId, itemId);
   if (!item) return ITEM_NF;
-  if (!fits(db, userId, text.length)) return TEXT_FULL;
+  if (!fits(db, userId, text.length - item.text.length)) return TEXT_FULL;
   db.update(todoChecklist).set({ text }).where(eq(todoChecklist.id, itemId)).run();
   touch(db, item.taskId);
   return { ok: true };
@@ -383,7 +383,7 @@ export function moveItem(db: Db, userId: number, itemId: number, dir: -1 | 1): R
 
 function getNote(db: Db, userId: number, noteId: number) {
   return db
-    .select({ id: todoNotes.id, taskId: todoNotes.taskId })
+    .select({ id: todoNotes.id, taskId: todoNotes.taskId, text: todoNotes.text })
     .from(todoNotes)
     .innerJoin(todoTasks, eq(todoTasks.id, todoNotes.taskId))
     .where(and(eq(todoNotes.id, noteId), eq(todoTasks.userId, userId)))
@@ -403,7 +403,7 @@ export function addNote(db: Db, userId: number, taskId: number, text: string): R
 export function updateNote(db: Db, userId: number, noteId: number, text: string): Result {
   const note = getNote(db, userId, noteId);
   if (!note) return NOTE_NF;
-  if (!fits(db, userId, text.length)) return TEXT_FULL;
+  if (!fits(db, userId, text.length - note.text.length)) return TEXT_FULL;
   db.update(todoNotes).set({ text }).where(eq(todoNotes.id, noteId)).run();
   touch(db, note.taskId);
   return { ok: true };
@@ -439,8 +439,8 @@ export function listEvents(db: Db, userId: number): (EventView & { categoryId: n
 }
 
 function ownsEvent(db: Db, userId: number, id: number) {
-  return !!db
-    .select({ id: todoEvents.id })
+  return db
+    .select({ id: todoEvents.id, title: todoEvents.title, description: todoEvents.description })
     .from(todoEvents)
     .where(and(eq(todoEvents.id, id), eq(todoEvents.userId, userId)))
     .get();
@@ -456,10 +456,12 @@ export function createEvent(db: Db, userId: number, e: EventInput): Result {
 }
 
 export function updateEvent(db: Db, userId: number, id: number, e: EventInput): Result {
-  if (!ownsEvent(db, userId, id)) return EVENT_NF;
+  const old = ownsEvent(db, userId, id);
+  if (!old) return EVENT_NF;
   const g = checkGroups(db, userId, e.categoryId, null);
   if (!g.ok) return g;
-  if (!fits(db, userId, e.title.length + e.description.length)) return TEXT_FULL;
+  const added = e.title.length + e.description.length - old.title.length - old.description.length;
+  if (!fits(db, userId, added)) return TEXT_FULL;
   db.update(todoEvents).set(e).where(eq(todoEvents.id, id)).run();
   return { ok: true };
 }
@@ -501,8 +503,9 @@ export function createQuickNote(db: Db, userId: number, text: string): Result {
 }
 
 export function updateQuickNote(db: Db, userId: number, id: number, text: string): Result {
-  if (!ownsQuickNote(db, userId, id)) return NOTE_NF;
-  if (!fits(db, userId, text.length)) return TEXT_FULL;
+  const old = ownsQuickNote(db, userId, id);
+  if (!old) return NOTE_NF;
+  if (!fits(db, userId, text.length - old.text.length)) return TEXT_FULL;
   db.update(quickNotes).set({ text, updatedAt: new Date() }).where(eq(quickNotes.id, id)).run();
   return { ok: true };
 }
@@ -527,6 +530,8 @@ export function convertQuickNote(db: Db, userId: number, id: number): Result {
   const title = firstLine.length > 120 ? `${firstLine.slice(0, 117)}...` : firstLine || "Nota";
   const description = title === note.text ? "" : note.text;
   if (countWhere(db, todoTasks, userId) >= LIMITS.tasks) return err(`Limite de ${LIMITS.tasks} tarefas atingido`);
+  // A nota some e o texto vai para a tarefa; só o título pode somar caracteres.
+  if (!fits(db, userId, title.length + description.length - note.text.length)) return TEXT_FULL;
   db.transaction((tx) => {
     const now = new Date();
     tx.insert(todoTasks).values({ userId, title, description, priority: 2, status: "pending", createdAt: now, updatedAt: now }).run();
