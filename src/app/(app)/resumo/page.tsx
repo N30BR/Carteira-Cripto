@@ -43,7 +43,8 @@ const SHORT: Record<ComponentKey, string> = {
   outflow: "Saídas",
   variation: "Variação",
 };
-const toneColor = (tone: Tone) => (tone === "neutral" ? NEUTRAL : tone === "out" ? DOWN : UP);
+// Saldos neutros (azul); variação informativa em verde/vermelho conforme o sinal.
+const toneColor = (tone: Tone, v: number | null) => (tone === "neutral" ? NEUTRAL : tone === "out" || (tone === "info" && (v ?? 0) < 0) ? DOWN : UP);
 
 export default async function SummaryPage({ searchParams }: PageProps<"/resumo">) {
   const user = await requireUser();
@@ -74,13 +75,15 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   // Valores cripto convertidos pela cotação da própria data (como na aba Cripto).
   const toRef = (usdt: number | null, t: number) =>
     usdt === null || !cryptoRate ? null : usdt * (t >= now.getTime() ? viewUsdt.factorNow : viewUsdt.factorAt(t)) * scale;
+  // Saldo cripto: total atual. Variação: do início do período até o fim (ou agora), só informativa.
+  const cryptoNow = toRef(crypto.nowUsdt, now.getTime());
   const cryptoStart = toRef(crypto.startUsdt, startMs);
   const cryptoEnd = toRef(crypto.endUsdt, crypto.endMs);
   const fiat = fiatBalanceBrl(db, user.id, today);
   const invoices = monthTotals(listInstallments(db, user.id, win.invoiceMonths[0], win.invoiceMonths.at(-1)!)).total;
   const tx = transactionTotals(listTransactions(db, user.id, win.fromDate, win.toDate));
   const summary = consolidate({
-    cryptoCents: cryptoStart,
+    cryptoCents: cryptoNow,
     fiatCents: fromBrlCents(fiat.cents),
     invoicesCents: fromBrlCents(invoices),
     inflowCents: fromBrlCents(tx.inflow),
@@ -101,11 +104,11 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   const hints: Record<ComponentKey, React.ReactNode> = {
     crypto: crypto.empty ? (
       "Nenhum ativo cadastrado"
-    ) : cryptoStart === null ? (
-      `${cryptoReason}; fora da conta`
+    ) : cryptoNow === null ? (
+      `${cryptoRate ? "Preços indisponíveis" : "Cotação indisponível"}; fora da conta`
     ) : (
       <>
-        Saldo em {dateBr(win.fromDate)} (início do período)
+        Saldo total atual{when ? ` (preços de ${when})` : ""}
         {staleNote}
       </>
     ),
@@ -123,7 +126,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
       `${cryptoReason}; fora da conta`
     ) : (
       <>
-        De {dateBr(win.fromDate)} a {dateBr(variationEnd)}
+        De {dateBr(win.fromDate)} a {dateBr(variationEnd)} • só comparação, já incluída no saldo
         {staleNote}
       </>
     ),
@@ -133,13 +136,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
     return c.signedCents === null ? (
       <span className="text-base text-muted-foreground">Indisponível</span>
     ) : (
-      <SignedMoney
-        cents={c.signedCents}
-        currency={currency}
-        neutral={c.tone === "neutral"}
-        showSign={key === "variation"}
-        testId={`sum-${key}`}
-      />
+      <SignedMoney cents={c.signedCents} currency={currency} neutral={c.tone === "neutral"} testId={`sum-${key}`} />
     );
   };
   const items = summary.components.map((c) => ({ ...c, short: SHORT[c.key] }));
@@ -160,7 +157,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {summary.components.map((c) => (
-          <StatCard compact key={c.key} icon={c.key === "variation" && (c.signedCents ?? 0) < 0 ? TrendingDown : ICONS[c.key]} color={toneColor(c.tone)} title={c.label} hint={hints[c.key]}>
+          <StatCard compact key={c.key} icon={c.key === "variation" && (c.signedCents ?? 0) < 0 ? TrendingDown : ICONS[c.key]} color={toneColor(c.tone, c.signedCents)} title={c.label} hint={hints[c.key]}>
             {valueOf(c.key)}
           </StatCard>
         ))}
@@ -178,12 +175,16 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                 <Info className="size-3.5" /> Consolidação estimada (sem conciliação)
               </span>
               <p>
-                Patrimônio (saldo cripto no início do período + variação cripto + saldo em reais) + entradas − faturas e saídas de{" "}
-                {periodLabel}. Não é o patrimônio efetivo: um gasto que já baixou o saldo de uma conta aparece de novo como fatura ou
-                saída.
+                Saldos (cripto total atual e reais) + entradas − faturas e saídas de {periodLabel}. Não é o patrimônio efetivo:
+                um gasto que já baixou o saldo de uma conta aparece de novo como fatura ou saída.
               </p>
-              {(summary.missing.includes("crypto") || summary.missing.includes("variation")) && !crypto.empty && (
-                <p className="text-amber-400">Cripto fora da conta: {cryptoReason?.toLowerCase()}.</p>
+              <p className="text-xs">
+                A variação cripto serve só para comparar o período: o saldo cripto atual já a inclui, então ela não é somada nem
+                descontada.
+              </p>
+              {summary.missing.includes("crypto") && !crypto.empty && <p className="text-amber-400">Saldo cripto fora da conta: preços ou cotação indisponíveis.</p>}
+              {!summary.missing.includes("crypto") && summary.missing.includes("variation") && !crypto.empty && (
+                <p className="text-amber-400">Variação cripto indisponível: {cryptoReason?.toLowerCase()}.</p>
               )}
             </div>
           </div>
@@ -191,7 +192,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
           <dl className="flex flex-col justify-center gap-2 text-sm">
             <div className="flex items-center justify-between gap-4 border-b py-2">
               <dt className="flex items-center gap-2">
-                <span className="size-3 rounded-sm" style={{ background: NEUTRAL }} /> Patrimônio (saldos e variação cripto)
+                <span className="size-3 rounded-sm" style={{ background: NEUTRAL }} /> Saldos patrimoniais (neutros)
               </dt>
               <dd>
                 <SignedMoney cents={summary.neutral} currency={currency} neutral testId="sum-neutral" />
@@ -211,6 +212,19 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
               </dt>
               <dd>
                 <SignedMoney cents={-summary.negative} currency={currency} testId="sum-negative" />
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-b py-2">
+              <dt className="flex items-center gap-2 text-muted-foreground">
+                <span className="size-3 rounded-sm border" style={{ borderColor: toneColor("info", byKey.variation.signedCents) }} /> Variação cripto
+                (informativa, não somada)
+              </dt>
+              <dd>
+                {byKey.variation.signedCents === null ? (
+                  <span className="text-muted-foreground">—</span>
+                ) : (
+                  <SignedMoney cents={byKey.variation.signedCents} currency={currency} testId="sum-variation-panel" />
+                )}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-4 rounded-lg px-3 py-2.5" style={{ backgroundColor: `${BLUE}26` }}>
@@ -274,7 +288,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                         </span>
                       </TableCell>
                       <TableCell>
-                        <KindBadge kind={c.tone} label={c.classification} />
+                        <KindBadge kind={c.tone === "info" ? ((c.signedCents ?? 0) < 0 ? "out" : "in") : c.tone} label={c.classification} />
                       </TableCell>
                       <TableCell className="text-right">{valueOf(c.key)}</TableCell>
                       <TableCell className="text-right tabular-nums">{c.share === null ? "—" : formatPct(c.share)}</TableCell>
@@ -294,7 +308,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
             }
           >
             <TotalChip color={NEUTRAL}>
-              Patrimônio (neutro): <SignedMoney cents={summary.neutral} currency={currency} neutral />
+              Saldos (neutros): <SignedMoney cents={summary.neutral} currency={currency} neutral />
             </TotalChip>
             <TotalChip color={UP}>
               Entradas totais: <SignedMoney cents={summary.positive} currency={currency} />

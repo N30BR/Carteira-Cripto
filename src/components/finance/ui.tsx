@@ -49,15 +49,12 @@ export function SignedMoney({
   testId,
   currency = "BRL",
   neutral,
-  showSign,
 }: {
   cents: number;
   className?: string;
   testId?: string;
   currency?: RefCurrency;
   neutral?: boolean;
-  /** Neutro com "+" visível (ex.: variação patrimonial). */
-  showSign?: boolean;
 }) {
   if (cents === 0 || neutral) {
     return (
@@ -66,7 +63,7 @@ export function SignedMoney({
         style={neutral ? { color: NEUTRAL } : undefined}
         data-testid={testId}
       >
-        {cents < 0 ? "- " : showSign && cents > 0 ? "+ " : ""}
+        {cents < 0 ? "- " : ""}
         {money(Math.abs(cents), currency)}
       </span>
     );

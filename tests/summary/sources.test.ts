@@ -39,7 +39,7 @@ describe("cripto no período do Resumo", () => {
     const { db, u } = setup();
     const start = now.getTime() - 19 * DAY;
     const r = await cryptoPeriod(db, u, start, now.getTime() + 11 * DAY, now);
-    expect(r).toMatchObject({ startUsdt: 20000, endUsdt: 30000, endMs: now.getTime(), stale: false, reason: null });
+    expect(r).toMatchObject({ nowUsdt: 30000, startUsdt: 20000, endUsdt: 30000, endMs: now.getTime(), stale: false, reason: null });
     expect(mocks.period).toBe("1M"); // até 29 dias: velas de 1 hora
   });
 
@@ -60,7 +60,8 @@ describe("cripto no período do Resumo", () => {
   test("mais de um ano atrás: sem histórico, fica indisponível", async () => {
     const { db, u } = setup();
     const r = await cryptoPeriod(db, u, now.getTime() - 400 * DAY, now.getTime() - 370 * DAY, now);
-    expect(r).toMatchObject({ startUsdt: null, endUsdt: null, reason: "Sem histórico de preços tão antigo" });
+    // O saldo atual continua disponível; só a variação fica sem dado.
+    expect(r).toMatchObject({ nowUsdt: 30000, startUsdt: null, endUsdt: null, reason: "Sem histórico de preços tão antigo" });
   });
 
   test("preços vindos de cache antigo marcam o resultado como desatualizado", async () => {

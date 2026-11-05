@@ -162,7 +162,7 @@ export type ComponentDatum = {
   short: string;
   signedCents: number | null;
   share: number | null;
-  tone: "neutral" | "in" | "out";
+  tone: "neutral" | "in" | "out" | "info";
 };
 
 // Saldos em tons de azul (neutros), entradas em verdes e saídas em vermelhos, para separar os componentes.
@@ -173,9 +173,16 @@ const REDS = ["#ef4444", "#fda4af", "#f97316"];
 function componentColors(items: ComponentDatum[]): Record<string, string> {
   const next = { neutral: 0, in: 0, out: 0 };
   const palette = { neutral: BLUES, in: GREENS, out: REDS };
-  return Object.fromEntries(items.map((c) => [c.key, palette[c.tone][next[c.tone]++ % palette[c.tone].length]]));
+  return Object.fromEntries(
+    items.map((c) => {
+      const tone = c.tone === "info" ? ((c.signedCents ?? 0) < 0 ? "out" : "in") : c.tone;
+      return [c.key, palette[tone][next[tone]++ % palette[tone].length]];
+    }),
+  );
 }
-const barColor = (c: ComponentDatum) => (c.tone === "neutral" ? NEUTRAL : c.tone === "out" ? DOWN : UP);
+// Saldos em azul; a variação (informativa) em verde ou vermelho conforme o sinal.
+const barColor = (c: ComponentDatum) =>
+  c.tone === "neutral" ? NEUTRAL : c.tone === "out" || (c.tone === "info" && (c.signedCents ?? 0) < 0) ? DOWN : UP;
 
 /** Uma barra por componente com a magnitude; a cor diz se é saldo (azul), soma (verde) ou subtrai (vermelho). */
 export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDatum[]; currency?: RefCurrency }) {
@@ -224,10 +231,14 @@ export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDat
   );
 }
 
-/** Participação de cada componente sobre a soma dos valores absolutos (não é o saldo líquido). */
+/**
+ * Participação de cada componente contabilizado sobre a soma dos valores absolutos (não é o saldo líquido).
+ * A variação cripto (informativa) fica de fora.
+ */
 export function ComponentPie({ items, currency = "BRL" }: { items: ComponentDatum[]; currency?: RefCurrency }) {
-  const colors = componentColors(items);
-  const sorted = [...items].sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+  const counted = items.filter((c) => c.tone !== "info");
+  const colors = componentColors(counted);
+  const sorted = [...counted].sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
   return (
     <PieLegend
       labelInside
