@@ -46,7 +46,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
     page.locator(sel).first().evaluate((el) => getComputedStyle(el, "::after").content);
   await page.getByRole("button", { name: "Modo discreto" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-discreet", "");
-  expect(await afterContent("[data-testid=total] .priv-dots")).toBe('"●●●●"');
+  expect(await afterContent("[data-testid=total] .priv")).toBe('"***"');
   expect(await afterContent("tbody .priv")).toBe('"***"');
   await expect(page.getByRole("row", { name: /BTC/ })).toContainText("US$ 60.000,00"); // preço continua visível
   // percentuais continuam visíveis (participação e variações)
@@ -58,7 +58,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.goto("/");
   await page.getByRole("button", { name: "Mostrar valores" }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-discreet", "");
-  expect(await afterContent("[data-testid=total] .priv-dots")).toBe("none");
+  expect(await afterContent("[data-testid=total] .priv")).toBe("none");
 
   // Período
   await page.getByRole("link", { name: "1S", exact: true }).click();

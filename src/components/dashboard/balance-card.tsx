@@ -30,7 +30,7 @@ export function BalanceCard({
     <div className="flex flex-col gap-1">
       <span className="text-sm text-muted-foreground">Saldo total</span>
       <span className="text-4xl font-semibold tracking-tight tabular-nums" data-testid="total">
-        {total === null ? "—" : <Priv dots>{formatMoney(total, currency)}</Priv>}
+        {total === null ? "—" : <Priv>{formatMoney(total, currency)}</Priv>}
       </span>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums" data-testid="total-changes">
         {changes.map((c) => (

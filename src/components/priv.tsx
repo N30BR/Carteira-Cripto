@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/** Valor pessoal: no modo discreto aparece como "***" (ou "●●●●" com `dots`), na mesma cor. */
-export function Priv({ children, dots, className }: { children: React.ReactNode; dots?: boolean; className?: string }) {
-  return <span className={cn("priv", dots && "priv-dots", className)}>{children}</span>;
+/** Valor pessoal (dinheiro, total ou quantidade): no modo discreto aparece como "***", na mesma cor. */
+export function Priv({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <span className={cn("priv", className)}>{children}</span>;
 }
