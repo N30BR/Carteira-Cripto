@@ -84,6 +84,8 @@ function formFromRow(r: InstallmentRow): ExpenseForm {
 }
 
 export function LaunchesView({
+  showInvoices,
+  showTransactions,
   month,
   today,
   rows,
@@ -93,6 +95,8 @@ export function LaunchesView({
   open,
   overdue,
 }: {
+  showInvoices: boolean;
+  showTransactions: boolean;
   month: string;
   today: string;
   rows: InstallmentRow[];
@@ -147,6 +151,7 @@ export function LaunchesView({
 
   return (
     <div className="flex flex-col gap-6">
+      {showInvoices && (
       <Card>
         <CardContent className="flex flex-col gap-5">
           <SectionTitle
@@ -335,7 +340,9 @@ export function LaunchesView({
           </TotalsBar>
         </CardContent>
       </Card>
+      )}
 
+      {showTransactions && (
       <Card>
         <CardContent className="flex flex-col gap-5">
           <SectionTitle
@@ -349,6 +356,7 @@ export function LaunchesView({
           <TransactionsTable items={transactions} emptyText={`Nenhuma transação em ${monthLabel(month)}.`} />
         </CardContent>
       </Card>
+      )}
 
       <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
         <DialogContent className="sm:max-w-5xl">

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { createCardAccount, deleteCardAccount, setCardClosingDay, setCardDueDay, updateCardAccount, type Side } from "@/lib/cards/accounts";
 import { createCategory, deleteCategory, renameCategory, type Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
@@ -41,7 +42,7 @@ function refresh() {
 
 /** Cria (id null) ou edita uma compra. Tudo que vem do navegador é validado aqui. */
 export async function saveExpenseAction(id: number | null, f: ExpenseForm): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (id !== null && !Number.isInteger(id)) return NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!f || typeof f !== "object") return { ok: false, error: "Dados inválidos" };
@@ -88,7 +89,7 @@ export async function saveExpenseAction(id: number | null, f: ExpenseForm): Prom
 }
 
 export async function deleteExpenseAction(id: number): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(id)) return NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = deleteExpense(getDb(), user.id, id);
@@ -97,7 +98,7 @@ export async function deleteExpenseAction(id: number): Promise<Result> {
 }
 
 export async function toggleInstallmentAction(installmentId: number, paid: boolean): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(installmentId) || typeof paid !== "boolean") return NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = setInstallmentPaid(getDb(), user.id, installmentId, paid);
@@ -169,7 +170,7 @@ export async function deleteCardAccountAction(id: number): Promise<Result> {
 
 /** Dia de vencimento da fatura de uma conta (1–31); null limpa. */
 export async function setCardDueDayAction(id: number, day: number | null): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (day !== null && typeof day !== "number") return { ok: false, error: "O vencimento deve ser um dia de 1 a 31" };
@@ -180,7 +181,7 @@ export async function setCardDueDayAction(id: number, day: number | null): Promi
 
 /** Dia de fechamento da fatura de uma conta (1–31); null limpa. */
 export async function setCardClosingDayAction(id: number, day: number | null): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (day !== null && typeof day !== "number") return { ok: false, error: "O fechamento deve ser um dia de 1 a 31" };

@@ -4,6 +4,8 @@ import { testDb } from "../helpers/db";
 const state = vi.hoisted(() => ({ user: { id: 1 } as { id: number } | null, db: null as unknown }));
 vi.mock("@/db/client", async (orig) => ({ ...(await orig<typeof import("@/db/client")>()), getDb: () => state.db }));
 vi.mock("@/lib/auth/current", () => ({ getCurrentUser: async () => state.user }));
+const modules = vi.hoisted(() => ({ chartsOn: true }));
+vi.mock("@/lib/auth/modules", () => ({ moduleOn: () => modules.chartsOn }));
 
 import { GET } from "@/app/api/macro/route";
 import { resetMacroRouteLimits } from "@/lib/charts/route-limit";
@@ -13,6 +15,7 @@ const call = (q: string) => GET(new Request(`http://x/api/macro?${q}`));
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
+  modules.chartsOn = true;
   state.user = { id: 1 };
   state.db = testDb();
   resetMacroRouteLimits();

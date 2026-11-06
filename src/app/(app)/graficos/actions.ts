@@ -1,7 +1,7 @@
 "use server";
 
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { allowChartChange } from "@/lib/charts/limit";
 import { createChartTab, deleteChartTab, renameChartTab, saveChartPrefs, saveChartTab, type Result } from "@/lib/charts/store";
 import { LIMITS } from "@/lib/charts/workspace";
@@ -14,7 +14,7 @@ const TOO_MANY: Result = { ok: false, error: "Muitas alterações seguidas. Agua
 // a cada desenho seria pesado. Ao abrir de novo, o servidor lê o que foi salvo.
 
 async function begin(): Promise<{ id: number } | Result> {
-  const user = await requireUser();
+  const user = await requireModule("charts");
   if (!allowChartChange(user.id)) return TOO_MANY;
   return user;
 }

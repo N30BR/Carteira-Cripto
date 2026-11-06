@@ -55,3 +55,31 @@ describe("consolidação do resumo", () => {
     expect(s.components.every((c) => c.share === null)).toBe(true);
   });
 });
+
+describe("módulos desligados", () => {
+  const input = { cryptoCents: 1000, fiatCents: 500, invoicesCents: 200, inflowCents: 300, outflowCents: 100, cryptoVariationCents: 50 };
+
+  test("componentes de módulos desligados saem da conta e da lista (não viram zero)", async () => {
+    const { consolidate } = await import("@/lib/summary/consolidate");
+    const s = consolidate({ ...input, exclude: ["crypto", "variation", "invoices"] });
+    expect(s.components.map((c) => c.key)).toEqual(["fiat", "inflow", "outflow"]);
+    expect(s.result).toBe(500 + 300 - 100);
+    expect(s.missing).toEqual([]);
+    // participação só entre os que ficaram
+    expect(s.components.find((c) => c.key === "fiat")!.share).toBeCloseTo(500 / 900, 6);
+  });
+
+  test("sem exclusões, nada muda", async () => {
+    const { consolidate } = await import("@/lib/summary/consolidate");
+    expect(consolidate({ ...input, exclude: [] })).toEqual(consolidate(input));
+  });
+});
+
+describe("chaves do Resumo por módulo", () => {
+  test("Cripto tira saldo e variação; Transações tira entradas e saídas", async () => {
+    const { excludedSummaryKeys } = await import("@/lib/summary/consolidate");
+    expect(excludedSummaryKeys(["crypto"])).toEqual(["crypto", "variation"]);
+    expect(excludedSummaryKeys(["fiat", "invoices"])).toEqual(["fiat", "invoices"]);
+    expect(excludedSummaryKeys(["transactions", "todos", "charts"])).toEqual(["inflow", "outflow"]);
+  });
+});

@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
 import { getCurrentUser } from "@/lib/auth/current";
+import { moduleOn } from "@/lib/auth/modules";
 import { createWindowLimiter } from "@/lib/rate-limit";
 import { searchCoins } from "@/lib/prices";
 
@@ -8,6 +9,7 @@ const limiter = createWindowLimiter(30, 60_000);
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Não autenticado" }, { status: 401 });
+  if (!moduleOn(user.id, "crypto")) return Response.json({ error: "Cripto desativado" }, { status: 404 });
 
   const key = String(user.id);
   if (limiter.limited(key)) {

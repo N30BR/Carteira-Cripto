@@ -1,5 +1,5 @@
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { ensureDefaultGroups, listEvents, listGroups, listQuickNotes, listTasks } from "@/lib/todos/store";
 import { appTimeZone, todayIn } from "@/lib/validation";
 import { TodosView } from "./view";
@@ -7,7 +7,7 @@ import { TodosView } from "./view";
 export const metadata = { title: "Pendências · BlackHole Dashboard" };
 
 export default async function TodosPage() {
-  const user = await requireUser();
+  const user = await requireModule("todos");
   const db = getDb();
   ensureDefaultGroups(db, user.id);
 

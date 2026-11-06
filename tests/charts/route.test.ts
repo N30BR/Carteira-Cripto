@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const state = vi.hoisted(() => ({ user: { id: 1 } as { id: number } | null, fail: false }));
 vi.mock("@/db/client", () => ({ getDb: () => ({}) }));
 vi.mock("@/lib/auth/current", () => ({ getCurrentUser: async () => state.user }));
+const modules = vi.hoisted(() => ({ chartsOn: true }));
+vi.mock("@/lib/auth/modules", () => ({ moduleOn: () => modules.chartsOn }));
 vi.mock("@/lib/charts/market", () => ({
   isListedSymbol: async (_db: unknown, s: string) => s === "BTCUSDT",
   getCandles: async () => {
@@ -17,6 +19,7 @@ import { resetCandleRouteLimits } from "@/lib/charts/route-limit";
 const call = (q: string) => GET(new Request(`http://x/api/candles?${q}`));
 
 beforeEach(() => {
+  modules.chartsOn = true;
   state.user = { id: 1 };
   state.fail = false;
   resetCandleRouteLimits();
@@ -44,5 +47,12 @@ describe("rota de velas", () => {
   test("limite de pedidos por minuto", async () => {
     for (let i = 0; i < 300; i++) await call("symbol=BTCUSDT&interval=1h");
     expect((await call("symbol=BTCUSDT&interval=1h")).status).toBe(429);
+  });
+});
+
+describe("módulo Gráficos desligado", () => {
+  test("a rota de velas responde 404 (não busca nada)", async () => {
+    modules.chartsOn = false;
+    expect((await call("symbol=BTCUSDT&interval=1h")).status).toBe(404);
   });
 });

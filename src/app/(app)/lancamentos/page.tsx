@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { getModuleState } from "@/lib/auth/modules";
+import { ModulesEmpty } from "@/components/modules-empty";
 import { ensureDefaultAccounts, listCardAccounts } from "@/lib/cards/accounts";
 import { ensureDefaultCategories, listCategories } from "@/lib/cards/categories";
 import { parseMonth } from "@/lib/cards/months";
@@ -14,7 +15,10 @@ import { LaunchesView } from "./view";
 export const metadata = { title: "Lançamentos · BlackHole Dashboard" };
 
 export default async function LaunchesPage({ searchParams }: PageProps<"/lancamentos">) {
-  const user = await requireUser();
+  // Lançamentos fica sempre visível; cada bloco segue o seu módulo (Faturas e Transações).
+  const { user, on } = await getModuleState();
+  const showInvoices = on("invoices");
+  const showTransactions = on("transactions");
   const db = getDb();
   const today = todayIn(appTimeZone());
   const month = parseMonth((await searchParams).mes) ?? today.slice(0, 7);
@@ -28,14 +32,17 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/lancame
   return (
     <div className="flex flex-col gap-6">
       <PageTitle title="Lançamentos" subtitle="Registre faturas e transações financeiras, com controle por categorias e cartões." />
+      {!showInvoices && !showTransactions && <ModulesEmpty what="Os módulos Faturas e Transações" />}
       <LaunchesView
+        showInvoices={showInvoices}
+        showTransactions={showTransactions}
         key={month}
         month={month}
         today={today}
         rows={listInstallments(db, user.id, month, month)}
         categories={listCategories(db, user.id)}
         accounts={listCardAccounts(db, user.id)}
-        transactions={listTransactions(db, user.id, from, to)}
+        transactions={showTransactions ? listTransactions(db, user.id, from, to) : []}
         open={Object.fromEntries(open.map((o) => [o.expenseId, { remainingCount: o.remainingCount, remainingCents: o.remainingCents }]))}
         overdue={open.reduce(
           (t, o) => ({ count: t.count + o.overdueCount, cents: t.cents + o.overdueCents }),

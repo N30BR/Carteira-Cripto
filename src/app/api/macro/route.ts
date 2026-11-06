@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
 import { getCurrentUser } from "@/lib/auth/current";
+import { moduleOn } from "@/lib/auth/modules";
 import { MACRO_IDS, MacroUnavailable, getMacroSeries, type MacroId } from "@/lib/charts/macro";
 import { allowMacroRequest } from "@/lib/charts/route-limit";
 
@@ -7,6 +8,7 @@ import { allowMacroRequest } from "@/lib/charts/route-limit";
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Não autenticado" }, { status: 401 });
+  if (!moduleOn(user.id, "charts")) return Response.json({ error: "Gráficos desativados" }, { status: 404 });
   if (!allowMacroRequest(user.id)) return Response.json({ error: "Muitos pedidos, aguarde um minuto" }, { status: 429 });
 
   const id = new URL(request.url).searchParams.get("id");

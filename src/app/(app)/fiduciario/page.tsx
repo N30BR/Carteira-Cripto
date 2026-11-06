@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { adjustChange, pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { listAccounts, listBalances } from "@/lib/fiat/accounts";
@@ -23,7 +23,7 @@ const COOKIE = "moeda-fiat";
 const DAY = 86_400_000;
 
 export default async function FiatDashboardPage({ searchParams }: PageProps<"/fiduciario">) {
-  const user = await requireUser();
+  const user = await requireModule("fiat");
   const params = await searchParams;
   const period = parseFiatPeriod(params.periodo);
   const requested = pickCurrency(params.moeda, (await cookies()).get(COOKIE)?.value, "BRL");

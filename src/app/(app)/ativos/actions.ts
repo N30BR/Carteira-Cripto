@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { deleteHolding, updateQuantity, upsertHolding } from "@/lib/holdings/holdings";
 import { isListedAsset } from "@/lib/prices";
 import { coinName } from "@/lib/prices/coin-names";
@@ -16,7 +16,7 @@ function refresh() {
 }
 
 export async function addHoldingAction(coinId: string, rawQuantity: string): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("crypto");
   if (typeof coinId !== "string" || !/^[A-Z0-9]{1,20}$/.test(coinId)) {
     return { ok: false, error: "Escolha uma moeda da lista" };
   }
@@ -34,7 +34,7 @@ export async function addHoldingAction(coinId: string, rawQuantity: string): Pro
 }
 
 export async function updateHoldingAction(holdingId: number, rawQuantity: string): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("crypto");
   const q = parseQuantity(String(rawQuantity ?? ""));
   if (!q.ok) return q;
   if (!Number.isInteger(holdingId) || !updateQuantity(getDb(), user.id, holdingId, q.value)) {
@@ -45,7 +45,7 @@ export async function updateHoldingAction(holdingId: number, rawQuantity: string
 }
 
 export async function deleteHoldingAction(holdingId: number): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("crypto");
   if (!Number.isInteger(holdingId) || !deleteHolding(getDb(), user.id, holdingId)) {
     return { ok: false, error: "Ativo não encontrado" };
   }

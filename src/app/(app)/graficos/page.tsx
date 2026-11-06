@@ -1,5 +1,5 @@
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { listChartSymbols } from "@/lib/charts/market";
 import { getChartPrefs, listChartTabs } from "@/lib/charts/store";
 import { ChartWorkspace } from "@/components/charts/workspace";
@@ -7,7 +7,7 @@ import { ChartWorkspace } from "@/components/charts/workspace";
 export const metadata = { title: "Gráficos · BlackHole Dashboard" };
 
 export default async function ChartsPage() {
-  const user = await requireUser();
+  const user = await requireModule("charts");
   const db = getDb();
   const tabs = listChartTabs(db, user.id);
   const prefs = getChartPrefs(db, user.id);

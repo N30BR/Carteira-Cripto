@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { MAX_TOTAL_CENTS } from "@/lib/cards/installments";
 import { allowFiatChange } from "@/lib/fiat/limit";
 import { createTransaction, deleteTransaction, updateTransaction, type Result, type TxKind } from "@/lib/transactions/store";
@@ -21,7 +21,7 @@ function refresh() {
 
 /** Cria (id null) ou edita uma transação. Tudo que vem do navegador é validado aqui. */
 export async function saveTransactionAction(id: number | null, f: TransactionForm): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("transactions");
   if (id !== null && !Number.isInteger(id)) return NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!f || typeof f !== "object") return { ok: false, error: "Dados inválidos" };
@@ -43,7 +43,7 @@ export async function saveTransactionAction(id: number | null, f: TransactionFor
 }
 
 export async function deleteTransactionAction(id: number): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("transactions");
   if (!Number.isInteger(id)) return NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = deleteTransaction(getDb(), user.id, id);

@@ -7,6 +7,8 @@
 // Sem conciliação entre saldos e movimentos, o resultado é uma composição nominal (estimativa).
 // Valores em unidades mínimas da moeda escolhida (centavos; satoshis em BTC).
 
+import type { ModuleKey } from "@/lib/modules";
+
 export type ComponentKey = "crypto" | "fiat" | "invoices" | "inflow" | "outflow" | "variation";
 export type Tone = "neutral" | "in" | "out" | "info";
 
@@ -21,7 +23,21 @@ export type SummaryInput = {
   outflowCents: number;
   /** Valorização (+) ou desvalorização (−) da carteira no período, só informativa; null sem histórico. */
   cryptoVariationCents?: number | null;
+  /** Componentes de módulos desligados: ficam fora da conta e da lista (não contam como zero). */
+  exclude?: ComponentKey[];
 };
+
+const BY_MODULE: Partial<Record<ModuleKey, ComponentKey[]>> = {
+  crypto: ["crypto", "variation"],
+  fiat: ["fiat"],
+  invoices: ["invoices"],
+  transactions: ["inflow", "outflow"],
+};
+
+/** Componentes do Resumo que saem quando estes módulos estão desligados. */
+export function excludedSummaryKeys(disabled: readonly ModuleKey[]): ComponentKey[] {
+  return disabled.flatMap((m) => BY_MODULE[m] ?? []);
+}
 
 export type SummaryComponent = {
   key: ComponentKey;
@@ -74,7 +90,7 @@ export function consolidate(input: SummaryInput): Summary {
     outflow: -Math.round(input.outflowCents),
     variation: input.cryptoVariationCents === undefined ? 0 : round(input.cryptoVariationCents),
   };
-  const keys = Object.keys(META) as ComponentKey[];
+  const keys = (Object.keys(META) as ComponentKey[]).filter((k) => !input.exclude?.includes(k));
   const counted = keys.filter((k) => k !== "variation");
   const absTotal = counted.reduce((s, k) => s + Math.abs(signed[k] ?? 0), 0);
 

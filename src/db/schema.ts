@@ -316,3 +316,12 @@ export const chartPrefs = sqliteTable("chart_prefs", {
   activeTabId: integer("active_tab_id"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+/** Módulos que o usuário desligou em "Personalizar abas" (lista JSON; vazio = tudo ligado). */
+export const modulePrefs = sqliteTable("module_prefs", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  disabled: text("disabled").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});

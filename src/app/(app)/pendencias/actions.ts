@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { allowTodoChange } from "@/lib/todos/limit";
 import type { TaskStatus } from "@/lib/todos/logic";
 import * as store from "@/lib/todos/store";
@@ -21,7 +21,7 @@ const EVENT_STATUSES = ["scheduled", "done", "canceled"] as const;
 
 /** Começa toda action: usuário logado e dentro do limite de alterações. */
 async function begin(): Promise<{ userId: number } | { error: Result }> {
-  const user = await requireUser();
+  const user = await requireModule("todos");
   if (!allowTodoChange(user.id)) return { error: TOO_MANY };
   return { userId: user.id };
 }

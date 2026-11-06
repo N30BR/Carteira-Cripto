@@ -55,6 +55,8 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-discreet", "");
   await page.getByRole("link", { name: "Dashboard fiduciário" }).click();
+  await expect(page).toHaveURL(/fiduciario/);
+  await expect(page.locator("tbody .priv").first()).toBeVisible();
   expect(await afterContent("tbody .priv")).toBe('"***"');
   await page.goto("/");
   await page.getByRole("button", { name: "Mostrar valores" }).click();
@@ -289,10 +291,88 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(tasks.locator("li").first()).toContainText("Pesquisar cursos de IA");
   await expect(tasks.locator("li").last()).toContainText("Enviar orçamento");
 
+  // Página Sobre: a logo abre /sobre na mesma guia, com os 8 módulos como links
+  await page.getByRole("link", { name: "Sobre o BlackHole Dashboard" }).click();
+  await expect(page).toHaveURL(/\/sobre$/);
+  await expect(page.getByText("Concentrar sinais essenciais, reduzir fragmentação")).toBeVisible();
+  await expect(page.locator("main").getByRole("listitem")).toHaveCount(8);
+  await expect(page.locator("main").getByRole("link", { name: "Faturas" })).toHaveAttribute("href", "/faturas");
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT + "/sobre.png", fullPage: true });
+  if (process.env.SHOT) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: process.env.SHOT + "/sobre-mobile.png", fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 720 });
+  }
+
+  // Personalizar abas: desligar Cripto esconde a aba, o cartão, a seção em Ativos e o saldo no Resumo
+  const nav = page.getByRole("navigation", { name: "Principal" });
+  const toggle = async (name: string) => {
+    await page.getByRole("button", { name: "Personalizar abas" }).click();
+    await page.getByRole("menuitemcheckbox", { name }).click();
+    await page.keyboard.press("Escape");
+  };
+  await toggle("Cripto");
+  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toHaveCount(0);
+  await expect(page.locator("main").getByRole("link", { name: "Cripto" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Lançamentos" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Ativos" })).toBeVisible();
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/fiduciario$/); // URL direta de módulo desligado → primeira aba ativa
+  await page.goto("/ativos");
+  await expect(page.getByRole("button", { name: "Adicionar ativo" })).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /Conta PF/ })).toBeVisible();
+  await page.goto("/resumo");
+  await expect(page.getByText(/Fora da conta \(módulo desligado/)).toContainText("Cripto");
+  await expect(page.getByTestId("sum-crypto")).toHaveCount(0);
+
+  // Desligar a aba em que está: vai para uma aba ativa; a escolha continua depois de recarregar
+  await toggle("Resumo");
+  await expect(page).toHaveURL(/\/fiduciario$/);
+  await page.reload();
+  await expect(nav.getByRole("link", { name: "Resumo" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toHaveCount(0);
+
+  // Ativos sem nenhum módulo: estado vazio, sem erro
+  await toggle("R$ / Fiduciário");
+  await expect(page).toHaveURL(/\/faturas$/);
+  await page.goto("/ativos");
+  await expect(page.getByText(/Os módulos Cripto e R\$ \/ Fiduciário estão desligados/)).toBeVisible();
+
+  // O olho continua só cuidando da privacidade dos valores
+  await page.getByRole("button", { name: "Modo discreto" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-discreet", "");
+  await page.getByRole("button", { name: "Mostrar valores" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-discreet", "");
+
+  // Religar: tudo volta com os dados de antes
+  for (const name of ["Cripto", "R$ / Fiduciário", "Resumo"]) await toggle(name);
+  await page.goto("/ativos");
+  await expect(page.getByRole("row", { name: /BTC/ })).toContainText("0,5");
+  await expect(page.getByRole("row", { name: /Conta PF/ })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toBeVisible();
+
+  // Admin: cria uma conta comum (sem marcar administrador)
+  await page.goto("/admin");
+  await page.getByRole("button", { name: "Novo usuário" }).click();
+  await page.getByRole("dialog").getByLabel("Usuário").fill("comum");
+  await page.getByRole("dialog").getByLabel("Senha").fill("senha-comum-123");
+  await page.getByRole("dialog").getByRole("button", { name: "Criar" }).click();
+  await expect(page.getByRole("cell", { name: "comum", exact: true })).toBeVisible();
+
   // Sair
   await page.getByRole("button", { name: /admin/ }).click();
   await page.getByRole("menuitem", { name: "Sair" }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/fiduciario");
   await expect(page).toHaveURL(/\/login$/);
+
+  // Conta comum: não vê nem acessa o Admin (nem pela URL); a personalização do admin não vale para ela
+  await page.getByLabel("Usuário").fill("comum");
+  await page.getByLabel("Senha").fill("senha-comum-123");
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Admin" })).toHaveCount(0);
+  await page.goto("/admin");
+  await expect(page).not.toHaveURL(/\/admin/);
 });

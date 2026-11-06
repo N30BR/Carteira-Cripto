@@ -4,6 +4,8 @@ import { BinanceError } from "@/lib/prices/binance";
 const state = vi.hoisted(() => ({ user: { id: 1 } as { id: number } | null, error: null as unknown }));
 vi.mock("@/db/client", () => ({ getDb: () => ({}) }));
 vi.mock("@/lib/auth/current", () => ({ getCurrentUser: async () => state.user }));
+const modules = vi.hoisted(() => ({ chartsOn: true }));
+vi.mock("@/lib/auth/modules", () => ({ moduleOn: () => modules.chartsOn }));
 vi.mock("@/lib/charts/market", () => ({
   isListedSymbol: async (_db: unknown, s: string) => s === "BTCUSDT" || s === "ETHBTC",
   getOpenInterest: async () => {
@@ -17,6 +19,7 @@ import { resetOpenInterestRouteLimits } from "@/lib/charts/route-limit";
 
 const call = (q: string) => GET(new Request(`http://x/api/open-interest?${q}`));
 beforeEach(() => {
+  modules.chartsOn = true;
   state.user = { id: 1 };
   state.error = null;
   resetOpenInterestRouteLimits();

@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowLeftRight, ArrowUp, Wallet } from "lucide-react";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { parseMonth } from "@/lib/cards/months";
 import { brlDisplay, staleRateWarning } from "@/lib/currency-display";
 import { parsePeriod } from "@/lib/portfolio/calc";
@@ -21,7 +21,7 @@ export const metadata = { title: "Transações · BlackHole Dashboard" };
 const COOKIE = "moeda-transacoes";
 
 export default async function TransactionsPage({ searchParams }: PageProps<"/transacoes">) {
-  const user = await requireUser();
+  const user = await requireModule("transactions");
   const params = await searchParams;
   const db = getDb();
   const month = parseMonth(params.mes) ?? todayIn(appTimeZone()).slice(0, 7);

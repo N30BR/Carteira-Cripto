@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
 import { getCurrentUser } from "@/lib/auth/current";
+import { moduleOn } from "@/lib/auth/modules";
 import { getOpenInterest, isListedSymbol } from "@/lib/charts/market";
 import { CHART_INTERVALS } from "@/lib/charts/params";
 import { allowOpenInterestRequest } from "@/lib/charts/route-limit";
@@ -9,6 +10,7 @@ import { BinanceError } from "@/lib/prices/binance";
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Não autenticado" }, { status: 401 });
+  if (!moduleOn(user.id, "charts")) return Response.json({ error: "Gráficos desativados" }, { status: 404 });
   if (!allowOpenInterestRequest(user.id)) return Response.json({ error: "Muitos pedidos, aguarde um minuto" }, { status: 429 });
 
   const q = new URL(request.url).searchParams;

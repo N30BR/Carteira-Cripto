@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { createAccount, deleteAccount, renameAccount, setBalance, type Result } from "@/lib/fiat/accounts";
 import { allowFiatChange } from "@/lib/fiat/limit";
 import { appTimeZone, parseBalanceDate, parseBrl, todayIn, validateAccountName } from "@/lib/validation";
@@ -30,7 +30,7 @@ function parseBalance(rawAmount: unknown, rawDate: unknown): { ok: false; error:
 }
 
 export async function createAccountAction(rawName: string, rawAmount: string, rawDate: string): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("fiat");
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const name = validateAccountName(String(rawName ?? ""));
   if (!name.ok) return name;
@@ -42,7 +42,7 @@ export async function createAccountAction(rawName: string, rawAmount: string, ra
 }
 
 export async function setBalanceAction(accountId: number, rawAmount: string, rawDate: string): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("fiat");
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!Number.isInteger(accountId)) return NOT_FOUND;
   const b = parseBalance(rawAmount, rawDate);
@@ -53,7 +53,7 @@ export async function setBalanceAction(accountId: number, rawAmount: string, raw
 }
 
 export async function renameAccountAction(accountId: number, rawName: string): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("fiat");
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!Number.isInteger(accountId)) return NOT_FOUND;
   const name = validateAccountName(String(rawName ?? ""));
@@ -64,7 +64,7 @@ export async function renameAccountAction(accountId: number, rawName: string): P
 }
 
 export async function deleteAccountAction(accountId: number): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("fiat");
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!Number.isInteger(accountId)) return NOT_FOUND;
   const r = deleteAccount(getDb(), user.id, accountId);

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { requireModule } from "@/lib/auth/modules";
 import { addMonths, monthLabel, monthShort, parseMonth } from "@/lib/cards/months";
 import { listCardAccounts, type CardAccount } from "@/lib/cards/accounts";
 import { hasExpenses, listInstallments } from "@/lib/cards/store";
@@ -46,7 +46,7 @@ function Indicator({ title, value, hint, color, testId }: { title: string; value
 }
 
 export default async function InvoicesPage({ searchParams }: PageProps<"/faturas">) {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   const params = await searchParams;
   const month = parseMonth(params.mes) ?? todayIn(appTimeZone()).slice(0, 7);
   const period = parsePeriod(params.periodo);

@@ -2,7 +2,8 @@ import { ArrowDown, ArrowLeftRight, ArrowUp, ChartColumn, ChartPie, Coins, Credi
 import type { LucideIcon } from "lucide-react";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
+import { getModuleState, requireModule } from "@/lib/auth/modules";
+import { MODULES } from "@/lib/modules";
 import { addMonths, monthLabel, parseMonth } from "@/lib/cards/months";
 import { listCardAccounts } from "@/lib/cards/accounts";
 import { invoicesDueBetween } from "@/lib/cards/due";
@@ -11,8 +12,8 @@ import { pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { formatPct } from "@/lib/format";
 import { parsePeriod } from "@/lib/portfolio/calc";
-import { consolidate, type ComponentKey, type Tone } from "@/lib/summary/consolidate";
-import { cryptoPeriod, fiatBalanceBrl } from "@/lib/summary/sources";
+import { consolidate, excludedSummaryKeys, type ComponentKey, type Tone } from "@/lib/summary/consolidate";
+import { cryptoPeriod, fiatBalanceBrl, type CryptoPeriod } from "@/lib/summary/sources";
 import { analysisWindow, zonedMidnight } from "@/lib/summary/window";
 import { staleRateWarning } from "@/lib/currency-display";
 import { getCurrentPrices } from "@/lib/prices";
@@ -54,7 +55,10 @@ const toneColor = (tone: Tone, v: number | null) => {
 };
 
 export default async function SummaryPage({ searchParams }: PageProps<"/resumo">) {
-  const user = await requireUser();
+  const user = await requireModule("summary");
+  // Módulos desligados ficam fora da conta (não contam como zero).
+  const { disabled } = await getModuleState();
+  const cryptoOff = disabled.includes("crypto");
   const params = await searchParams;
   const db = getDb();
   const now = new Date();
@@ -77,7 +81,9 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   const [viewUsdt, crypto] = await Promise.all([
     resolveCurrency(db, "USDT", currency, "USDT", now, { historyDays: 365, btcUsdt }),
     // Cada origem vem da sua área; a conta toda é feita uma vez só, em consolidate().
-    cryptoPeriod(db, user.id, startMs, endMs, now),
+    cryptoOff
+      ? Promise.resolve<CryptoPeriod>({ nowUsdt: 0, startUsdt: 0, endUsdt: 0, endMs, asOf: null, stale: false, empty: true, reason: null })
+      : cryptoPeriod(db, user.id, startMs, endMs, now),
   ]);
   const scale = MINOR[currency];
   // Em BRL não há conversão: os centavos ficam exatos.
@@ -104,6 +110,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
     inflowCents: fromBrlCents(tx.inflow),
     outflowCents: fromBrlCents(tx.outflow),
     cryptoVariationCents: cryptoStart === null || cryptoEnd === null ? null : cryptoEnd - cryptoStart,
+    exclude: excludedSummaryKeys(disabled),
   });
   const byKey = Object.fromEntries(summary.components.map((c) => [c.key, c]));
 
@@ -158,6 +165,8 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
       <SignedMoney cents={c.signedCents} currency={currency} neutral={c.tone === "neutral"} soft={c.tone === "info"} testId={`sum-${key}`} />
     );
   };
+  const offLabels = MODULES.filter((m) => ["crypto", "fiat", "invoices", "transactions"].includes(m.key) && disabled.includes(m.key)).map((m) => m.menuLabel);
+  const variation = byKey.variation as (typeof summary.components)[number] | undefined;
   const items = summary.components.map((c) => ({ ...c, short: SHORT[c.key] }));
 
   return (
@@ -201,6 +210,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                 A variação cripto serve só para comparar o período: o saldo cripto atual já a inclui, então ela não é somada nem
                 descontada.
               </p>
+              {offLabels.length > 0 && <p>Fora da conta (módulo desligado em Personalizar abas): {offLabels.join(", ")}.</p>}
               {summary.missing.includes("crypto") && !crypto.empty && <p className="text-amber-400">Saldo cripto fora da conta: preços ou cotação indisponíveis.</p>}
               {!summary.missing.includes("crypto") && summary.missing.includes("variation") && !crypto.empty && (
                 <p className="text-amber-400">Variação cripto indisponível: {cryptoReason?.toLowerCase()}.</p>
@@ -233,19 +243,21 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                 <SignedMoney cents={-summary.negative} currency={currency} testId="sum-negative" />
               </dd>
             </div>
+            {variation && (
             <div className="flex items-center justify-between gap-4 border-b py-2">
               <dt className="flex items-center gap-2 text-muted-foreground">
-                <span className="size-3 rounded-sm border" style={{ borderColor: toneColor("info", byKey.variation.signedCents) }} /> Variação cripto
+                <span className="size-3 rounded-sm border" style={{ borderColor: toneColor("info", variation.signedCents) }} /> Variação cripto
                 (informativa, não somada)
               </dt>
               <dd>
-                {byKey.variation.signedCents === null ? (
+                {variation.signedCents === null ? (
                   <span className="text-muted-foreground">—</span>
                 ) : (
-                  <SignedMoney cents={byKey.variation.signedCents} currency={currency} soft testId="sum-variation-panel" />
+                  <SignedMoney cents={variation.signedCents} currency={currency} soft testId="sum-variation-panel" />
                 )}
               </dd>
             </div>
+            )}
             <div className="flex items-center justify-between gap-4 rounded-lg px-3 py-2.5" style={{ backgroundColor: `${BLUE}26` }}>
               <dt className="flex items-center gap-2 font-medium">
                 <span className="size-3 rounded-sm" style={{ background: BLUE }} /> Resultado consolidado
