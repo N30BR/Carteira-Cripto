@@ -14,3 +14,18 @@ export function allowCandleRequest(userId: number): boolean {
 export function resetCandleRouteLimits(): void {
   limiter.reset();
 }
+
+// Rota de séries macro (FRED): poucas séries, em cache de 6 h.
+const macroLimiter = createWindowLimiter(60, 60_000);
+
+export function allowMacroRequest(userId: number): boolean {
+  const key = String(userId);
+  if (macroLimiter.limited(key)) return false;
+  macroLimiter.hit(key);
+  return true;
+}
+
+/** Só para testes. */
+export function resetMacroRouteLimits(): void {
+  macroLimiter.reset();
+}

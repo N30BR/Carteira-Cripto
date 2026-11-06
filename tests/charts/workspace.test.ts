@@ -84,3 +84,25 @@ describe("preferências das ferramentas", () => {
     expect(sanitizePrefs("x").ok).toBe(false);
   });
 });
+
+describe("comparações por gráfico", () => {
+  const withCompares = (compares: unknown) => sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), compares }] });
+
+  test("pares cripto (USDT/BTC/ETH) e séries macro conhecidas", () => {
+    const r = withCompares([
+      { kind: "pair", id: "PAXGUSDT" },
+      { kind: "macro", id: "GLOBAL_LIQUIDITY" },
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.panes[0].compares).toHaveLength(2);
+    expect(withCompares(undefined).ok).toBe(true); // estados antigos, sem comparações
+  });
+
+  test("recusa tipo, par ou série desconhecidos e mais de 10 comparações", () => {
+    expect(withCompares([{ kind: "x", id: "BTCUSDT" }]).ok).toBe(false);
+    expect(withCompares([{ kind: "pair", id: "BTCBRL" }]).ok).toBe(false);
+    expect(withCompares([{ kind: "macro", id: "HACK" }]).ok).toBe(false);
+    expect(withCompares("x").ok).toBe(false);
+    expect(withCompares(Array.from({ length: 11 }, () => ({ kind: "pair", id: "ETHUSDT" }))).ok).toBe(false);
+  });
+});

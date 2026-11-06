@@ -233,6 +233,14 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByRole("button", { name: /^RSI\s*painel$/ }).click();
   await expect(page.getByRole("list", { name: "Indicadores no gráfico" }).getByText("RSI", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
+  // Comparar: ouro (PAXG) sobre o preço; juros sem chave do FRED mostram aviso, sem quebrar
+  await page.getByRole("button", { name: /^Comparar/ }).click();
+  await page.getByRole("button", { name: "Ouro (PAXG/USDT) Binance" }).click();
+  await page.getByRole("button", { name: /Treasury 10 anos/ }).click();
+  await expect(page.getByRole("list", { name: "Comparações no gráfico" }).locator("li")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await expect(page.getByText(/Comparação UST10Y: Chave do FRED não configurada/)).toBeVisible();
+  await expect(page.getByText(/Comparação PAXGUSDT/)).toHaveCount(0);
   await page.getByRole("button", { name: "Nova aba" }).click();
   await expect(page.getByRole("tab")).toHaveCount(2);
   await page.waitForTimeout(1500); // salvamento automático (~1 s)

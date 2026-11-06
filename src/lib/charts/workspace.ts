@@ -1,5 +1,6 @@
 // Estado das abas da aba Gráficos (o que é salvo na conta) e a validação de tudo que vem do navegador.
 // Sem dependências de banco ou navegador: usado no servidor (actions) e no cliente (tela).
+import { MACRO_IDS, type MacroId } from "./macro-ids";
 import { CHART_INTERVALS, splitSymbol, type ChartInterval } from "./params";
 
 export const CHART_TYPES = ["candle", "ohlc", "area", "line"] as const;
@@ -17,6 +18,7 @@ export const LIMITS = {
   overlaysPerPane: 300,
   pointsPerOverlay: 10,
   overlayText: 200,
+  comparesPerPane: 10,
   /** Tamanho máximo do estado de uma aba salvo no banco (JSON). */
   stateBytes: 400_000,
 };
@@ -88,6 +90,8 @@ export const DEFAULT_FAVORITE_TOOLS = ["segment", "horizontalStraightLine", "fib
 
 export type IndicatorState = { name: string; params: number[]; pane: "main" | "sub" };
 export type OverlayState = { name: string; points: { timestamp: number; value: number }[]; text?: string };
+/** Série comparada na mesma divisão: outro par da Binance (ex.: ouro PAXGUSDT) ou série macro do FRED. */
+export type CompareState = { kind: "pair"; id: string } | { kind: "macro"; id: MacroId };
 export type PaneState = {
   symbol: string;
   interval: ChartInterval;
@@ -95,6 +99,7 @@ export type PaneState = {
   scale: ChartScale;
   indicators: IndicatorState[];
   overlays: OverlayState[];
+  compares: CompareState[];
 };
 export type TabState = { layout: ChartLayout; panes: PaneState[] };
 export type ToolPrefs = { visible: string[]; favorites: string[] };
@@ -106,6 +111,7 @@ export const defaultPane = (symbol = "BTCUSDT"): PaneState => ({
   scale: "normal",
   indicators: [{ name: "VOL", params: [5, 10, 20], pane: "sub" }],
   overlays: [],
+  compares: [],
 });
 export const defaultTab = (): TabState => ({ layout: 1, panes: [defaultPane()] });
 export const defaultPrefs = (): ToolPrefs => ({ visible: CHART_TOOLS.map((t) => t.name), favorites: [...DEFAULT_FAVORITE_TOOLS] });
@@ -142,6 +148,13 @@ function sanitizeOverlay(v: unknown): R<OverlayState> {
   return { ok: true, value: out };
 }
 
+function sanitizeCompare(v: unknown): R<CompareState> {
+  if (!isObj(v)) return fail("Comparação inválida");
+  if (v.kind === "pair" && typeof v.id === "string" && /^[A-Z0-9]{2,20}$/.test(v.id) && splitSymbol(v.id)) return { ok: true, value: { kind: "pair", id: v.id } };
+  if (v.kind === "macro" && (MACRO_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "macro", id: v.id as MacroId } };
+  return fail("Comparação inválida");
+}
+
 function sanitizePane(v: unknown): R<PaneState> {
   if (!isObj(v)) return fail("Gráfico inválido");
   const symbol = typeof v.symbol === "string" ? v.symbol : "";
@@ -165,9 +178,17 @@ function sanitizePane(v: unknown): R<PaneState> {
     if (!r.ok) return r;
     overlays.push(r.value);
   }
+  const rawCmp = v.compares ?? [];
+  if (!Array.isArray(rawCmp) || rawCmp.length > LIMITS.comparesPerPane) return fail(`Até ${LIMITS.comparesPerPane} comparações por gráfico`);
+  const compares: CompareState[] = [];
+  for (const c of rawCmp) {
+    const r = sanitizeCompare(c);
+    if (!r.ok) return r;
+    compares.push(r.value);
+  }
   return {
     ok: true,
-    value: { symbol, interval: v.interval as ChartInterval, chartType: v.chartType as ChartType, scale: v.scale as ChartScale, indicators, overlays },
+    value: { symbol, interval: v.interval as ChartInterval, chartType: v.chartType as ChartType, scale: v.scale as ChartScale, indicators, overlays, compares },
   };
 }
 

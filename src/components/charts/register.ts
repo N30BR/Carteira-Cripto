@@ -4,6 +4,7 @@
 // Os cálculos ficam em lib/charts/indicators.ts (testados); aqui só a ligação com o gráfico.
 import { registerIndicator, registerOverlay, type KLineData } from "klinecharts";
 import { atr, ema, ichimoku, mfi, rsi, rsiDivergences, stochRsi, volumeProfile, vwap } from "@/lib/charts/indicators";
+import { alignStep, rebase, type Point } from "@/lib/charts/macro-math";
 
 const UP = "#22c55e";
 const DOWN = "#ef4444";
@@ -15,9 +16,38 @@ const bars = (d: KLineData[]) => d.map((b) => ({ ...b, volume: b.volume ?? 0 }))
 const lines = (keys: string[], titles?: string[]) =>
   keys.map((key, i) => ({ key, title: `${titles?.[i] ?? key.toUpperCase()}: `, type: "line" }));
 
+/** Cores das séries comparadas (uma por comparação). */
+export const COMPARE_COLORS = ["#f59e0b", "#38bdf8", "#f472b6", "#a3e635", "#e5e7eb", "#2dd4bf", "#fb923c", "#c084fc", "#facc15", "#94a3b8"];
+export type CompareData = { label: string; points: Point[]; color: string };
+
 export function registerChartExtensions(): void {
   if (done) return;
   done = true;
+
+  // Comparações: uma "vaga" por comparação (o gráfico não aceita dois indicadores com o mesmo nome no mesmo painel).
+  for (let slot = 0; slot < COMPARE_COLORS.length; slot++) {
+    // Na janela do preço: rebase (começa no preço e segue as próprias variações).
+    registerIndicator<Row, number, CompareData>({
+      name: `COMPARE_${slot}`,
+      shortName: "Comparar",
+      series: "price",
+      precision: 2,
+      figures: [{ key: "v", title: "", type: "line" }],
+      calc: (data, ind) => {
+        const pts = ind.extendData?.points ?? [];
+        const aligned = alignStep(pts, data.map((b) => b.timestamp));
+        return rebase(aligned, data.map((b) => b.close)).map((v) => ({ v }));
+      },
+    });
+    // Em painel próprio: o valor real (ex.: juros em %).
+    registerIndicator<Row, number, CompareData>({
+      name: `MACRO_${slot}`,
+      shortName: "Macro",
+      precision: 2,
+      figures: [{ key: "v", title: "", type: "line" }],
+      calc: (data, ind) => alignStep(ind.extendData?.points ?? [], data.map((b) => b.timestamp)).map((v) => ({ v })),
+    });
+  }
 
   registerIndicator<Row, number>({
     name: "MA_RIBBON",

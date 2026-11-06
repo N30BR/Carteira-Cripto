@@ -8,6 +8,7 @@ const DAY = 24 * HOUR;
 const PRICES: Record<string, { last: string; change: string; from: number; to: number }> = {
   BTCUSDT: { last: "60000.00", change: "1.500", from: 50000, to: 60000 },
   USDTBRL: { last: "5.00", change: "0.000", from: 5, to: 5 },
+  PAXGUSDT: { last: "2600.00", change: "0.200", from: 2400, to: 2600 },
 };
 
 /** Velas com fechamento indo de `from` a `to` ao longo do período. */
@@ -34,7 +35,12 @@ const server = http.createServer((req, res) => {
   };
 
   if (url.pathname === "/api/v3/exchangeInfo") {
-    return send({ symbols: [{ symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING" }] });
+    return send({
+      symbols: [
+        { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING" },
+        { symbol: "PAXGUSDT", baseAsset: "PAXG", quoteAsset: "USDT", status: "TRADING" },
+      ],
+    });
   }
   if (url.pathname === "/api/v3/ticker/24hr") {
     const symbols: string[] = JSON.parse(url.searchParams.get("symbols") ?? "[]");

@@ -5,7 +5,9 @@ import { dispose, init, type Chart, type KLineData, type OverlayMode, type Perio
 import type { ChartInterval } from "@/lib/charts/params";
 import { splitSymbol } from "@/lib/charts/params";
 import type { OverlayState, PaneState } from "@/lib/charts/workspace";
-import { registerChartExtensions } from "./register";
+import { MACRO_SERIES } from "@/lib/charts/macro-ids";
+import type { Point } from "@/lib/charts/macro-math";
+import { COMPARE_COLORS, registerChartExtensions } from "./register";
 
 const PERIOD: Record<ChartInterval, Period> = {
   "1m": { type: "minute", span: 1 },
@@ -53,8 +55,8 @@ function precisionFor(price: number): number {
   return Math.min(10, Math.max(2, Math.ceil(-Math.log10(price)) + 4));
 }
 
-async function loadCandles(symbol: string, interval: ChartInterval, end: number | null): Promise<KLineData[]> {
-  const q = new URLSearchParams({ symbol, interval, limit: String(LIMIT) });
+async function loadCandles(symbol: string, interval: ChartInterval, end: number | null, limit = LIMIT): Promise<KLineData[]> {
+  const q = new URLSearchParams({ symbol, interval, limit: String(limit) });
   if (end !== null) q.set("end", String(end));
   const res = await fetch(`/api/candles?${q}`);
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Preços indisponíveis");
@@ -215,17 +217,69 @@ export function ChartPane({
     c.overrideYAxis({ paneId: "candle_pane", name: pane.scale });
   }, [pane.chartType, pane.scale]);
 
-  // Indicadores: recria quando a lista muda.
+  // Indicadores: recria quando a lista muda (sem mexer nas comparações).
+  const indicatorIds = useRef<string[]>([]);
   const indicatorKey = JSON.stringify(pane.indicators);
   useEffect(() => {
     const c = chart.current;
     if (!c) return;
-    c.removeIndicator();
+    for (const id of indicatorIds.current) c.removeIndicator({ id });
+    indicatorIds.current = [];
     for (const ind of pane.indicators) {
-      c.createIndicator({ name: ind.name, calcParams: ind.params, ...(ind.pane === "main" ? { paneId: "candle_pane" } : {}) }, ind.pane === "main");
+      const id = c.createIndicator({ name: ind.name, calcParams: ind.params, ...(ind.pane === "main" ? { paneId: "candle_pane" } : {}) }, ind.pane === "main");
+      if (id) indicatorIds.current.push(id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indicatorKey]);
+
+  // Comparações: busca os dados (par da Binance no mesmo tempo, ou série do FRED) e desenha as linhas.
+  const compareIds = useRef<string[]>([]);
+  const compareKey = JSON.stringify(pane.compares);
+  useEffect(() => {
+    const c = chart.current;
+    if (!c) return;
+    let cancelled = false;
+    for (const id of compareIds.current) c.removeIndicator({ id });
+    compareIds.current = [];
+    pane.compares.forEach(async (cmp, slot) => {
+      try {
+        let points: Point[];
+        let label: string;
+        let sub = false;
+        if (cmp.kind === "pair") {
+          const data = await loadCandles(cmp.id, pane.interval, null, 1000);
+          points = data.map((k) => [k.timestamp, k.close]);
+          label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : cmp.id;
+        } else {
+          const res = await fetch(`/api/macro?${new URLSearchParams({ id: cmp.id })}`);
+          if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Dados indisponíveis");
+          points = (await res.json()) as Point[];
+          const meta = MACRO_SERIES.find((m) => m.id === cmp.id);
+          label = meta?.label ?? cmp.id;
+          sub = meta?.pane === "sub";
+        }
+        if (cancelled) return;
+        const color = COMPARE_COLORS[slot % COMPARE_COLORS.length];
+        const id = c.createIndicator(
+          {
+            name: `${sub ? "MACRO" : "COMPARE"}_${slot}`,
+            shortName: label,
+            extendData: { label, points, color },
+            styles: { lines: [{ color, size: 1.5 }] },
+            ...(sub ? {} : { paneId: "candle_pane" }),
+          },
+          !sub,
+        );
+        if (id) compareIds.current.push(id);
+      } catch (e) {
+        cb.current.onError(`Comparação ${cmp.id}: ${e instanceof Error ? e.message : "indisponível"}`);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compareKey, pane.interval]);
 
   // Desenhos salvos: aplica ao abrir (depois as mudanças vêm do próprio gráfico).
   useEffect(() => {

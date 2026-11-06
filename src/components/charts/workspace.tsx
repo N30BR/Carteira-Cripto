@@ -54,11 +54,13 @@ import {
   type ChartLayout,
   type ChartScale,
   type ChartType,
+  type CompareState,
   type OverlayState,
   type PaneState,
   type TabState,
   type ToolPrefs,
 } from "@/lib/charts/workspace";
+import { MACRO_SERIES } from "@/lib/charts/macro-ids";
 import { safeAction } from "@/lib/safe-action";
 import { cn } from "@/lib/utils";
 import type { PaneHandle } from "./chart-pane";
@@ -141,7 +143,7 @@ export function ChartWorkspace({
   const [magnet, setMagnet] = useState(false);
   const [hideDrawings, setHideDrawings] = useState(false);
   const [hideIndicators, setHideIndicators] = useState(false);
-  const [dialog, setDialog] = useState<null | "symbol" | "indicators" | "tools">(null);
+  const [dialog, setDialog] = useState<null | "symbol" | "indicators" | "tools" | "compare">(null);
   const [error, setError] = useState<string | null>(null);
   const handles = useRef<(PaneHandle | null)[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -256,6 +258,9 @@ export function ChartWorkspace({
         <Seg label="Escala" value={pane.scale} options={["normal", "logarithm", "percentage"] as const} onChange={(scale) => updatePane({ scale })} render={(v) => SCALE_LABEL[v]} />
         <Button size="sm" variant="outline" onClick={() => setDialog("indicators")}>
           Indicadores ({pane.indicators.length})
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setDialog("compare")}>
+          Comparar ({pane.compares.length})
         </Button>
         <div className="ml-auto flex items-center gap-1.5">
           <LayoutGrid className="size-4 text-muted-foreground" />
@@ -372,6 +377,7 @@ export function ChartWorkspace({
 
       <SymbolDialog open={dialog === "symbol"} onClose={() => setDialog(null)} symbols={symbols} onPick={(symbol) => (updatePane({ symbol }), setDialog(null))} />
       <IndicatorsDialog open={dialog === "indicators"} onClose={() => setDialog(null)} pane={pane} onChange={(indicators) => updatePane({ indicators })} />
+      <CompareDialog open={dialog === "compare"} onClose={() => setDialog(null)} pane={pane} symbols={symbols} onChange={(compares) => updatePane({ compares })} />
       <ToolsDialog
         open={dialog === "tools"}
         onClose={() => setDialog(null)}
@@ -518,6 +524,83 @@ function ToolsDialog({ open, onClose, prefs, onChange }: { open: boolean; onClos
             );
           })}
         </ul>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CompareDialog({
+  open,
+  onClose,
+  pane,
+  symbols,
+  onChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  pane: PaneState;
+  symbols: SymbolOption[];
+  onChange: (c: CompareState[]) => void;
+}) {
+  const [q, setQ] = useState("");
+  const full = pane.compares.length >= LIMITS.comparesPerPane;
+  const has = (c: CompareState) => pane.compares.some((x) => x.kind === c.kind && x.id === c.id);
+  const add = (c: CompareState) => !full && !has(c) && onChange([...pane.compares, c]);
+  const gold = symbols.filter((s) => s.symbol === "PAXGUSDT" || s.symbol === "XAUTUSDT");
+  const pairs = useMemo(() => {
+    const t = q.trim().toUpperCase();
+    return t ? symbols.filter((s) => s.symbol.includes(t)).slice(0, 30) : [];
+  }, [q, symbols]);
+  const labelOf = (c: CompareState) =>
+    c.kind === "macro" ? (MACRO_SERIES.find((m) => m.id === c.id)?.label ?? c.id) : c.id === "PAXGUSDT" ? "Ouro (PAXG/USDT)" : c.id === "XAUTUSDT" ? "Ouro (XAUT/USDT)" : c.id;
+  const item = (c: CompareState, label: string, hint?: string) => (
+    <button
+      key={c.kind + c.id}
+      type="button"
+      disabled={full || has(c)}
+      onClick={() => add(c)}
+      className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+    >
+      <span>{label}</span>
+      {hint && <span className="shrink-0 text-xs text-muted-foreground">{hint}</span>}
+    </button>
+  );
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Comparar na mesma janela</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Pares e liquidez aparecem sobre o preço, começando no mesmo ponto (desempenho relativo). Juros aparecem num painel próprio, em %.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Ouro</p>
+            {gold.map((g) => item({ kind: "pair", id: g.symbol }, labelOf({ kind: "pair", id: g.symbol }), "Binance"))}
+            <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Macro (FRED)</p>
+            {MACRO_SERIES.map((m) => item({ kind: "macro", id: m.id }, m.label, m.pane === "sub" ? "painel" : "rebase"))}
+            <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Outro par</p>
+            <Input aria-label="Buscar par para comparar" placeholder="Buscar (ex.: ETHUSDT)" value={q} onChange={(e) => setQ(e.target.value)} />
+            <div className="max-h-40 overflow-auto">{pairs.map((s) => item({ kind: "pair", id: s.symbol }, `${s.base}/${s.quote}`))}</div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">
+              No gráfico ({pane.compares.length}/{LIMITS.comparesPerPane})
+            </p>
+            <ul className="flex flex-col gap-1" aria-label="Comparações no gráfico">
+              {pane.compares.map((c, i) => (
+                <li key={c.kind + c.id} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate">{labelOf(c)}</span>
+                  <Button size="icon-sm" variant="ghost" aria-label={`Remover comparação ${labelOf(c)}`} onClick={() => onChange(pane.compares.filter((_, j) => j !== i))}>
+                    <X />
+                  </Button>
+                </li>
+              ))}
+              {!pane.compares.length && <li className="text-sm text-muted-foreground">Nenhuma comparação.</li>}
+            </ul>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
