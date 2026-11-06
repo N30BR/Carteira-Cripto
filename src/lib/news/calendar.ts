@@ -38,11 +38,11 @@ const IMPACT: Record<string, Stars> = { High: 3, Medium: 2 };
 const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 40) : null);
 
 /** Feed semanal da Forex Factory → eventos de ★★ e ★★★ das regiões cobertas, em ordem de horário. */
-export function parseForexFactory(json: unknown): NewsEvent[] {
+export function parseForexFactory(json: unknown, now = Date.now()): NewsEvent[] {
   if (!Array.isArray(json)) throw new Error("Forex Factory: resposta inesperada");
   const out: NewsEvent[] = [];
   // Resposta externa: ignora itens que não sejam objetos, eventos a mais de 1 ano e corta em 2000.
-  const maxTs = Date.now() + 365 * 86_400_000;
+  const maxTs = now + 365 * 86_400_000;
   for (const r of json as Record<string, unknown>[]) {
     if (out.length >= 2000) break;
     if (!r || typeof r !== "object") continue;

@@ -68,3 +68,28 @@ describe("revisão: falhas guardadas no banco com espera crescente", () => {
     expect(failureAllows(db, "k", 0, later(20.1))).toBe(true);
   });
 });
+
+describe("revisão 2: teto de tamanho também sem content-length (resposta em pedaços)", () => {
+  test("corta a leitura ao passar do teto", async () => {
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        sent += 500;
+        c.enqueue(new TextEncoder().encode("x".repeat(500)));
+        if (sent > 100_000) c.close();
+      },
+    });
+    globalThis.fetch = (async () => new Response(stream)) as typeof fetch;
+    await expect(fetchJsonCapped("https://x", 2000, "Fonte")).rejects.toThrow(/grande demais/);
+    expect(sent).toBeLessThan(10_000); // parou cedo, não leu tudo
+  });
+});
+
+describe("revisão 2: paginação com janela de páginas", () => {
+  test("primeira, última e vizinhas da atual; '…' nos saltos", async () => {
+    const { pageWindow } = await import("@/lib/pagination");
+    expect(pageWindow(0, 3)).toEqual([0, 1, 2]);
+    expect(pageWindow(10, 50)).toEqual([0, null, 9, 10, 11, null, 49]);
+    expect(pageWindow(49, 50)).toEqual([0, null, 48, 49]);
+  });
+});

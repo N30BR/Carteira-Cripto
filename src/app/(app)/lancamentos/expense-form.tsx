@@ -72,7 +72,8 @@ export function ExpenseFormFields({
   editing?: boolean;
   submitLabel: string;
   onSubmit: (f: ExpenseForm) => Promise<Result>;
-  onDone?: () => void;
+  /** Depois de salvar; recebe o que foi enviado (a janela usa para lembrar mês e conta no próximo). */
+  onDone?: (saved: ExpenseForm) => void;
   /** "row": em fileira na página; "modal": em janela, com Cancelar (mesmos campos e regras). */
   layout?: "row" | "modal";
   onCancel?: () => void;
@@ -109,7 +110,7 @@ export function ExpenseFormFields({
         setError(undefined);
         // Novo lançamento: limpa o formulário, mas mantém o mês e a conta para o próximo.
         if (!editing) setF({ ...initial, refMonth: f.refMonth, accountId });
-        onDone?.();
+        onDone?.({ ...f, accountId });
       } else setError(r.error);
     });
   }
@@ -285,7 +286,7 @@ export function ExpenseFormFields({
           {refMonthField}
           {dateField}
         </div>
-        <div className="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-end">
+        <div className={editing ? "grid gap-3" : "grid gap-3 sm:grid-cols-[auto_1fr] sm:items-end"}>
           {statusField}
           {notesField}
         </div>

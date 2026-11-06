@@ -153,6 +153,9 @@ export function LaunchesView({
   // Janelas de cadastro/edição (o formulário completo de antes, em janela).
   const [invoiceDialog, setInvoiceDialog] = useState<null | { row: InstallmentRow | null }>(null);
   const [txDialog, setTxDialog] = useState(false);
+  // Como o formulário fixo de antes: o próximo cadastro começa com o mês/conta e a data/tipo do anterior.
+  const [lastInvoice, setLastInvoice] = useState<{ refMonth: string; accountId: number } | null>(null);
+  const [lastTx, setLastTx] = useState<{ date: string; kind: "" | "in" | "out" } | null>(null);
   const [invoicePage, setInvoicePage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
   const page = Math.min(invoicePage, pageCount - 1);
@@ -170,10 +173,7 @@ export function LaunchesView({
         <CardContent className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-3">
             <IconBox icon={CalendarDays} color="#8b7cf6" />
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Mês de referência</span>
-              <MonthPicker month={month} />
-            </div>
+            <MonthPicker month={month} />
           </div>
           {showInvoices && <CategoriesDialog categories={categories} />}
           <p className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
@@ -460,7 +460,11 @@ export function LaunchesView({
             <ExpenseFormFields
               key={editingRow ? editingRow.installmentId : "new"}
               layout="modal"
-              initial={editingRow ? formFromRow(editingRow) : emptyForm(month, today, accounts[0]?.id ?? 0)}
+              initial={
+                editingRow
+                  ? formFromRow(editingRow)
+                  : { ...emptyForm(month, today, accounts[0]?.id ?? 0), ...(lastInvoice && accounts.some((a) => a.id === lastInvoice.accountId) ? lastInvoice : {}) }
+              }
               categories={categories}
               accounts={accounts}
               accountsButton={editingRow ? undefined : <AccountsDialog accounts={accounts} />}
@@ -468,7 +472,8 @@ export function LaunchesView({
               submitLabel={editingRow ? "Salvar alterações" : "Salvar Fatura"}
               onSubmit={(f) => saveExpenseAction(editingRow ? editingRow.expenseId : null, f)}
               onCancel={() => setInvoiceDialog(null)}
-              onDone={() => {
+              onDone={(saved) => {
+                if (!editingRow) setLastInvoice({ refMonth: saved.refMonth, accountId: saved.accountId });
                 setInvoiceDialog(null);
                 toast.success(editingRow ? "Lançamento atualizado" : "Fatura lançada");
               }}
@@ -486,11 +491,14 @@ export function LaunchesView({
           </DialogHeader>
           {txDialog && (
             <TransactionFormRow
-              initial={emptyDraft(txDefaultDate)}
+              initial={lastTx ? { ...emptyDraft(lastTx.date), kind: lastTx.kind } : emptyDraft(txDefaultDate)}
               submitLabel="Salvar Transação"
               layout="modal"
               onCancel={() => setTxDialog(false)}
-              onDone={() => setTxDialog(false)}
+              onDone={(saved) => {
+                setLastTx({ date: saved.date, kind: saved.kind });
+                setTxDialog(false);
+              }}
             />
           )}
         </DialogContent>

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { deleteTransactionAction, saveTransactionAction, type TransactionForm } from "@/app/(app)/lancamentos/transaction-actions";
+import { pageWindow } from "@/lib/pagination";
 import { safeAction } from "@/lib/safe-action";
 import { CURRENCY_SYMBOL, type RefCurrency } from "@/lib/currency";
 import type { Transaction } from "@/lib/transactions/store";
@@ -33,7 +34,8 @@ export function TransactionFormRow({
   initial: Draft;
   editId?: number | null;
   submitLabel: string;
-  onDone?: () => void;
+  /** Depois de salvar; recebe o que foi enviado (a janela usa para lembrar data e tipo no próximo). */
+  onDone?: (saved: Draft) => void;
   /** "row": em fileira; "modal": em janela, com Cancelar (mesmos campos e regras). */
   layout?: "row" | "modal";
   onCancel?: () => void;
@@ -54,7 +56,7 @@ export function TransactionFormRow({
         if (editId === null) setF({ ...initial, date: f.date, kind: f.kind });
         // Avisa a data: lançada em outro mês, ela aparece quando esse mês for escolhido.
         toast.success(`${editId === null ? "Transação lançada" : "Transação atualizada"} em ${dateBr(f.date)}`);
-        onDone?.();
+        onDone?.(f);
       } else setError(r.error);
     });
   }
@@ -298,11 +300,17 @@ export function Pager({ label, shown, total, page, pages, onPage }: { label: str
           <Button size="icon-sm" variant="outline" aria-label="Página anterior" disabled={page === 0} onClick={() => onPage(page - 1)}>
             ‹
           </Button>
-          {Array.from({ length: pages }, (_, i) => (
-            <Button key={i} size="icon-sm" variant={i === page ? "default" : "outline"} aria-current={i === page ? "page" : undefined} onClick={() => onPage(i)}>
-              {i + 1}
-            </Button>
-          ))}
+          {pageWindow(page, pages).map((i, k) =>
+            i === null ? (
+              <span key={`gap-${k}`} className="px-1">
+                …
+              </span>
+            ) : (
+              <Button key={i} size="icon-sm" variant={i === page ? "default" : "outline"} aria-current={i === page ? "page" : undefined} onClick={() => onPage(i)}>
+                {i + 1}
+              </Button>
+            ),
+          )}
           <Button size="icon-sm" variant="outline" aria-label="Próxima página" disabled={page === pages - 1} onClick={() => onPage(page + 1)}>
             ›
           </Button>
