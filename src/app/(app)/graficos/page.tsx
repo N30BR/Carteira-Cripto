@@ -15,7 +15,8 @@ export default async function ChartsPage() {
 
   return (
     // Usa a largura toda da tela (o gráfico precisa de espaço).
-    <div className="relative left-1/2 w-screen max-w-[100vw] -translate-x-1/2 px-3 md:px-6">
+    // Fundo próprio: o fundo espacial não aparece atrás das velas nem das barras do gráfico.
+    <div className="relative left-1/2 -my-8 w-screen max-w-[100vw] -translate-x-1/2 bg-background px-3 py-8 md:px-6">
       <ChartWorkspace initialTabs={tabs} initialPrefs={prefs} symbols={symbols} />
     </div>
   );

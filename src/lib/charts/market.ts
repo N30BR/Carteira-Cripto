@@ -67,11 +67,11 @@ export function resetCandleCache(): void {
 }
 
 export async function getCandles(query: CandleQuery, nowMs = Date.now()): Promise<Candle[]> {
-  // 6M e 1A não existem na Binance: junta as mensais (que já passam pelo cache abaixo).
-  const months = AGGREGATED[query.interval];
-  if (months) {
-    const monthly = await getCandles({ ...query, interval: "1M", limit: Math.min(1000, (query.limit + 1) * months) }, nowMs);
-    return aggregateCandles(monthly, query.interval as "6M" | "1y").slice(-query.limit);
+  // 2D, 6M e 1A não existem na Binance: junta as diárias/mensais (que já passam pelo cache abaixo).
+  const agg = AGGREGATED[query.interval];
+  if (agg) {
+    const base = await getCandles({ ...query, interval: agg.base, limit: Math.min(1000, (query.limit + 1) * agg.count) }, nowMs);
+    return aggregateCandles(base, query.interval as "2d" | "6M" | "1y").slice(-query.limit);
   }
   // Data final no futuro = "mais recentes" (senão ficaria 1 dia em cache como se fosse passado).
   const q = query.end !== null && query.end >= nowMs ? { ...query, end: null } : query;
@@ -105,6 +105,7 @@ const OI_PERIOD: Record<string, string> = {
   "6h": "6h",
   "12h": "12h",
   "1d": "1d",
+  "2d": "1d",
   "3d": "1d",
   "1w": "1d",
   "1M": "1d",

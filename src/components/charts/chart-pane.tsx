@@ -20,6 +20,7 @@ const PERIOD: Record<ChartInterval, Period> = {
   "6h": { type: "hour", span: 6 },
   "12h": { type: "hour", span: 12 },
   "1d": { type: "day", span: 1 },
+  "2d": { type: "day", span: 2 },
   "3d": { type: "day", span: 3 },
   "1w": { type: "week", span: 1 },
   "1M": { type: "month", span: 1 },
@@ -30,7 +31,9 @@ const LIMIT = 500;
 const POLL_MS = 15_000;
 /** Ferramentas cujo dado extra é o texto (as outras guardam extensão, níveis etc.). */
 const TEXT_TOOLS = new Set(["simpleAnnotation", "simpleTag"]);
-const PRICE_ONLY = new Set(["fixedRangeVolumeProfile", "fibonacciLine"]);
+const PRICE_ONLY = new Set(["fixedRangeVolumeProfile", "fibonacciLine", "anchoredVwap"]);
+/** Indicadores com níveis de referência (linhas tracejadas configuráveis). */
+const LEVEL_DEFAULTS: Record<string, number[]> = { RSI: [30, 50, 70], RSI_DIV: [30, 50, 70] };
 /** Cores padrão das linhas dos indicadores (as mesmas da biblioteca). */
 export const DEFAULT_LINE_COLORS = ["#FF9600", "#935EBD", "#2196F3", "#E11D74", "#01C5C4"];
 
@@ -114,6 +117,25 @@ async function loadCandles(symbol: string, interval: ChartInterval, end: number 
   const res = await fetch(`/api/candles?${q}`);
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Preços indisponíveis");
   return (await res.json()) as KLineData[];
+}
+
+/** Linhas tracejadas nos níveis de referência (ex.: RSI 30/50/70). Devolve false: a biblioteca desenha o resto. */
+function drawLevels({ ctx, indicator, bounding, yAxis }: { ctx: CanvasRenderingContext2D; indicator: Indicator; bounding: { width: number }; yAxis: { convertToPixel: (v: number) => number } }) {
+  const levels = (indicator.extendData as { levels?: number[] } | undefined)?.levels ?? [];
+  if (!indicator.visible || !levels.length) return false;
+  ctx.save();
+  ctx.strokeStyle = "#71717a";
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1;
+  for (const l of levels) {
+    const y = Math.round(yAxis.convertToPixel(l)) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(bounding.width, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  return false;
 }
 
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -551,6 +573,9 @@ export function ChartPane({
           visible: ind.visible !== false,
           zLevel: index,
           ...(ind.options?.types ? { extendData: { types: ind.options.types } } : {}),
+          ...(LEVEL_DEFAULTS[ind.name] ? { extendData: { levels: ind.options?.levels ?? LEVEL_DEFAULTS[ind.name] } } : {}),
+          // RSI da biblioteca: acrescenta as linhas de referência e deixa o resto como está.
+          ...(ind.name === "RSI" ? { draw: (p: Parameters<typeof drawLevels>[0]) => drawLevels(p), minValue: 0, maxValue: 100 } : {}),
           ...(main ? { paneId: "candle_pane" } : ind.paneKey ? { paneId: `p_${ind.paneKey}` } : {}),
           // Legenda: nome, parâmetros e valores podem ser escondidos; ícones aparecem com o mouse no painel.
           createTooltipDataSource: ({ indicator, crosshair }) => {

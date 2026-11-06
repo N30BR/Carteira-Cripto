@@ -4,7 +4,7 @@
 // As regras (níveis do Fibonacci, faixa em log) ficam em lib/charts e são testadas sem navegador.
 import { registerOverlay, registerYAxis, type KLineData, type OverlayFigure } from "klinecharts";
 import { DEFAULT_FIB_LEVELS, fibPrice, findBarIndex } from "@/lib/charts/drawing";
-import { volumeProfile } from "@/lib/charts/indicators";
+import { anchoredVwap, volumeProfile } from "@/lib/charts/indicators";
 import { fromLog, logRange, logTickValues, toLog, type AxisRange } from "@/lib/charts/log-axis";
 import type { ExtendName, FibLevel } from "@/lib/charts/workspace";
 
@@ -147,6 +147,43 @@ export function registerOverlaysAndAxes(): void {
         // Linha do meio, tracejada.
         { type: "line", attrs: { coordinates: [{ x: a.x, y: a.y + dy / 2 }, { x: b.x, y: b.y + dy / 2 }] }, styles: { style: "dashed", dashedValue: [4, 4] }, ignoreEvent: true },
       ];
+    },
+  });
+
+  // ---------- VWAP ancorado: 1 clique escolhe a vela da âncora ----------
+  const avwapMemo = new Map<string, { key: string; values: (number | null)[] }>();
+  registerOverlay({
+    name: "anchoredVwap",
+    totalStep: 2,
+    needDefaultPointFigure: true,
+    needDefaultXAxisFigure: true,
+    createPointFigures: ({ chart, overlay, xAxis, yAxis, coordinates }) => {
+      const [p] = overlay.points;
+      const data: KLineData[] = chart.getDataList();
+      if (!coordinates.length || !xAxis || !yAxis || !data.length || typeof p?.timestamp !== "number") return [];
+      const from = findBarIndex(data.map((d) => d.timestamp), p.timestamp);
+      const last = data[data.length - 1];
+      const key = `${from}:${data.length}:${last.timestamp}:${last.close}:${last.volume}`;
+      let memo = avwapMemo.get(overlay.id);
+      if (!memo || memo.key !== key) {
+        memo = { key, values: anchoredVwap(data.map((d) => ({ ...d, volume: d.volume ?? 0 })), from) };
+        avwapMemo.set(overlay.id, memo);
+      }
+      const range = chart.getVisibleRange();
+      const pts: { x: number; y: number }[] = [];
+      for (let i = Math.max(from, range.from - 1); i < Math.min(data.length, range.to + 1); i++) {
+        const v = memo.values[i];
+        if (v !== null) pts.push({ x: xAxis.convertToPixel(i), y: yAxis.convertToPixel(v) });
+      }
+      const color = (overlay.styles?.line as { color?: string } | undefined)?.color ?? "#f59e0b";
+      const lastV = memo.values[data.length - 1];
+      const figures: OverlayFigure[] = [];
+      if (pts.length > 1) figures.push({ type: "line", attrs: { coordinates: pts }, styles: { color } });
+      if (lastV !== null && pts.length) {
+        const end = pts[pts.length - 1];
+        figures.push({ type: "text", attrs: { x: end.x - 4, y: end.y - 4, text: `VWAP ancorado ${fmt(lastV)}`, align: "right", baseline: "bottom" }, styles: { color, backgroundColor: "transparent", size: 11 }, ignoreEvent: true });
+      }
+      return figures;
     },
   });
 

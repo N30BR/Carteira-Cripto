@@ -4,6 +4,7 @@
 import { useState } from "react";
 import {
   AlignJustify,
+  Anchor,
   ArrowRight,
   ArrowUp,
   ChartBarBig,
@@ -58,6 +59,7 @@ export const TOOL_ICON: Record<string, LucideIcon> = {
   rectangle: Square,
   measure: Ruler,
   fixedRangeVolumeProfile: ChartBarBig,
+  anchoredVwap: Anchor,
   simpleAnnotation: MessageSquare,
   simpleTag: Tag,
 };
@@ -88,7 +90,7 @@ export const TOOL_GROUPS: { id: string; label: string; sections: { title: string
   },
   { id: "fib", label: "Fibonacci", sections: [{ title: "Fibonacci", tools: ["fibonacciLine"] }] },
   { id: "shapes", label: "Formas", sections: [{ title: "Formas", tools: ["rectangle"] }] },
-  { id: "measure", label: "Medição e volume", sections: [{ title: "Medição", tools: ["measure", "fixedRangeVolumeProfile"] }] },
+  { id: "measure", label: "Medição e volume", sections: [{ title: "Medição e volume", tools: ["measure", "fixedRangeVolumeProfile", "anchoredVwap"] }] },
   { id: "text", label: "Texto", sections: [{ title: "Texto", tools: ["simpleAnnotation", "simpleTag"] }] },
 ];
 
@@ -235,6 +237,7 @@ export const INTERVAL_LABEL: Record<ChartInterval, string> = {
   "6h": "6h",
   "12h": "12h",
   "1d": "1D",
+  "2d": "2D",
   "3d": "3D",
   "1w": "1S",
   "1M": "1M",
@@ -251,6 +254,7 @@ const INTERVAL_NAME: Record<ChartInterval, string> = {
   "6h": "6 horas",
   "12h": "12 horas",
   "1d": "1 dia",
+  "2d": "2 dias",
   "3d": "3 dias",
   "1w": "1 semana",
   "1M": "1 mês",

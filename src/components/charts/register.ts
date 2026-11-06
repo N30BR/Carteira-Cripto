@@ -147,7 +147,7 @@ export function registerChartExtensions(): void {
     maxValue: 100,
     figures: lines(["rsi"], ["RSI"]),
     calc: (data, ind) => rsi(data.map((b) => b.close), ind.calcParams[0]).map((v) => ({ rsi: v })),
-    draw: ({ ctx, chart, indicator, xAxis, yAxis }) => {
+    draw: ({ ctx, chart, indicator, bounding, xAxis, yAxis }) => {
       if (!indicator.visible) return false;
       const data = chart.getDataList();
       const values = indicator.result as Row[];
@@ -160,6 +160,19 @@ export function registerChartExtensions(): void {
       }
       const range = chart.getVisibleRange();
       const divs = memo.divs.filter((d) => d.to >= range.from && d.from <= range.to);
+      // Níveis de referência (padrão 30/50/70).
+      const levels = (indicator.extendData as { levels?: number[] } | undefined)?.levels ?? [30, 50, 70];
+      ctx.save();
+      ctx.strokeStyle = "#71717a";
+      ctx.setLineDash([4, 4]);
+      for (const l of levels) {
+        const y = Math.round(yAxis.convertToPixel(l)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(bounding.width, y);
+        ctx.stroke();
+      }
+      ctx.restore();
       ctx.save();
       ctx.font = "11px sans-serif";
       for (const d of divs) {
@@ -195,7 +208,7 @@ export function registerChartExtensions(): void {
     name: "VOLUME_PROFILE",
     shortName: "Volume Profile",
     series: "price",
-    calcParams: [24],
+    calcParams: [24, 70],
     figures: [],
     calc: (data) => data.map(() => ({})),
     draw: ({ ctx, chart, indicator, bounding, yAxis }) => {
@@ -204,10 +217,10 @@ export function registerChartExtensions(): void {
       const range = chart.getVisibleRange();
       // Recalcula só quando as velas ou a faixa visível mudam (não a cada movimento do mouse).
       const rows = Math.max(4, Math.min(200, indicator.calcParams[0] || 24));
-      const key = `${dataKey(data)}:${range.from}:${range.to}:${rows}`;
+      const key = `${dataKey(data)}:${range.from}:${range.to}:${rows}:${indicator.calcParams[1] ?? 70}`;
       let memo = vpMemo.get(indicator.id);
       if (!memo || memo.key !== key) {
-        memo = { key, vp: volumeProfile(bars(data), range.from, range.to - 1, rows) };
+        memo = { key, vp: volumeProfile(bars(data), range.from, range.to - 1, rows, Math.max(10, Math.min(100, indicator.calcParams[1] ?? 70)) / 100) };
         vpMemo.set(indicator.id, memo);
       }
       const vp = memo.vp;

@@ -23,7 +23,7 @@ export function AppHeader({ user, disabled }: { user: SessionUser; disabled: Mod
     ...(user.isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];
   return (
-    <header className="border-b border-border/60">
+    <header className="border-b border-border/60 bg-background">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 md:h-14 md:flex-nowrap md:py-0">
         <Link href="/sobre" aria-label="Sobre o BlackHole Dashboard" className="shrink-0">
           <Logo />

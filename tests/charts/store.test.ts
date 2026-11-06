@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { testDb } from "../helpers/db";
 import { users } from "@/db/schema";
-import { DEFAULT_INTERVALS, defaultTab, LIMITS } from "@/lib/charts/workspace";
+import { CHART_TOOLS, DEFAULT_INTERVALS, defaultTab, LIMITS } from "@/lib/charts/workspace";
 import { getChartPrefs, listChartTabs } from "@/lib/charts/store";
 import { resetChartLimits } from "@/lib/charts/limit";
 
@@ -77,8 +77,9 @@ describe("abas de gráficos na conta", () => {
   test("preferências de ferramentas e aba aberta", async () => {
     expect(getChartPrefs(db(), state.userId).tools.favorites.length).toBeGreaterThan(0);
     const [tab] = listChartTabs(db(), state.userId);
-    expect(await saveChartPrefsAction({ visible: ["segment"], favorites: ["fibonacciLine"] }, tab.id)).toEqual({ ok: true });
-    expect(getChartPrefs(db(), state.userId)).toEqual({ tools: { visible: ["segment", "fibonacciLine"], favorites: ["fibonacciLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [] }, activeTabId: tab.id });
+    const known = CHART_TOOLS.map((t) => t.name);
+    expect(await saveChartPrefsAction({ visible: ["segment"], favorites: ["fibonacciLine"], known }, tab.id)).toEqual({ ok: true });
+    expect(getChartPrefs(db(), state.userId)).toEqual({ tools: { visible: ["segment", "fibonacciLine"], favorites: ["fibonacciLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [], known }, activeTabId: tab.id });
     expect((await saveChartPrefsAction("x" as never, null)).ok).toBe(false);
     // aba de outra pessoa não vira a aba aberta
     const theirs = listChartTabs(db(), other)[0];

@@ -290,9 +290,9 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByRole("button", { name: "Lista de desenhos" }).click();
   await expect(page.getByRole("list", { name: "Lista de desenhos" }).getByRole("listitem")).toHaveCount(1);
   await page.keyboard.press("Escape");
-  // Tempos da barra: 14 no menu, no máximo 8 marcados
+  // Tempos da barra: 15 no menu, no máximo 8 marcados
   await page.getByRole("button", { name: "Personalizar tempos" }).click();
-  await expect(page.getByRole("menuitemcheckbox")).toHaveCount(14);
+  await expect(page.getByRole("menuitemcheckbox")).toHaveCount(15);
   await page.keyboard.press("Escape");
 
   // Atalhos: só pelo menu de perfil (não é aba)

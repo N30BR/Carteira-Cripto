@@ -78,9 +78,10 @@ describe("estado de uma aba de gráficos", () => {
 describe("preferências das ferramentas", () => {
   test("visíveis e favoritas: só ferramentas conhecidas, sem repetição; favoritas também visíveis", () => {
     expect(CHART_TOOLS.length).toBeGreaterThanOrEqual(15);
-    expect(sanitizePrefs({ visible: ["segment", "segment", "fibonacciLine", "hack"], favorites: ["fibonacciLine", "priceLine"] })).toEqual({
+    const known = CHART_TOOLS.map((t) => t.name);
+    expect(sanitizePrefs({ visible: ["segment", "segment", "fibonacciLine", "hack"], favorites: ["fibonacciLine", "priceLine"], known })).toEqual({
       ok: true,
-      value: { visible: ["segment", "fibonacciLine", "priceLine"], favorites: ["fibonacciLine", "priceLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [] },
+      value: { visible: ["segment", "fibonacciLine", "priceLine"], favorites: ["fibonacciLine", "priceLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [], known },
     });
     expect(sanitizePrefs("x").ok).toBe(false);
   });
@@ -185,8 +186,9 @@ describe("comparações: sobre o preço ou em painel separado", () => {
 
 describe("preferências: tempos da barra e indicadores favoritos", () => {
   test("até 8 tempos conhecidos, na ordem do menor para o maior; indicadores favoritos só conhecidos", () => {
-    const r = sanitizePrefs({ visible: [], favorites: [], intervals: ["1M", "1m", "1M", "6M", "x"], favoriteIndicators: ["RSI", "HACK", "RSI"] });
-    expect(r).toEqual({ ok: true, value: { visible: [], favorites: [], intervals: ["1m", "1M", "6M"], favoriteIndicators: ["RSI"] } });
+    const known = CHART_TOOLS.map((t) => t.name);
+    const r = sanitizePrefs({ visible: [], favorites: [], intervals: ["1M", "1m", "1M", "6M", "x"], favoriteIndicators: ["RSI", "HACK", "RSI"], known });
+    expect(r).toEqual({ ok: true, value: { visible: [], favorites: [], intervals: ["1m", "1M", "6M"], favoriteIndicators: ["RSI"], known } });
     const many = sanitizePrefs({ visible: [], favorites: [], intervals: ["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h", "1d"] });
     expect(many.ok && many.value.intervals).toHaveLength(8);
   });
@@ -196,5 +198,31 @@ describe("preferências: tempos da barra e indicadores favoritos", () => {
     expect(r.ok && r.value.intervals).toEqual(DEFAULT_INTERVALS);
     const empty = sanitizePrefs({ visible: [], favorites: [], intervals: [] });
     expect(empty.ok && empty.value.intervals).toEqual(DEFAULT_INTERVALS);
+  });
+});
+
+describe("níveis de referência do RSI e novas ferramentas", () => {
+  test("níveis entre 0 e 100, no máximo 5; VWAP ancorado é uma ferramenta", () => {
+    const one = (levels: unknown) =>
+      sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), indicators: [{ name: "RSI", params: [14], pane: "sub", options: { levels } }] }] });
+    const r = one([30, 50, 70]);
+    expect(r.ok && r.value.panes[0].indicators[0].options).toEqual({ levels: [30, 50, 70] });
+    expect(one([101]).ok).toBe(false);
+    expect(one([1, 2, 3, 4, 5, 6]).ok).toBe(false);
+    expect(one(["x"]).ok).toBe(false);
+    expect(CHART_TOOLS.map((t) => t.name)).toContain("anchoredVwap");
+  });
+});
+
+describe("ferramentas novas aparecem para quem já tinha preferências salvas", () => {
+  test("preferências antigas (sem 'known'): ferramentas criadas depois entram como visíveis", () => {
+    const r = sanitizePrefs({ visible: ["segment"], favorites: [] });
+    expect(r.ok && r.value.visible).toEqual(expect.arrayContaining(["segment", "parallelChannel", "fixedRangeVolumeProfile", "anchoredVwap"]));
+    expect(r.ok && r.value.visible).not.toContain("rectangle"); // escondida pela pessoa continua escondida
+  });
+  test("com 'known': só o que não existia ainda entra; o que a pessoa escondeu continua escondido", () => {
+    const r = sanitizePrefs({ visible: ["segment"], favorites: [], known: CHART_TOOLS.map((t) => t.name).filter((n) => n !== "anchoredVwap") });
+    expect(r.ok && r.value.visible).toEqual(["segment", "anchoredVwap"]);
+    expect(r.ok && r.value.known).toEqual(CHART_TOOLS.map((t) => t.name));
   });
 });

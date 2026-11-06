@@ -18,6 +18,21 @@ export function ema(values: number[], period: number): N[] {
   return out;
 }
 
+/** VWAP ancorado: a partir da vela `from`, média do preço típico (máx+mín+fech)/3 ponderada pelo volume. */
+export function anchoredVwap(bars: Bar[], from: number): N[] {
+  const out: N[] = bars.map(() => null);
+  let pv = 0;
+  let vol = 0;
+  for (let i = Math.max(0, from); i < bars.length; i++) {
+    const b = bars[i];
+    const v = b.volume ?? 0;
+    pv += ((b.high + b.low + b.close) / 3) * v;
+    vol += v;
+    out[i] = vol > 0 ? pv / vol : null;
+  }
+  return out;
+}
+
 /** RSI de Wilder (0–100). */
 export function rsi(closes: number[], period: number): N[] {
   const out: N[] = closes.map(() => null);

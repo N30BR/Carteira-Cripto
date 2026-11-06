@@ -35,7 +35,7 @@ export const CHART_INDICATORS: { name: string; label: string; pane: "main" | "su
   { name: "SAR", label: "Parabolic SAR", pane: "main", params: [2, 2, 20] },
   { name: "BBI", label: "BBI", pane: "main", params: [3, 6, 12, 24] },
   { name: "ICHIMOKU", label: "Ichimoku", pane: "main", params: [9, 26, 52] },
-  { name: "VOLUME_PROFILE", label: "Volume Profile (faixa visível)", pane: "main", params: [24] },
+  { name: "VOLUME_PROFILE", label: "Volume Profile (faixa visível)", pane: "main", params: [24, 70] },
   { name: "AVP", label: "Preço médio (AVP)", pane: "main", params: [] },
   { name: "LIQ_HEATMAP", label: "Heatmap de liquidações (estimado)", pane: "main", params: [] },
   // Em painel próprio
@@ -87,6 +87,7 @@ export const CHART_TOOLS: { name: string; label: string }[] = [
   { name: "rectangle", label: "Retângulo" },
   { name: "measure", label: "Medir (preço e %)" },
   { name: "fixedRangeVolumeProfile", label: "Perfil de volume (faixa fixa)" },
+  { name: "anchoredVwap", label: "VWAP ancorado" },
   { name: "simpleAnnotation", label: "Anotação" },
   { name: "simpleTag", label: "Etiqueta" },
 ];
@@ -115,7 +116,7 @@ export type IndicatorState = {
   /** O que mostrar na legenda (falso = escondido). O cálculo continua. */
   legend?: { name?: boolean; params?: boolean; values?: boolean };
   /** Opções além dos períodos (ex.: tipo de cada média do MA ribbon). */
-  options?: { types?: MaType[] };
+  options?: { types?: MaType[]; levels?: number[] };
 };
 export type FibLevel = { value: number; color: string; visible: boolean };
 export type OverlayStyleState = {
@@ -151,7 +152,34 @@ export type PaneState = {
   compares: CompareState[];
 };
 export type TabState = { layout: ChartLayout; panes: PaneState[] };
-export type ToolPrefs = { visible: string[]; favorites: string[]; intervals: ChartInterval[]; favoriteIndicators: string[] };
+export type ToolPrefs = {
+  visible: string[];
+  favorites: string[];
+  intervals: ChartInterval[];
+  favoriteIndicators: string[];
+  /** Ferramentas que já existiam quando as preferências foram salvas (as criadas depois entram visíveis). */
+  known?: string[];
+};
+/** Ferramentas da primeira versão (preferências salvas sem "known"). */
+const KNOWN_V1 = [
+  "segment",
+  "rayLine",
+  "straightLine",
+  "horizontalStraightLine",
+  "horizontalRayLine",
+  "horizontalSegment",
+  "verticalStraightLine",
+  "verticalRayLine",
+  "verticalSegment",
+  "priceLine",
+  "parallelStraightLine",
+  "priceChannelLine",
+  "fibonacciLine",
+  "rectangle",
+  "measure",
+  "simpleAnnotation",
+  "simpleTag",
+];
 /** Tempos que aparecem na barra superior (no máximo 8). */
 export const MAX_BAR_INTERVALS = 8;
 export const DEFAULT_INTERVALS: ChartInterval[] = ["1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M"];
@@ -171,6 +199,7 @@ export const defaultPrefs = (): ToolPrefs => ({
   favorites: [...DEFAULT_FAVORITE_TOOLS],
   intervals: [...DEFAULT_INTERVALS],
   favoriteIndicators: [],
+  known: CHART_TOOLS.map((t) => t.name),
 });
 
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -241,7 +270,10 @@ function sanitizeIndicatorExtras(v: Record<string, unknown>, out: IndicatorState
     if (!isObj(v.options)) return "Opções do indicador inválidas";
     const t = v.options.types;
     if (t !== undefined && (!Array.isArray(t) || t.length > LIMITS.paramsPerIndicator || !t.every((x) => oneOf(MA_TYPES, x)))) return "Opções do indicador inválidas";
-    out.options = t === undefined ? {} : { types: t as MaType[] };
+    // Níveis de referência (ex.: RSI 30/50/70): de 0 a 100, no máximo 5.
+    const lv = v.options.levels;
+    if (lv !== undefined && (!Array.isArray(lv) || lv.length > 5 || !lv.every((x) => isNum(x) && x >= 0 && x <= 100))) return "Opções do indicador inválidas";
+    out.options = { ...(t === undefined ? {} : { types: t as MaType[] }), ...(lv === undefined ? {} : { levels: lv as number[] }) };
   }
   return null;
 }
@@ -389,11 +421,16 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
   if (!isObj(v) || !Array.isArray(v.visible) || !Array.isArray(v.favorites)) return fail("Preferências inválidas");
   const pick = (list: unknown[]) => [...new Set(list.filter((t): t is string => typeof t === "string" && TOOL_NAMES.has(t)))];
   const favorites = pick(v.favorites);
-  const visible = [...new Set([...pick(v.visible), ...favorites])];
+  const known = Array.isArray(v.known) ? pick(v.known) : KNOWN_V1;
+  const added = CHART_TOOLS.map((t) => t.name).filter((n) => !known.includes(n));
+  const visible = [...new Set([...pick(v.visible), ...favorites, ...added])];
   // Tempos: só conhecidos, sem repetição, do menor para o maior, no máximo 8.
   const rawIntervals = Array.isArray(v.intervals) ? v.intervals : [];
   const intervals = CHART_INTERVALS.filter((i) => rawIntervals.includes(i)).slice(0, MAX_BAR_INTERVALS);
   const rawFav = Array.isArray(v.favoriteIndicators) ? v.favoriteIndicators : [];
   const favoriteIndicators = [...new Set(rawFav.filter((n): n is string => typeof n === "string" && INDICATOR_NAMES.has(n)))];
-  return { ok: true, value: { visible, favorites, intervals: intervals.length ? intervals : [...DEFAULT_INTERVALS], favoriteIndicators } };
+  return {
+    ok: true,
+    value: { visible, favorites, intervals: intervals.length ? intervals : [...DEFAULT_INTERVALS], favoriteIndicators, known: CHART_TOOLS.map((t) => t.name) },
+  };
 }

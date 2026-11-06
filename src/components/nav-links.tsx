@@ -30,9 +30,10 @@ export function NavLinks({ items }: { items: NavItem[] }) {
             aria-current={active ? "page" : undefined}
             className={cn(
               "relative shrink-0 rounded-md px-2.5 py-1.5 transition-colors",
+              // Cor do texto: o roxo do disco da logomarca (referência corbarra.png); o resto do estilo não muda.
               active
-                ? "bg-muted font-semibold text-foreground after:absolute after:inset-x-2.5 after:bottom-0.5 after:h-0.5 after:rounded-full after:bg-[#8b7cf6]"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                ? "bg-muted font-semibold text-[#a888c0] after:absolute after:inset-x-2.5 after:bottom-0.5 after:h-0.5 after:rounded-full after:bg-[#8b7cf6]"
+                : "text-[#a888c0] hover:bg-muted hover:text-[#cdb8e6]",
             )}
           >
             {l.label}

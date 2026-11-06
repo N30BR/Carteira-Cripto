@@ -162,3 +162,16 @@ describe("média simples e área de valor configurável", () => {
     expect(volumeProfile(bars, 0, 4, 5)).toEqual(volumeProfile(bars, 0, 4, 5, 0.7));
   });
 });
+
+describe("VWAP ancorado", () => {
+  test("começa na vela da âncora e acumula preço típico × volume desde ela", async () => {
+    const { anchoredVwap } = await import("@/lib/charts/indicators");
+    const bars = [
+      { timestamp: 0, open: 1, high: 1, low: 1, close: 1, volume: 100 },
+      { timestamp: 1, open: 10, high: 12, low: 9, close: 9, volume: 1 }, // típico 10
+      { timestamp: 2, open: 20, high: 21, low: 19, close: 20, volume: 3 }, // típico 20
+    ];
+    expect(anchoredVwap(bars, 1)).toEqual([null, 10, 17.5]);
+    expect(anchoredVwap(bars, 5)).toEqual([null, null, null]);
+  });
+});

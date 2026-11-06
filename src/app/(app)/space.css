@@ -1,0 +1,85 @@
+/* Fundo espacial global (referência fundo.png): camada fixa atrás de toda a aplicação.
+   Cartões, tabelas, gráficos e menus continuam com o próprio fundo por cima dela. */
+.bh-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 30% 50% at 0% 70%, rgba(126, 34, 206, 0.22), transparent 70%),
+    radial-gradient(ellipse 30% 50% at 100% 70%, rgba(126, 34, 206, 0.22), transparent 70%),
+    radial-gradient(ellipse 60% 18% at 50% 100%, rgba(168, 85, 247, 0.2), transparent 75%),
+    #000;
+}
+
+.bh-backdrop .bh-stars {
+  position: absolute;
+  inset: 0;
+}
+.bh-backdrop .bh-twinkle {
+  animation: bh-bg-twinkle 4s ease-in-out infinite;
+}
+@keyframes bh-bg-twinkle {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Chuva de código nas margens laterais. */
+.bh-backdrop .bh-rain {
+  position: absolute;
+  top: -40%;
+  font: 600 11px/1.15 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #c084fc;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 6px rgba(192, 132, 252, 0.8);
+  mask-image: linear-gradient(to bottom, transparent, #000 25%, #000 60%, transparent);
+  animation: bh-bg-fall linear infinite;
+}
+@keyframes bh-bg-fall {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(60%);
+  }
+}
+
+.bh-backdrop .bh-galaxy {
+  position: absolute;
+}
+.bh-backdrop .bh-galaxy-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bh-bg-spin 90s linear infinite;
+}
+@keyframes bh-bg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Chuva e galáxias só quando sobra margem livre ao lado do conteúdo (max-w-6xl = 72rem). */
+.bh-backdrop .bh-side {
+  display: none;
+}
+@media (min-width: 84rem) {
+  .bh-backdrop .bh-side {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bh-backdrop .bh-rain,
+  .bh-backdrop .bh-twinkle,
+  .bh-backdrop .bh-galaxy-spin {
+    animation: none;
+  }
+}

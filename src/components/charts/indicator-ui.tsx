@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CHART_INDICATORS, LIMITS, MA_TYPES, type IndicatorState, type MaType, type SeriesStyle } from "@/lib/charts/workspace";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ColorPicker, NumberInput, StyleMenu, WidthMenu } from "./object-ui";
 
@@ -31,7 +32,7 @@ const PARAM_LABELS: Record<string, string[]> = {
   SAR: ["Aceleração inicial (×0,01)", "Passo (×0,01)", "Máximo (×0,01)"],
   BBI: ["Média 1", "Média 2", "Média 3", "Média 4"],
   ICHIMOKU: ["Tenkan", "Kijun", "Senkou B"],
-  VOLUME_PROFILE: ["Linhas de preço"],
+  VOLUME_PROFILE: ["Linhas de preço", "Área de valor (%)"],
   VOL: ["Média 1 do volume", "Média 2 do volume", "Média 3 do volume"],
   MACD: ["Rápida", "Lenta", "Sinal"],
   RSI: ["RSI 1 — período", "RSI 2 — período", "RSI 3 — período"],
@@ -49,6 +50,9 @@ const PARAM_LABELS: Record<string, string[]> = {
   TRIX: ["Período", "Sinal"],
   AO: ["Curta", "Longa"],
 };
+
+/** Indicadores com níveis de referência editáveis (de 0 a 100, até 5). */
+const LEVELS = new Set(["RSI", "RSI_DIV"]);
 
 export type Figure = { key: string; title: string; line: boolean; color: string };
 export type MenuTarget = { index: number; x: number; y: number };
@@ -235,6 +239,25 @@ function IndicatorSettingsForm({
         ))}
       </div>
       <div className="flex max-h-[55vh] min-h-40 flex-col gap-3 overflow-auto py-1 text-sm">
+        {current === "inputs" && LEVELS.has(draft.name) && (
+          <div className="flex items-center gap-2">
+            <span className="w-44 shrink-0 text-muted-foreground">Níveis de referência</span>
+            <Input
+              aria-label="Níveis de referência"
+              className="h-8 w-40 text-sm"
+              defaultValue={(draft.options?.levels ?? [30, 50, 70]).join(", ")}
+              onKeyDown={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const levels = e.target.value
+                  .split(",")
+                  .map((x) => Number(x.trim()))
+                  .filter((n) => Number.isFinite(n) && n >= 0 && n <= 100)
+                  .slice(0, 5);
+                setDraft((d) => ({ ...d, options: { ...d.options, levels } }));
+              }}
+            />
+          </div>
+        )}
         {current === "inputs" &&
           draft.params.map((p, i) => (
             <div key={i} className="flex items-center gap-2">

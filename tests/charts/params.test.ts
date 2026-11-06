@@ -3,7 +3,7 @@ import { CHART_INTERVALS, CHART_QUOTES, aggregateCandles, parseCandleQuery, spli
 
 describe("parâmetros das velas", () => {
   test("tempos aceitos e cotações USDT/BTC/ETH", () => {
-    expect(CHART_INTERVALS).toEqual(["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h", "1d", "3d", "1w", "1M", "6M", "1y"]);
+    expect(CHART_INTERVALS).toEqual(["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h", "1d", "2d", "3d", "1w", "1M", "6M", "1y"]);
     expect(CHART_QUOTES).toEqual(["USDT", "BTC", "ETH"]);
   });
 
@@ -64,5 +64,18 @@ describe("velas de 6 meses e 1 ano (montadas a partir das mensais)", () => {
   test("sem compra agressora em alguma mensal: o período fica sem esse dado (não inventa)", () => {
     const r = aggregateCandles([m(2024, 0, 1, 2, 1, 2, 1, 1), m(2024, 1, 2, 3, 2, 3, 1)], "6M");
     expect(r[0].buyVolume).toBeUndefined();
+  });
+});
+
+describe("vela de 2 dias (montada a partir das diárias)", () => {
+  const DAY = 86_400_000;
+  const d = (n: number, o: number, h: number, l: number, c: number, v: number) => ({ timestamp: n * DAY, open: o, high: h, low: l, close: c, volume: v });
+  test("2D junta pares de dias alinhados ao calendário (desde 01/01/1970), sem inventar dias", () => {
+    expect(CHART_INTERVALS).toContain("2d");
+    const r = aggregateCandles([d(20000, 1, 3, 1, 2, 5), d(20001, 2, 4, 1.5, 3, 7), d(20002, 3, 3.5, 2, 2.5, 1)], "2d");
+    expect(r).toEqual([
+      { timestamp: 20000 * DAY, open: 1, high: 4, low: 1, close: 3, volume: 12 },
+      { timestamp: 20002 * DAY, open: 3, high: 3.5, low: 2, close: 2.5, volume: 1 },
+    ]);
   });
 });

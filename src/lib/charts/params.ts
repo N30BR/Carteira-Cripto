@@ -1,10 +1,16 @@
 // Parâmetros da aba Gráficos (sem dependências de banco ou navegador).
 
-// "1m" = 1 minuto; "1M" = 1 mês; "1w" = 1 semana (aparece como "1S"); "6M" e "1y" são montados a partir das mensais.
-export const CHART_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h", "1d", "3d", "1w", "1M", "6M", "1y"] as const;
+// "1m" = 1 minuto; "1M" = 1 mês; "1w" = 1 semana (aparece como "1S").
+// "2d" é montado a partir das diárias; "6M" e "1y", a partir das mensais.
+export const CHART_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h", "1d", "2d", "3d", "1w", "1M", "6M", "1y"] as const;
 export type ChartInterval = (typeof CHART_INTERVALS)[number];
-/** Tempos que a Binance não tem: quantos meses cada vela junta. */
-export const AGGREGATED: Partial<Record<ChartInterval, number>> = { "6M": 6, "1y": 12 };
+/** Tempos que a Binance não tem: de qual tempo vêm e quantas velas dele cada uma junta. */
+export const AGGREGATED: Partial<Record<ChartInterval, { base: "1d" | "1M"; count: number }>> = {
+  "2d": { base: "1d", count: 2 },
+  "6M": { base: "1M", count: 6 },
+  "1y": { base: "1M", count: 12 },
+};
+const DAY_MS = 86_400_000;
 
 /** Cotações aceitas nos pares (ex.: BTCUSDT, SOLBTC, LINKETH). */
 export const CHART_QUOTES = ["USDT", "BTC", "ETH"] as const;
@@ -39,14 +45,21 @@ export function splitSymbol(symbol: string): { base: string; quote: ChartQuote }
 
 type Bar = { timestamp: number; open: number; high: number; low: number; close: number; volume: number; buyVolume?: number };
 
-/** Junta velas mensais em semestres (jan–jun, jul–dez) ou anos, pelo calendário UTC. */
-export function aggregateCandles<T extends Bar>(monthly: T[], interval: "6M" | "1y"): Bar[] {
-  const span = AGGREGATED[interval] as number;
+/**
+ * Junta velas: diárias em pares de dias (alinhados a 01/01/1970, UTC) para 2D; mensais em
+ * semestres (jan–jun, jul–dez) para 6M ou anos para 1A, pelo calendário UTC.
+ */
+export function aggregateCandles<T extends Bar>(source: T[], interval: "2d" | "6M" | "1y"): Bar[] {
+  const { base, count } = AGGREGATED[interval] as { base: "1d" | "1M"; count: number };
+  const bucket = (ts: number) => {
+    if (base === "1d") return Math.floor(ts / (count * DAY_MS)) * count * DAY_MS;
+    const d = new Date(ts);
+    return Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / count) * count, 1);
+  };
   const out: Bar[] = [];
   let missingBuy = false;
-  for (const k of monthly) {
-    const d = new Date(k.timestamp);
-    const start = Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / span) * span, 1);
+  for (const k of source) {
+    const start = bucket(k.timestamp);
     const last = out.at(-1);
     if (!last || last.timestamp !== start) {
       missingBuy = k.buyVolume === undefined;
