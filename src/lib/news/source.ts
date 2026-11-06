@@ -10,7 +10,8 @@ const MIN = 60_000;
 /** Intervalo mínimo entre buscas na Forex Factory (o feed muda pouco; respeita a fonte). */
 const REFRESH = 30 * MIN;
 const FAIL_COOLDOWN = 15 * MIN;
-const KEY = "news:events:v1";
+/** v2: passou a guardar também os eventos de impacto baixo (★). */
+const KEY = "news:events:v2";
 
 type Stored = { events: NewsEvent[]; fetchedAt: number | null; coveredUntil: number | null; lastError: number | null };
 

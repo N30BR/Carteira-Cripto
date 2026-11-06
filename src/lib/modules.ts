@@ -2,7 +2,7 @@
 // Lançamentos e Ativos ficam sempre visíveis; Admin segue a regra de administrador; /sobre é fixa.
 // Desligar um módulo só esconde e tira das contas: nenhum registro é apagado.
 
-export const MODULE_KEYS = ["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "todos"] as const;
+export const MODULE_KEYS = ["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "macro", "todos"] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
 export type ModuleInfo = { key: ModuleKey; label: string; menuLabel: string; href: string };
@@ -16,6 +16,7 @@ export const MODULES: ModuleInfo[] = [
   { key: "summary", label: "Resumo", menuLabel: "Resumo", href: "/resumo" },
   { key: "charts", label: "Gráficos", menuLabel: "Gráficos", href: "/graficos" },
   { key: "news", label: "Notícias", menuLabel: "Notícias", href: "/noticias" },
+  { key: "macro", label: "Macro", menuLabel: "Macro (Panorama Macro)", href: "/macro" },
   { key: "todos", label: "Pendências", menuLabel: "Pendências", href: "/pendencias" },
 ];
 

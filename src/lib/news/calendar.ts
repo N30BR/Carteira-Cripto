@@ -1,7 +1,7 @@
 // Calendário econômico da aba Notícias: leitura da fonte, períodos, filtros e agrupamento (funções puras).
 //
 // Fonte gratuita usada: Forex Factory (feed público da semana, sem chave). Classificação de impacto da própria
-// fonte, convertida assim: "High" → ★★★, "Medium" → ★★; "Low", "Holiday" e "Non-Economic" ficam de fora.
+// fonte, convertida assim: "High" → ★★★, "Medium" → ★★, "Low" → ★; "Holiday" e "Non-Economic" ficam de fora.
 // Cobre USD, JPY e EUR (não cobre BRL). Não traz o valor divulgado ("Atual").
 
 export type RegionId = "US" | "JP" | "BR" | "EU";
@@ -14,11 +14,11 @@ export const REGIONS: { id: RegionId; label: string; short: string; currency: st
 const REGION_IDS = REGIONS.map((r) => r.id);
 const BY_CURRENCY: Record<string, RegionId> = { USD: "US", JPY: "JP", BRL: "BR", EUR: "EU" };
 
-export const NEWS_PERIODS = ["1d", "3d", "7d", "1m", "3m"] as const;
+export const NEWS_PERIODS = ["1d", "7d", "1m"] as const;
 export type NewsPeriod = (typeof NEWS_PERIODS)[number];
-export const PERIOD_LABEL: Record<NewsPeriod, string> = { "1d": "1 dia", "3d": "3 dias", "7d": "7 dias", "1m": "1 mês", "3m": "3 meses" };
+export const PERIOD_LABEL: Record<NewsPeriod, string> = { "1d": "1 dia", "7d": "7 dias", "1m": "1 mês" };
 
-export type Stars = 2 | 3;
+export type Stars = 1 | 2 | 3;
 export type NewsEvent = {
   id: string;
   title: string;
@@ -34,10 +34,10 @@ export type NewsEvent = {
   source: "forexfactory";
 };
 
-const IMPACT: Record<string, Stars> = { High: 3, Medium: 2 };
+const IMPACT: Record<string, Stars> = { High: 3, Medium: 2, Low: 1 };
 const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 40) : null);
 
-/** Feed semanal da Forex Factory → eventos de ★★ e ★★★ das regiões cobertas, em ordem de horário. */
+/** Feed semanal da Forex Factory → eventos de ★, ★★ e ★★★ das regiões cobertas, em ordem de horário. */
 export function parseForexFactory(json: unknown, now = Date.now()): NewsEvent[] {
   if (!Array.isArray(json)) throw new Error("Forex Factory: resposta inesperada");
   const out: NewsEvent[] = [];
@@ -90,8 +90,7 @@ const addMonths = (date: string, n: number) => {
 /** Intervalo de datas (inclusive) do período, a partir de hoje no fuso do app. */
 export function periodRange(period: NewsPeriod, tz: string, now = new Date()): { from: string; to: string } {
   const from = localDate(now.getTime(), tz);
-  const to =
-    period === "1d" ? from : period === "3d" ? addDays(from, 2) : period === "7d" ? addDays(from, 6) : period === "1m" ? addMonths(from, 1) : addMonths(from, 3);
+  const to = period === "1d" ? from : period === "7d" ? addDays(from, 6) : addMonths(from, 1);
   return { from, to };
 }
 
@@ -106,8 +105,7 @@ export type DayGroup = { date: string; weekday: string; label: string; events: N
 export type MonthGroup = { key: string; label: string; days: DayGroup[] };
 
 /**
- * Organiza por mês → dia → importância (★★★ antes) → horário. Só eventos dentro do intervalo.
- * Em 3 meses, todos os meses do intervalo aparecem (mesmo sem eventos); nos outros períodos, só os que têm eventos.
+ * Organiza por mês → dia → importância (★★★ antes) → horário. Só eventos dentro do intervalo (e só os meses com eventos).
  */
 export function groupEvents(events: NewsEvent[], period: NewsPeriod, tz: string, range: { from: string; to: string }): { months: MonthGroup[] } {
   const byDay = new Map<string, NewsEvent[]>();
@@ -124,9 +122,6 @@ export function groupEvents(events: NewsEvent[], period: NewsPeriod, tz: string,
     }
     return months.get(key)!;
   };
-  if (period === "3m") {
-    for (let k = range.from.slice(0, 7); k <= range.to.slice(0, 7); k = addMonths(`${k}-01`, 1).slice(0, 7)) monthOf(k);
-  }
   for (const date of [...byDay.keys()].sort()) {
     const list = byDay.get(date)!.sort((a, b) => b.stars - a.stars || a.ts - b.ts);
     const wd = WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()];
@@ -147,17 +142,19 @@ export function mergeEvents(stored: NewsEvent[], fresh: NewsEvent[], window: { f
 
 export type NewsPrefs = { period: NewsPeriod; regions: RegionId[]; stars: Stars[] };
 export const NEWS_COOKIE = "noticias-filtros";
-export const DEFAULT_NEWS_PREFS: NewsPrefs = { period: "7d", regions: [...REGION_IDS], stars: [2, 3] };
+export const DEFAULT_NEWS_PREFS: NewsPrefs = { period: "7d", regions: [...REGION_IDS], stars: [1, 2, 3] };
 
 /** Filtros salvos no cookie (só valores conhecidos; inválido → padrão). */
 export function parseNewsPrefs(raw: string | undefined): NewsPrefs {
   if (!raw) return { ...DEFAULT_NEWS_PREFS, regions: [...DEFAULT_NEWS_PREFS.regions], stars: [...DEFAULT_NEWS_PREFS.stars] };
   try {
-    const v = JSON.parse(raw.startsWith("%") ? decodeURIComponent(raw) : raw) as Partial<Record<keyof NewsPrefs, unknown>>;
+    const v = JSON.parse(raw.startsWith("%") ? decodeURIComponent(raw) : raw) as Partial<Record<keyof NewsPrefs | "v", unknown>>;
     const period = (NEWS_PERIODS as readonly unknown[]).includes(v.period) ? (v.period as NewsPeriod) : DEFAULT_NEWS_PREFS.period;
     const regions = Array.isArray(v.regions) ? REGION_IDS.filter((r) => (v.regions as unknown[]).includes(r)) : [];
-    const stars = Array.isArray(v.stars) ? ([3, 2] as Stars[]).filter((s) => (v.stars as unknown[]).includes(s)) : [];
-    return { period, regions: regions.length ? regions : [...REGION_IDS], stars: stars.length ? stars : [2, 3] };
+    let stars = Array.isArray(v.stars) ? ([3, 2, 1] as Stars[]).filter((s) => (v.stars as unknown[]).includes(s)) : [];
+    // Filtro salvo antes de existir ★ com as duas opções de então marcadas (= "todas"): passa a incluir ★.
+    if (stars.length === 2 && stars.includes(3) && stars.includes(2) && !(v.stars as unknown[]).includes(1) && v.v !== 2) stars = [3, 2, 1];
+    return { period, regions: regions.length ? regions : [...REGION_IDS], stars: stars.length ? stars : [...DEFAULT_NEWS_PREFS.stars] };
   } catch {
     return parseNewsPrefs(undefined);
   }

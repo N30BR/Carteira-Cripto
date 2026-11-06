@@ -23,12 +23,13 @@ describe("Forex Factory (gratuita): leitura", () => {
     { title: "Outro país", country: "GBP", date: "2026-11-06T02:00:00-05:00", impact: "High", forecast: "", previous: "" },
   ];
 
-  test("só EUA, Japão e Zona do Euro; Alto = ★★★, Médio = ★★; Baixo e feriados ficam fora", () => {
+  test("só EUA, Japão e Zona do Euro; Alto = ★★★, Médio = ★★, Baixo = ★; feriados ficam fora", () => {
     const ev = parseForexFactory(feed);
     expect(ev.map((e) => [e.region, e.stars])).toEqual([
       ["JP", 3],
       ["EU", 2],
       ["US", 3],
+      ["US", 1],
     ]);
     const nfp = ev.find((e) => e.title.startsWith("Non-Farm"))!;
     expect(nfp).toMatchObject({ currency: "USD", forecast: "65K", previous: "29K", actual: null, ts: Date.parse("2026-11-06T13:30:00Z") });
@@ -42,13 +43,11 @@ describe("Forex Factory (gratuita): leitura", () => {
 
 describe("períodos (no fuso do app)", () => {
   const now = new Date("2026-11-06T15:00:00Z"); // 12h em São Paulo
-  test("1 dia, 3 dias, 7 dias, 1 mês e 3 meses (mesmo dia do mês seguinte, respeitando o calendário)", () => {
-    expect(NEWS_PERIODS).toEqual(["1d", "3d", "7d", "1m", "3m"]);
+  test("1 dia, 7 dias e 1 mês (mesmo dia do mês seguinte, respeitando o calendário); sem 3 dias e 3 meses", () => {
+    expect(NEWS_PERIODS).toEqual(["1d", "7d", "1m"]);
     expect(periodRange("1d", TZ, now)).toEqual({ from: "2026-11-06", to: "2026-11-06" });
-    expect(periodRange("3d", TZ, now)).toEqual({ from: "2026-11-06", to: "2026-11-08" });
     expect(periodRange("7d", TZ, now)).toEqual({ from: "2026-11-06", to: "2026-11-12" });
     expect(periodRange("1m", TZ, now)).toEqual({ from: "2026-11-06", to: "2026-12-06" });
-    expect(periodRange("3m", TZ, now)).toEqual({ from: "2026-11-06", to: "2027-02-06" });
     // 31/jan + 1 mês = 28/fev (o dia não existe: último dia do mês)
     expect(periodRange("1m", TZ, new Date("2027-01-31T15:00:00Z")).to).toBe("2027-02-28");
   });
@@ -90,11 +89,10 @@ describe("agrupamento por período", () => {
     expect(g.months[0].days[0].events.map((e) => e.title)).toEqual(["C3 09h30", "B3 11h", "A2 08h"]);
   });
 
-  test("3 meses: separa por mês (todos os meses do intervalo, mesmo sem eventos), depois dia", () => {
-    const g = groupEvents([d, a], "3m", TZ, { from: "2026-11-06", to: "2027-02-06" });
-    expect(g.months.map((m) => m.key)).toEqual(["2026-11", "2026-12", "2027-01", "2027-02"]);
+  test("1 mês: separa por mês (só os meses com eventos), depois dia", () => {
+    const g = groupEvents([d, a], "1m", TZ, { from: "2026-11-06", to: "2026-12-06" });
+    expect(g.months.every((m) => m.days.length > 0)).toBe(true);
     expect(g.months[0].days.map((x) => x.date)).toEqual(["2026-11-06"]);
-    expect(g.months[2].days).toEqual([]);
   });
 
   test("fora do intervalo não aparece; dias sem eventos são omitidos", () => {
@@ -113,10 +111,16 @@ describe("acúmulo semanal e preferências", () => {
     expect(merged[1].forecast).toBe("1%");
   });
 
-  test("preferências do cookie: só valores conhecidos; padrão = 7 dias, todas as regiões, ★★ e ★★★", () => {
+  test("preferências do cookie: só valores conhecidos; padrão = 7 dias, todas as regiões, ★, ★★ e ★★★", () => {
     expect(REGIONS.map((r) => r.id)).toEqual(["US", "JP", "BR", "EU"]);
-    expect(parseNewsPrefs(undefined)).toEqual({ period: "7d", regions: ["US", "JP", "BR", "EU"], stars: [2, 3] });
-    expect(parseNewsPrefs(JSON.stringify({ period: "3m", regions: ["US", "JP", "XX"], stars: [3, 1] }))).toEqual({ period: "3m", regions: ["US", "JP"], stars: [3] });
+    expect(parseNewsPrefs(undefined)).toEqual({ period: "7d", regions: ["US", "JP", "BR", "EU"], stars: [1, 2, 3] });
+    expect(parseNewsPrefs(JSON.stringify({ period: "1m", regions: ["US", "JP", "XX"], stars: [3, 1, 7] }))).toEqual({ period: "1m", regions: ["US", "JP"], stars: [3, 1] });
+    // Filtro antigo com ★★ e ★★★ (todas as opções de então) passa a incluir ★; escolhido depois (v: 2), fica como está.
+    expect(parseNewsPrefs(JSON.stringify({ period: "7d", regions: ["US"], stars: [2, 3] })).stars).toEqual([3, 2, 1]);
+    expect(parseNewsPrefs(JSON.stringify({ period: "7d", regions: ["US"], stars: [2, 3], v: 2 })).stars).toEqual([3, 2]);
+    // Preferência antiga com um período retirado (3 dias / 3 meses) volta ao padrão, sem erro.
+    expect(parseNewsPrefs(JSON.stringify({ period: "3m", regions: ["US"], stars: [3] }))).toEqual({ period: "7d", regions: ["US"], stars: [3] });
+    expect(parseNewsPrefs(JSON.stringify({ period: "3d", regions: ["US"], stars: [3] })).period).toBe("7d");
     expect(parseNewsPrefs("{lixo")).toEqual(parseNewsPrefs(undefined));
   });
 });

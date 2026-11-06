@@ -141,11 +141,11 @@ export function registerOverlaysAndAxes(): void {
         const price = fibPrice(p1.value, p2.value, l.value);
         const y = yAxis.convertToPixel(price);
         figures.push({ type: "line", attrs: { coordinates: [{ x: x1, y }, { x: x2, y }] }, styles: { color: l.color, size } });
+        // O rótulo (nível e preço) também é clicável: seleciona e arrasta o Fibonacci inteiro, como as linhas.
         figures.push({
           type: "text",
           attrs: { x: x1 - 4, y, text: `${l.value} (${fmt(price)})`, align: "right", baseline: "middle" },
-          styles: { color: l.color, backgroundColor: "transparent", size: 11 },
-          ignoreEvent: true,
+          styles: { color: l.color, backgroundColor: "transparent", size: 11, paddingTop: 3, paddingBottom: 3, paddingLeft: 2, paddingRight: 2 },
         });
       }
       return figures;

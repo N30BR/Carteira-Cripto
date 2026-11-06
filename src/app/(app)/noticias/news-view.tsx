@@ -28,7 +28,7 @@ import { refreshNewsAction } from "./actions";
 const AUTO_REFRESH = 30 * 60_000;
 function savePrefs(next: NewsPrefs) {
   const secure = location.protocol === "https:" ? "; secure" : "";
-  document.cookie = `${NEWS_COOKIE}=${encodeURIComponent(JSON.stringify(next))}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax${secure}`;
+  document.cookie = `${NEWS_COOKIE}=${encodeURIComponent(JSON.stringify({ ...next, v: 2 }))}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax${secure}`;
 }
 const REGION = Object.fromEntries(REGIONS.map((r) => [r.id, r]));
 
@@ -47,7 +47,10 @@ function Chip({ on, onClick, children, label }: { on: boolean; onClick: () => vo
 }
 
 const StarsView = ({ n }: { n: Stars }) => (
-  <span className={cn("inline-flex", n === 3 ? "text-amber-400" : "text-amber-400/60")} aria-label={n === 3 ? "Impacto alto (3 estrelas)" : "Impacto médio (2 estrelas)"}>
+  <span
+    className={cn("inline-flex", n === 3 ? "text-amber-400" : n === 2 ? "text-amber-400/60" : "text-amber-400/40")}
+    aria-label={n === 3 ? "Impacto alto (3 estrelas)" : n === 2 ? "Impacto médio (2 estrelas)" : "Impacto baixo (1 estrela)"}
+  >
     {Array.from({ length: n }, (_, i) => (
       <Star key={i} className="size-3.5 fill-current" />
     ))}
@@ -102,7 +105,7 @@ export function NewsView({
     if (next.length) update({ ...prefs, stars: next });
   };
   const fmtDate = (d: string) => d.split("-").reverse().join("/");
-  const showMonths = prefs.period === "1m" || prefs.period === "3m";
+  const showMonths = prefs.period === "1m";
   const total = grouped.months.reduce((n, m) => n + m.days.reduce((k, d) => k + d.events.length, 0), 0);
 
   return (
@@ -152,6 +155,9 @@ export function NewsView({
           </div>
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Importância">
             <span className="w-24 text-xs font-medium tracking-wide text-muted-foreground uppercase">Importância</span>
+            <Chip on={prefs.stars.includes(1)} onClick={() => toggleStars(1)} label="Impacto baixo (1 estrela)">
+              <StarsView n={1} /> <span className="ml-1">Baixo</span>
+            </Chip>
             <Chip on={prefs.stars.includes(2)} onClick={() => toggleStars(2)} label="Impacto médio (2 estrelas)">
               <StarsView n={2} /> <span className="ml-1">Médio</span>
             </Chip>
@@ -175,7 +181,7 @@ export function NewsView({
             {REGION[r].label}: sem fonte gratuita com classificação de impacto disponível — eventos não exibidos (integração pendente; opções pagas: Trading Economics, Financial Modeling Prep, Finnhub).
           </p>
         ))}
-        <p>Fonte: Forex Factory (impacto alto = ★★★, médio = ★★). “Atual” fica “—” porque a fonte gratuita não informa o valor divulgado.</p>
+        <p>Fonte: Forex Factory (impacto alto = ★★★, médio = ★★, baixo = ★). “Atual” fica “—” porque a fonte gratuita não informa o valor divulgado.</p>
       </div>
 
       <section aria-label="Calendário econômico" className="flex flex-col gap-4">
@@ -184,7 +190,7 @@ export function NewsView({
             {showMonths && <h2 className="border-b border-[#8b7cf6]/40 pb-1 text-sm font-semibold tracking-wider text-[#a888c0]">{m.label}</h2>}
             {!m.days.length && (
               <p className="text-xs text-muted-foreground">
-                {coveredDate && `${m.key}-01` > coveredDate ? "A fonte ainda não publicou eventos deste mês." : "Nenhum evento ★★/★★★ disponível neste mês."}
+                {coveredDate && `${m.key}-01` > coveredDate ? "A fonte ainda não publicou eventos deste mês." : "Nenhum evento disponível neste mês."}
               </p>
             )}
             {m.days.map((d) => (
@@ -235,7 +241,7 @@ export function NewsView({
             ))}
           </div>
         ))}
-        {!total && prefs.period !== "3m" && <p className="py-6 text-center text-sm text-muted-foreground">Nenhum evento disponível para esses filtros no período.</p>}
+        {!total && <p className="py-6 text-center text-sm text-muted-foreground">Nenhum evento disponível para esses filtros no período.</p>}
       </section>
     </div>
   );

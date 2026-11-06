@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { movingAverage, priceSource, rma, volumeProfile, wma } from "@/lib/charts/indicators";
 import { DEFAULT_FIB_LEVELS, NEO_COLORS } from "@/lib/charts/drawing";
 import { compareDisplay, compareScale } from "@/lib/charts/compare";
-import { CHART_INDICATORS, CHART_TOOLS, ELLIOTT_LABELS, sanitizeTabState, type TabState } from "@/lib/charts/workspace";
+import { CHART_INDICATORS, CHART_TOOLS, ELLIOTT_LABELS, paneFromTemplate, sanitizePrefs, sanitizeTabState, templateOf, type TabState } from "@/lib/charts/workspace";
 
 const bar = (o: number, h: number, l: number, c: number, volume: number, buyVolume?: number) => ({ timestamp: 0, open: o, high: h, low: l, close: c, volume, ...(buyVolume === undefined ? {} : { buyVolume }) });
 
@@ -79,6 +79,51 @@ describe("ondas de Elliott e raios paralelos", () => {
     expect(withOverlay({ labels: ["1", "2", "3", "4", "5", "6"] }).ok).toBe(false);
     expect(withOverlay({ labelPosition: "left" }).ok).toBe(false);
     expect(withOverlay({ showPoints: "sim" }).ok).toBe(false);
+  });
+});
+
+describe("modelo para gráficos novos", () => {
+  const ref = {
+    symbol: "BTCUSDT",
+    interval: "4h",
+    chartType: "ohlc",
+    scale: "logarithm",
+    autoScale: true,
+    showOhlc: false,
+    indicators: [
+      { id: "a", name: "MA_RIBBON_NEO", params: [25, 30, 35, 40, 45, 50, 100, 200], pane: "main", styles: { m6: { color: "#ffffff", style: "dashed", size: 2 } }, options: { types: ["SMA"] } },
+      { id: "b", name: "RSI", params: [14], pane: "sub" },
+      { id: "c", name: "MACD", params: [12, 26, 9], pane: "sub", paneKey: "b" },
+    ],
+    overlays: [{ id: "d1", name: "segment", points: [{ timestamp: 1, value: 2 }] }],
+    compares: [{ kind: "pair", id: "PAXGUSDT" }],
+  } as const;
+  let n = 0;
+  const newId = () => `n${++n}`;
+  test("copia as configurações (não par, tempo, desenhos nem comparações) e dá ids novos", () => {
+    const p = paneFromTemplate("SOLUSDT", templateOf(ref as never, 7), newId);
+    expect(p).toMatchObject({ symbol: "SOLUSDT", interval: "1d", chartType: "ohlc", scale: "logarithm", autoScale: true, showOhlc: false, overlays: [], compares: [] });
+    expect(p.indicators.map((i) => i.name)).toEqual(["MA_RIBBON_NEO", "RSI", "MACD"]);
+    expect(p.indicators[0].styles).toEqual({ m6: { color: "#ffffff", style: "dashed", size: 2 } });
+    expect(p.indicators.some((i) => ["a", "b", "c"].includes(i.id!))).toBe(false);
+    // MACD continua no mesmo painel do RSI (chave remapeada para o id novo do RSI)
+    expect(p.indicators[2].paneKey).toBe(p.indicators[1].id);
+  });
+  test("cópia independente: mexer no novo não altera o modelo", () => {
+    const t = templateOf(ref as never);
+    const p = paneFromTemplate("ETHUSDT", t, newId);
+    p.indicators[0].params[0] = 99;
+    expect(t.indicators[0].params[0]).toBe(25);
+  });
+  test("sem modelo: gráfico padrão; modelo salvo é validado", () => {
+    expect(paneFromTemplate("ETHUSDT", undefined, newId).indicators.map((i) => i.name)).toEqual(["VOL"]);
+    const prefs = (template: unknown) => sanitizePrefs({ visible: [], favorites: [], template });
+    const ok = prefs(templateOf(ref as never, 3, 1));
+    expect(ok.ok && ok.value.template?.sourcePane).toBe(1);
+    const bad = prefs({ ...templateOf(ref as never), chartType: "pizza" });
+    expect(bad.ok && bad.value.template).toBeUndefined();
+    const bad2 = prefs({ ...templateOf(ref as never), indicators: [{ name: "NAO_EXISTE", params: [], pane: "main" }] });
+    expect(bad2.ok && bad2.value.template).toBeUndefined();
   });
 });
 

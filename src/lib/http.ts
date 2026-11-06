@@ -1,11 +1,11 @@
-// Busca JSON de fontes externas com tempo limite e teto de tamanho (a resposta é tratada como não confiável).
+// Busca JSON (ou texto) de fontes externas com tempo limite e teto de tamanho (a resposta é tratada como não confiável).
 // O corpo é lido aos poucos e a leitura é cortada ao passar do teto (vale também sem content-length e com
 // corpo comprimido, que chega já descomprimido). Redirecionamentos são recusados.
 
-export async function fetchJsonCapped(url: string, maxBytes: number, label: string, timeoutMs = 20_000): Promise<unknown> {
+async function fetchBytesCapped(url: string, maxBytes: number, label: string, timeoutMs: number, accept: string): Promise<Uint8Array> {
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(timeoutMs), headers: { Accept: "application/json" } });
+    res = await fetch(url, { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(timeoutMs), headers: { Accept: accept } });
   } catch {
     throw new Error(`${label} indisponível`);
   }
@@ -37,9 +37,19 @@ export async function fetchJsonCapped(url: string, maxBytes: number, label: stri
     bytes.set(c, at);
     at += c.byteLength;
   }
+  return bytes;
+}
+
+export async function fetchJsonCapped(url: string, maxBytes: number, label: string, timeoutMs = 20_000): Promise<unknown> {
+  const bytes = await fetchBytesCapped(url, maxBytes, label, timeoutMs, "application/json");
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {
     throw new Error(`${label}: resposta inválida`);
   }
+}
+
+/** Texto (ex.: CSV), com as mesmas proteções. */
+export async function fetchTextCapped(url: string, maxBytes: number, label: string, timeoutMs = 20_000): Promise<string> {
+  return new TextDecoder().decode(await fetchBytesCapped(url, maxBytes, label, timeoutMs, "text/csv, text/plain"));
 }

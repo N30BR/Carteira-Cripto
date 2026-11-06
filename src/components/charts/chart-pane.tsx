@@ -165,6 +165,16 @@ const priceAxis = (c: Chart) => (c.getYAxes({ paneId: "candle_pane" })[0] as unk
 const cursorOf = (c: Chart | null) =>
   (c as unknown as { getChartStore?: () => { getCrosshair: () => { paneId?: string; realDataIndex?: number } } } | null)?.getChartStore?.().getCrosshair() ?? null;
 
+type ClickInfo = { paneId: string; overlay: { id: string } | null; figureType: string; figureIndex: number; figure: unknown };
+type OverlayStore = { getClickOverlayInfo: () => ClickInfo; setClickOverlayInfo: (i: ClickInfo, onSel: () => void, onDesel: () => void) => void };
+const overlayStore = (c: Chart | null) => (c as unknown as { getChartStore?: () => OverlayStore } | null)?.getChartStore?.() ?? null;
+/** Desenho que a biblioteca tem selecionado agora (API interna: é o que mostra os pontos de controle). */
+const selectedInChart = (c: Chart | null) => overlayStore(c)?.getClickOverlayInfo().overlay?.id ?? null;
+/** Tira a seleção dentro da biblioteca (some com os pontos de controle), sem disparar os avisos dela. */
+const clearChartSelection = (c: Chart | null) => {
+  overlayStore(c)?.setClickOverlayInfo({ paneId: "candle_pane", overlay: null, figureType: "none", figureIndex: -1, figure: null }, () => {}, () => {});
+};
+
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 /** Estilo salvo do desenho → estilo do KLineCharts. */
@@ -266,6 +276,7 @@ export function ChartPane({
   onIndicatorAction,
   onCompareAction,
   onLegendCollapse,
+  onAutoScaleChange,
   onDrawingChange,
   handleRef,
   children,
@@ -274,6 +285,8 @@ export function ChartPane({
   onCompareAction: (a: CompareAction) => void;
   /** Seta "^" ao lado do título: recolhe/mostra as legendas dos indicadores. */
   onLegendCollapse: (collapsed: boolean) => void;
+  /** Ajuste manual da escala de preço com o modo A ligado: o botão passa para N (como no TradingView). */
+  onAutoScaleChange: (auto: boolean) => void;
   pane: PaneState;
   active: boolean;
   onActivate: () => void;
@@ -294,10 +307,30 @@ export function ChartPane({
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
   const magnet = useRef<OverlayMode>("normal");
-  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onDrawingChange });
+  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange });
   useEffect(() => {
-    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onDrawingChange };
+    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange };
   });
+  // Botão A/N. A: a escala de preço acompanha as velas visíveis (o ajuste automático da biblioteca).
+  // N: o enquadramento fica como está (mover e dar zoom continuam livres, só sem reajuste automático).
+  const autoScale = useRef(pane.autoScale === true);
+  /** Modo N: congela a faixa de preço atual (sai do automático sem mudar o que está na tela). */
+  const freezePrice = (c: Chart) => {
+    const a = priceAxis(c);
+    if (a?.getAutoCalcTickFlag()) a.setRange(a.getRange());
+  };
+  /**
+   * Enquadra uma vez (par, tempo ou escala novos: a faixa anterior não serve) e, no modo N, congela de novo
+   * logo depois de a biblioteca calcular a faixa.
+   */
+  const fitOnce = (c: Chart) => {
+    priceAxis(c)?.setAutoCalcTickFlag(true);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (!autoScale.current && chart.current === c) freezePrice(c);
+      }),
+    );
+  };
   // Estado de exibição lido pelas legendas (sem recriar indicadores).
   const view = useRef({ collapsed: !!pane.legendCollapsed, showOhlc: pane.showOhlc !== false, interval: pane.interval });
   // Comparação de cada indicador criado (id do indicador → índice na lista).
@@ -560,6 +593,7 @@ export function ChartPane({
         emitOverlays();
       },
       deselect: () => {
+        clearChartSelection(chart.current);
         cb.current.onSelect(null);
       },
       getFigures: (id) => {
@@ -612,8 +646,8 @@ export function ChartPane({
       }
       if (!current()) return;
       const precision = first?.length ? precisionFor(first[first.length - 1].close) : fallback;
-      // Par/tempo novo: a escala de preço volta ao ajuste automático.
-      priceAxis(c)?.setAutoCalcTickFlag(true);
+      // Par/tempo novo: enquadra os preços novos (no modo N, congela em seguida).
+      fitOnce(c);
       c.setSymbol({ ticker: symbol, pricePrecision: precision, volumePrecision: 2 });
       c.setPeriod(PERIOD[interval]);
       c.setDataLoader({
@@ -623,7 +657,9 @@ export function ChartPane({
           if (type === "init" && first) {
             const data = first;
             first = null;
-            return callback(data, { forward: data.length === LIMIT, backward: false });
+            callback(data, { forward: data.length === LIMIT, backward: false });
+            fitOnce(c);
+            return;
           }
           try {
             const end = type === "forward" && timestamp ? timestamp - 1 : null;
@@ -668,8 +704,20 @@ export function ChartPane({
       },
     });
     c.overrideYAxis({ paneId: "candle_pane", name: pane.scale === "logarithm" ? LOG_AXIS : pane.scale });
-    priceAxis(c)?.setAutoCalcTickFlag(true);
+    fitOnce(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.chartType, pane.scale]);
+
+  // Botão A/N: A liga o ajuste automático na hora (reenquadra os dados visíveis); N congela o enquadramento atual.
+  useEffect(() => {
+    autoScale.current = pane.autoScale === true;
+    const c = chart.current;
+    if (!c) return;
+    if (autoScale.current) {
+      priceAxis(c)?.setAutoCalcTickFlag(true);
+      c.resize();
+    } else freezePrice(c);
+  }, [pane.autoScale]);
 
   // Legenda da vela (Time/Open/High/Low/Close/Volume): valores só com o cursor sobre uma vela que existe
   // (fora da área do gráfico, ou à frente da última vela, ficam "Ø" — nada congelado); a linha some se desativada.
@@ -972,7 +1020,7 @@ export function ChartPane({
           return;
         }
         // Área livre do preço: a escala sai do automático já agora (a biblioteca só move na vertical fora dele);
-        // se o arraste for só horizontal, o automático volta ao soltar.
+        // se o arraste for só horizontal, o automático volta ao soltar (modo A). No modo N já está fora dele.
         const axis = priceAxis(c);
         if (!hoverOverlay.current && axis && inside(c.getSize("candle_pane", "main"))) {
           const wasAuto = axis.getAutoCalcTickFlag();
@@ -990,6 +1038,17 @@ export function ChartPane({
         d.x = e.clientX;
       }}
       onPointerUpCapture={(e) => {
+        // Seleção: a barra rápida segue SEMPRE o desenho que a biblioteca tem selecionado. A biblioteca decide no
+        // "mouseup" (que vem depois deste "pointerup"); por isso a leitura vai para logo depois deste evento.
+        // Assim um clique no vazio fecha a barra no 1º clique, mesmo que a tela tenha marcado a seleção por outro
+        // caminho (clique direito, lista de desenhos, Ctrl+D) que a biblioteca não conhecia.
+        if (e.button === 0 && el.current?.contains(e.target as Node) && !drawingId.current) {
+          const c0 = chart.current;
+          setTimeout(() => {
+            if (drawingId.current || chart.current !== c0) return;
+            cb.current.onSelect(selectedInChart(c0));
+          }, 0);
+        }
         timeDrag.current = null;
         const pd = priceDrag.current;
         priceDrag.current = null;
@@ -997,6 +1056,13 @@ export function ChartPane({
         if (pd?.wasAuto && c && Math.abs(e.clientY - pd.y) < 4) {
           priceAxis(c)?.setAutoCalcTickFlag(true);
           c.resize();
+        }
+        // Modo A e a pessoa ajustou o preço à mão (arrastou na vertical ou esticou a escala): passa para N,
+        // preservando esse enquadramento.
+        const axisNow = c ? priceAxis(c) : null;
+        if (autoScale.current && axisNow && !axisNow.getAutoCalcTickFlag()) {
+          autoScale.current = false;
+          cb.current.onAutoScaleChange(false);
         }
         const start = pressAt.current;
         pressAt.current = null;

@@ -18,6 +18,7 @@ export function AppHeader({ user, disabled }: { user: SessionUser; disabled: Mod
     ...mod("summary", { href: "/resumo", label: "Resumo" }),
     ...mod("charts", { href: "/graficos", label: "Gráficos" }),
     ...mod("news", { href: "/noticias", label: "Notícias" }),
+    ...mod("macro", { href: "/macro", label: "Macro" }),
     { href: "/lancamentos", label: "Lançamentos" },
     { href: "/ativos", label: "Ativos" },
     ...mod("todos", { href: "/pendencias", label: "Pendências" }),

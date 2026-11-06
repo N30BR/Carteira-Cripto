@@ -2,7 +2,7 @@
 
 // Edição de desenhos: barra rápida (clique esquerdo), configurações completas (clique direito)
 // e lista de desenhos (para mostrar de novo os ocultos).
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Copy, Eye, EyeOff, GripVertical, Layers, Lock, LockOpen, MoreHorizontal, Pencil, Plus, Settings2, Trash2, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -161,20 +161,68 @@ export type ObjectActions = {
   order: (to: "front" | "back" | "forward" | "backward") => void;
 };
 
+/** Última posição da barra rápida arrastada (relativa à posição padrão, no alto e centralizada). */
+let lastToolbarOffset = { x: 0, y: 0 };
+
 export function ObjectToolbar({ object, actions }: { object: OverlayState; actions: ObjectActions }) {
   const st = object.styles ?? {};
   const setStyle = (patch: Partial<OverlayStyleState>) => actions.update({ styles: patch });
   const isText = TEXT_TOOLS.has(object.name);
+  // Posição escolhida pelo arraste (vale enquanto a página estiver aberta, para qualquer desenho).
+  const [offset, setOffset] = useState(lastToolbarOffset);
+  const barRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const startDrag = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
+  };
+  const moveDrag = (e: React.PointerEvent) => {
+    const d = drag.current;
+    const bar = barRef.current;
+    const area = bar?.parentElement;
+    if (!d || !bar || !area) return;
+    // Fica dentro do gráfico: limita pelo tamanho da área e da barra.
+    const a = area.getBoundingClientRect();
+    const w = bar.offsetWidth;
+    const top = bar.offsetTop - d.oy; // posição sem deslocamento
+    const x = Math.max(-(a.width - w) / 2, Math.min((a.width - w) / 2, d.ox + e.clientX - d.x));
+    const y = Math.max(-top, Math.min(a.height - top - bar.offsetHeight, d.oy + e.clientY - d.y));
+    setOffset({ x, y });
+  };
+  const endDrag = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    lastToolbarOffset = offset;
+  };
   return (
     <div
+      ref={barRef}
       role="toolbar"
       aria-label={`Editar ${toolLabel(object.name)}`}
       data-testid="object-toolbar"
       // A barra fica fora da área do gráfico (o canvas não recebe o clique). Não interromper o evento aqui:
       // os seletores abertos a partir dela precisam vê-lo para saber que o clique foi dentro deles.
-      className="absolute top-14 left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border bg-popover/95 px-1 py-0.5 shadow-lg backdrop-blur"
+      style={{ transform: `translate(calc(-50% + ${offset.x}px), ${offset.y}px)` }}
+      className="absolute top-14 left-1/2 z-20 flex items-center gap-0.5 rounded-lg border bg-popover/95 px-1 py-0.5 shadow-lg backdrop-blur"
     >
-      <GripVertical className="size-4 text-muted-foreground/60" aria-hidden />
+      {/* Pegador: arrastar reposiciona a barra (não move o gráfico nem tira a seleção). */}
+      <span
+        role="button"
+        tabIndex={-1}
+        aria-label="Arrastar a barra"
+        title="Arrastar a barra"
+        data-testid="toolbar-grip"
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        className="grid h-7 w-4 cursor-grab touch-none place-items-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground active:cursor-grabbing"
+      >
+        <GripVertical className="size-4" aria-hidden />
+      </span>
       {isElliott(object.name) ? (
         // Ondas de Elliott: cor dos segmentos de alta e de baixa.
         <span className="flex items-center gap-1 px-1">

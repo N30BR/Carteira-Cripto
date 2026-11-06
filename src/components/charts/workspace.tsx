@@ -15,14 +15,15 @@ import {
   saveChartPrefsAction,
   saveChartTabAction,
 } from "@/app/(app)/graficos/actions";
-import { CHART_QUOTES, type ChartInterval } from "@/lib/charts/params";
+import { CHART_QUOTES, pairLabel, type ChartInterval } from "@/lib/charts/params";
 import type { ChartTab } from "@/lib/charts/store";
 import {
   CHART_INDICATORS,
   CHART_LAYOUTS,
   CHART_TOOLS,
   LIMITS,
-  defaultPane,
+  paneFromTemplate,
+  templateOf,
   type ChartLayout,
   type ChartScale,
   type ChartType,
@@ -30,6 +31,7 @@ import {
   type IndicatorState,
   type OverlayState,
   type PaneState,
+  type PaneTemplate,
   type TabState,
   type ToolPrefs,
 } from "@/lib/charts/workspace";
@@ -81,6 +83,17 @@ function withIds(state: TabState): TabState {
       overlays: p.overlays.map((o) => (o.id ? o : { ...o, id: uid("d") })),
     })),
   };
+}
+
+/**
+ * Título da aba: o par do 1º gráfico (ex.: BTC/USDT) e "+N" se os outros gráficos da divisão mostram pares diferentes;
+ * se a pessoa renomeou a aba, vale o nome dela. `full` (dica ao passar o mouse) lista todos os pares.
+ */
+function tabTitle(t: ChartTab): { label: string; full: string } {
+  const pairs = [...new Set(t.state.panes.slice(0, t.state.layout).map((p) => pairLabel(p.symbol)))];
+  const auto = pairs.length > 1 ? `${pairs[0]} +${pairs.length - 1}` : (pairs[0] ?? t.name);
+  const label = /^Gráfico \d+$/.test(t.name) ? auto : t.name;
+  return { label, full: label === pairs.join(", ") ? label : `${label} (${pairs.join(", ")})` };
 }
 
 /** O foco está num campo de texto (aí os atalhos do gráfico não valem)? */
@@ -185,6 +198,38 @@ export function ChartWorkspace({
   function savePrefs(nextTools: ToolPrefs, nextActive: number) {
     void safeAction(() => saveChartPrefsAction(nextTools, nextActive));
   }
+  // ---------- Modelo para gráficos novos ----------
+  // Referência: o 1º gráfico da aba de origem (no começo, a 1ª aba). Mudou a configuração dele → o modelo
+  // (salvo nas preferências) acompanha. Fechada a aba de origem, o último modelo continua valendo.
+  // O modelo só é aplicado ao CRIAR um gráfico (nova aba ou mais divisões); depois cada um é independente.
+  const sourceTabId = tools.template?.sourceTabId ?? tabs[0].id;
+  const sourceTab = tabs.find((t) => t.id === sourceTabId);
+  const sourcePane = sourceTab ? (sourceTab.state.panes[tools.template?.sourcePane ?? 0] ?? sourceTab.state.panes[0]) : null;
+  const sourceKey = sourceTab && sourcePane ? JSON.stringify(templateOf(sourcePane, sourceTab.id, tools.template?.sourcePane)) : null;
+  const toolsRef = useRef(tools);
+  const activeIdRef = useRef(activeId);
+  useEffect(() => {
+    toolsRef.current = tools;
+    activeIdRef.current = activeId;
+  });
+  useEffect(() => {
+    if (!sourceKey || sourceKey === JSON.stringify(toolsRef.current.template ?? null)) return;
+    // Espera a pessoa terminar de mexer (~1,5 s) antes de salvar.
+    const timer = setTimeout(() => {
+      const next = { ...toolsRef.current, template: JSON.parse(sourceKey) as PaneTemplate };
+      setTools(next);
+      savePrefs(next, activeIdRef.current);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [sourceKey]);
+  /** Gráfico novo com o modelo (indicadores e estilos, tipo, escala, exibição); o par é o do gráfico selecionado. */
+  const newPane = (symbol: string) => paneFromTemplate(symbol, tools.template ?? (sourcePane ? templateOf(sourcePane) : undefined), () => uid("i"));
+  /** Usa o gráfico selecionado como modelo para os próximos (passa a ser a referência). */
+  const useAsTemplate = () => {
+    changePrefs({ ...tools, template: templateOf(pane, tab.id, paneIndex) });
+    toast("Modelo atualizado: os próximos gráficos abrem com esta configuração.");
+  };
+
   const changePrefs = (next: ToolPrefs) => {
     setTools(next);
     savePrefs(next, tab.id);
@@ -225,7 +270,7 @@ export function ChartWorkspace({
       },
       hide: () => {
         h?.updateOverlay(sel.id, { visible: false });
-        setSelected(null);
+        h?.deselect(); // também tira os pontos de controle do desenho oculto
         toast("Desenho oculto. Para mostrar de novo, use a lista de desenhos.");
       },
       remove: () => {
@@ -252,7 +297,7 @@ export function ChartWorkspace({
       if (typing(e.target) || overlayOpen || k.dialog || k.settingsFor || k.indSettings || k.cmpSettings || !focusInside.current) return;
       if (matches(e, "charts.cancel")) {
         if (k.drawing && handles.current[k.drawing.pane]?.cancelDraw()) return;
-        if (k.selected) setSelected(null);
+        if (k.selected) handles.current[k.selected.pane]?.deselect();
         return;
       }
       if (!k.selected) return;
@@ -290,13 +335,19 @@ export function ChartWorkspace({
     const r = await safeAction(() => createChartTabAction(name));
     if (!r.ok) return toast.error(r.error);
     const id = (r as { ok: true; id: number }).id;
-    setTabs((list) => [...list, { id, name, state: withIds({ layout: 1, panes: [defaultPane(pane.symbol)] }) }]);
+    setTabs((list) => [...list, { id, name, state: { layout: 1, panes: [newPane(pane.symbol)] } }]);
     selectTab(id);
   }
 
   async function renameTab(t: ChartTab) {
-    const name = window.prompt("Nome da aba:", t.name)?.trim();
-    if (!name || name === t.name) return;
+    const typed = window.prompt("Nome da aba (apague para voltar a mostrar o par do gráfico):", tabTitle(t).label)?.trim();
+    if (typed === undefined) return; // cancelou
+    const generic = /^Gráfico \d+$/.test(t.name);
+    // Deixou o par que já aparecia: nada muda (o nome continua automático e acompanha o gráfico).
+    if (generic && typed === tabTitle(t).label) return;
+    // Apagou o nome: volta ao automático (nome genérico guardado, a tela mostra o par).
+    const name = typed || `Gráfico ${tabs.findIndex((x) => x.id === t.id) + 1}`;
+    if (name === t.name) return;
     const r = await safeAction(() => renameChartTabAction(t.id, name));
     if (!r.ok) return toast.error(r.error);
     setTabs((list) => list.map((x) => (x.id === t.id ? { ...x, name: name.slice(0, LIMITS.tabName) } : x)));
@@ -304,7 +355,7 @@ export function ChartWorkspace({
 
   async function closeTab(t: ChartTab) {
     if (tabs.length <= 1) return toast.error("Mantenha pelo menos uma aba");
-    if (!window.confirm(`Fechar a aba "${t.name}"? Os gráficos e desenhos dela serão apagados.`)) return;
+    if (!window.confirm(`Fechar a aba "${tabTitle(t).label}"? Os gráficos e desenhos dela serão apagados.`)) return;
     const r = await safeAction(() => deleteChartTabAction(t.id));
     if (!r.ok) return toast.error(r.error);
     const rest = tabs.filter((x) => x.id !== t.id);
@@ -314,7 +365,7 @@ export function ChartWorkspace({
 
   function setLayout(layout: ChartLayout) {
     const panes = [...tab.state.panes];
-    while (panes.length < layout) panes.push(withIds({ layout: 1, panes: [defaultPane(pane.symbol)] }).panes[0]);
+    while (panes.length < layout) panes.push(newPane(pane.symbol));
     updateTab({ layout, panes: panes.slice(0, layout) });
     if (activePane >= layout) setActivePane(0);
     setSelected(null);
@@ -386,10 +437,17 @@ export function ChartWorkspace({
               t.id === tab.id ? "border-[#8b7cf6] bg-muted font-medium" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <button type="button" onClick={() => selectTab(t.id)} onDoubleClick={() => renameTab(t)} title="Clique duas vezes para renomear">
-              {t.name}
+            {/* Nome = par do gráfico da aba (muda na hora ao trocar o par); nome dado pela pessoa continua valendo. */}
+            <button
+              type="button"
+              onClick={() => selectTab(t.id)}
+              onDoubleClick={() => renameTab(t)}
+              title={`${tabTitle(t).full} — clique duas vezes para renomear`}
+              className="max-w-40 truncate"
+            >
+              {tabTitle(t).label}
             </button>
-            <button type="button" aria-label={`Fechar ${t.name}`} onClick={() => closeTab(t)} className="opacity-50 hover:opacity-100">
+            <button type="button" aria-label={`Fechar ${tabTitle(t).label}`} onClick={() => closeTab(t)} className="opacity-50 hover:opacity-100">
               <X className="size-3.5" />
             </button>
           </div>
@@ -425,6 +483,20 @@ export function ChartWorkspace({
         </Button>
         <FavoritesBar prefs={tools} activeTool={activeTool} onDraw={draw} />
         <div className="ml-auto flex items-center gap-1.5">
+          {/* Botão A/N do gráfico selecionado: A = ajuste automático da escala de preço; N = enquadramento manual. */}
+          <button
+            type="button"
+            onClick={() => updatePane({ autoScale: !pane.autoScale })}
+            aria-pressed={!!pane.autoScale}
+            aria-label={pane.autoScale ? "Ajuste automático ativado" : "Ajuste automático desativado"}
+            title={pane.autoScale ? "Ajuste automático ativado" : "Ajuste automático desativado"}
+            className={cn(
+              "grid size-7 cursor-pointer place-items-center rounded-md border text-xs font-semibold transition-colors",
+              pane.autoScale ? "border-white bg-white text-zinc-900 hover:bg-zinc-200" : "border-border bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-white",
+            )}
+          >
+            {pane.autoScale ? "A" : "N"}
+          </button>
           <LayoutGrid className="size-4 text-muted-foreground" />
           <Seg label="Layout" value={tab.state.layout} options={CHART_LAYOUTS} onChange={setLayout} render={(v) => String(v)} />
         </div>
@@ -520,6 +592,7 @@ export function ChartWorkspace({
               onIndicatorAction={(a) => indicatorAction(i, a)}
               onCompareAction={(a) => compareAction(i, a)}
               onLegendCollapse={(legendCollapsed) => updatePaneOf(tab.id, i, { legendCollapsed })}
+              onAutoScaleChange={(autoScale) => updatePaneOf(tab.id, i, { autoScale })}
               onDrawingChange={(on) => setDrawing((d) => (on ? d : d?.pane === i ? null : d))}
               handleRef={(h) => (handles.current[i] = h)}
             >
@@ -552,6 +625,8 @@ export function ChartWorkspace({
         favorites={tools.favoriteIndicators}
         onFavorite={toggleFavoriteIndicator}
         onChange={(indicators) => updatePane({ indicators })}
+        isTemplate={tools.template?.sourceTabId === tab.id && (tools.template?.sourcePane ?? 0) === paneIndex}
+        onUseAsTemplate={useAsTemplate}
       />
       <CompareDialog
         open={dialog === "compare"}
@@ -660,6 +735,8 @@ function IndicatorsDialog({
   favorites,
   onFavorite,
   onChange,
+  isTemplate,
+  onUseAsTemplate,
 }: {
   open: boolean;
   onClose: () => void;
@@ -667,6 +744,9 @@ function IndicatorsDialog({
   favorites: string[];
   onFavorite: (name: string) => void;
   onChange: (i: IndicatorState[]) => void;
+  /** Este gráfico é a referência do modelo dos gráficos novos. */
+  isTemplate: boolean;
+  onUseAsTemplate: () => void;
 }) {
   const [q, setQ] = useState("");
   // Favoritos primeiro.
@@ -741,6 +821,19 @@ function IndicatorsDialog({
               ))}
               {!pane.indicators.length && <li className="text-sm text-muted-foreground">Nenhum indicador.</li>}
             </ul>
+            {/* Modelo: gráficos novos (nova aba ou mais divisões) abrem com estes indicadores e estilos. */}
+            <div className="mt-auto flex flex-col gap-1 border-t pt-2 text-xs text-muted-foreground">
+              {isTemplate ? (
+                <p>Este gráfico é o modelo: os gráficos novos abrem com esta configuração (cada um calculado com o próprio ativo).</p>
+              ) : (
+                <>
+                  <p>Gráficos novos abrem com a configuração do gráfico modelo.</p>
+                  <Button size="sm" variant="outline" className="self-start" onClick={onUseAsTemplate}>
+                    Usar este gráfico como modelo
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </DialogContent>

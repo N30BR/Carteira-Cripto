@@ -153,6 +153,21 @@ export async function fetchPairKlines(pair: string, days: 30 | 365 | 1000): Prom
     .filter(([t, p]) => Number.isFinite(t) && Number.isFinite(p));
 }
 
+/**
+ * Fechamentos ([horário de fechamento, preço]) de um par à vista ou de um contrato perpétuo da Binance Futures
+ * (ex.: XAUUSDT, BZUSDT), no tempo pedido. Usado pelo Panorama Macro.
+ */
+export async function fetchCloses(symbol: string, interval: "1h" | "1d", limit: number, futures = false): Promise<PricePoint[]> {
+  const params = { symbol, interval, limit: String(Math.min(1000, Math.max(2, limit))) };
+  const body = futures
+    ? await get<unknown[][]>("/fapi/v1/klines", params, TIMEOUT_MS, "futures")
+    : await get<unknown[][]>("/api/v3/klines", params);
+  if (!Array.isArray(body)) throw new Error(`Binance: sem histórico para ${symbol}`);
+  return body
+    .map((k) => [Number(k[6]), Number(k[4])] as PricePoint)
+    .filter(([t, p]) => Number.isFinite(t) && Number.isFinite(p) && p > 0);
+}
+
 export type ChartSymbol = { symbol: string; base: string; quote: string };
 
 /** Pares do mercado à vista cotados em USDT, BTC ou ETH (para a aba Gráficos). */

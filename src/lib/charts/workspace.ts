@@ -200,6 +200,8 @@ export type PaneState = {
   legendCollapsed?: boolean;
   /** Linha Time/Open/High/Low/Close/Volume (falso = escondida). */
   showOhlc?: boolean;
+  /** Botão A/N: ajuste automático da escala de preço (A = true). Padrão: N. */
+  autoScale?: boolean;
 };
 export type TabState = { layout: ChartLayout; panes: PaneState[] };
 export type ToolPrefs = {
@@ -209,7 +211,63 @@ export type ToolPrefs = {
   favoriteIndicators: string[];
   /** Ferramentas que já existiam quando as preferências foram salvas (as criadas depois entram visíveis). */
   known?: string[];
+  /** Modelo para gráficos novos: a configuração do gráfico de referência (1º gráfico da aba indicada). */
+  template?: PaneTemplate;
 };
+
+/**
+ * Configuração que um gráfico novo herda (só configurações; os cálculos são de cada ativo).
+ * Não entram: par, tempo, desenhos, comparações, zoom e posição.
+ */
+export type PaneTemplate = {
+  /** Aba de onde o modelo vem (seu 1º gráfico); se ela for fechada, o último modelo continua valendo. */
+  sourceTabId?: number;
+  /** Qual divisão dessa aba (0 = a primeira). */
+  sourcePane?: number;
+  indicators: IndicatorState[];
+  chartType: ChartType;
+  scale: ChartScale;
+  legendCollapsed?: boolean;
+  showOhlc?: boolean;
+  autoScale?: boolean;
+};
+
+/** Modelo a partir de um gráfico (cópia: nada é compartilhado por referência). */
+export function templateOf(p: PaneState, sourceTabId?: number, sourcePane?: number): PaneTemplate {
+  return {
+    ...(sourceTabId === undefined ? {} : { sourceTabId }),
+    ...(sourcePane ? { sourcePane } : {}),
+    indicators: structuredClone(p.indicators),
+    chartType: p.chartType,
+    scale: p.scale,
+    ...(p.legendCollapsed === undefined ? {} : { legendCollapsed: p.legendCollapsed }),
+    ...(p.showOhlc === undefined ? {} : { showOhlc: p.showOhlc }),
+    ...(p.autoScale === undefined ? {} : { autoScale: p.autoScale }),
+  };
+}
+
+/** Gráfico novo seguindo o modelo: indicadores com ids novos (painéis compartilhados continuam juntos). */
+export function paneFromTemplate(symbol: string, t: PaneTemplate | undefined, newId: () => string): PaneState {
+  const base = defaultPane(symbol);
+  if (!t) return base;
+  const ids = new Map<string, string>();
+  const idFor = (old: string) => ids.get(old) ?? (ids.set(old, newId()), ids.get(old)!);
+  const indicators = t.indicators.map((i) => {
+    const copy = structuredClone(i);
+    copy.id = i.id ? idFor(i.id) : newId();
+    if (i.paneKey) copy.paneKey = idFor(i.paneKey);
+    return copy;
+  });
+  return {
+    ...base,
+    indicators,
+    chartType: t.chartType,
+    scale: t.scale,
+    ...(t.legendCollapsed === undefined ? {} : { legendCollapsed: t.legendCollapsed }),
+    ...(t.showOhlc === undefined ? {} : { showOhlc: t.showOhlc }),
+    ...(t.autoScale === undefined ? {} : { autoScale: t.autoScale }),
+  };
+}
 /** Ferramentas da primeira versão (preferências salvas sem "known"). */
 const KNOWN_V1 = [
   "segment",
@@ -484,7 +542,7 @@ function sanitizePane(v: unknown): R<PaneState> {
     if (!r.ok) return r;
     compares.push(r.value);
   }
-  for (const k of ["legendCollapsed", "showOhlc"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
+  for (const k of ["legendCollapsed", "showOhlc", "autoScale"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
   return {
     ok: true,
     value: {
@@ -497,6 +555,7 @@ function sanitizePane(v: unknown): R<PaneState> {
       compares,
       ...(v.legendCollapsed === undefined ? {} : { legendCollapsed: v.legendCollapsed as boolean }),
       ...(v.showOhlc === undefined ? {} : { showOhlc: v.showOhlc as boolean }),
+      ...(v.autoScale === undefined ? {} : { autoScale: v.autoScale as boolean }),
     },
   };
 }
@@ -532,8 +591,42 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
   const intervals = CHART_INTERVALS.filter((i) => rawIntervals.includes(i)).slice(0, MAX_BAR_INTERVALS);
   const rawFav = Array.isArray(v.favoriteIndicators) ? v.favoriteIndicators : [];
   const favoriteIndicators = [...new Set(rawFav.filter((n): n is string => typeof n === "string" && INDICATOR_NAMES.has(n)))];
+  // Modelo para gráficos novos: validado como um gráfico; inválido ou grande demais é descartado (o resto salva).
+  const template = sanitizeTemplate(v.template);
   return {
     ok: true,
-    value: { visible, favorites, intervals: intervals.length ? intervals : [...DEFAULT_INTERVALS], favoriteIndicators, known: CHART_TOOLS.map((t) => t.name) },
+    value: {
+      visible,
+      favorites,
+      intervals: intervals.length ? intervals : [...DEFAULT_INTERVALS],
+      favoriteIndicators,
+      known: CHART_TOOLS.map((t) => t.name),
+      ...(template ? { template } : {}),
+    },
+  };
+}
+
+function sanitizeTemplate(v: unknown): PaneTemplate | undefined {
+  if (!isObj(v) || JSON.stringify(v).length > 60_000) return undefined;
+  if (!(CHART_TYPES as readonly unknown[]).includes(v.chartType) || !(CHART_SCALES as readonly unknown[]).includes(v.scale)) return undefined;
+  if (!Array.isArray(v.indicators) || v.indicators.length > LIMITS.indicatorsPerPane) return undefined;
+  const indicators: IndicatorState[] = [];
+  for (const i of v.indicators) {
+    const r = sanitizeIndicator(i);
+    if (!r.ok) return undefined;
+    indicators.push(r.value);
+  }
+  if (v.sourceTabId !== undefined && !(Number.isInteger(v.sourceTabId) && (v.sourceTabId as number) > 0)) return undefined;
+  if (v.sourcePane !== undefined && !(Number.isInteger(v.sourcePane) && (v.sourcePane as number) >= 0 && (v.sourcePane as number) < 8)) return undefined;
+  for (const k of ["legendCollapsed", "showOhlc", "autoScale"] as const) if (v[k] !== undefined && !isBool(v[k])) return undefined;
+  return {
+    ...(v.sourceTabId === undefined ? {} : { sourceTabId: v.sourceTabId as number }),
+    ...(v.sourcePane === undefined ? {} : { sourcePane: v.sourcePane as number }),
+    indicators,
+    chartType: v.chartType as ChartType,
+    scale: v.scale as ChartScale,
+    ...(v.legendCollapsed === undefined ? {} : { legendCollapsed: v.legendCollapsed as boolean }),
+    ...(v.showOhlc === undefined ? {} : { showOhlc: v.showOhlc as boolean }),
+    ...(v.autoScale === undefined ? {} : { autoScale: v.autoScale as boolean }),
   };
 }

@@ -18,7 +18,8 @@ const SIX_HOURS = 6 * 3_600_000;
 
 export class MacroUnavailable extends Error {}
 
-async function fredSeries(db: Db, seriesId: string, now: Date): Promise<Point[]> {
+/** Série do FRED (com a chave do servidor), em cache por 6 h; usada nos Gráficos e no Panorama Macro. */
+export async function fredSeries(db: Db, seriesId: string, now: Date): Promise<Point[]> {
   const key = process.env.FRED_API_KEY;
   if (!key || !/^[a-z0-9]{32}$/i.test(key)) throw new MacroUnavailable("Chave do FRED não configurada");
   const r = await cached(

@@ -43,6 +43,12 @@ export function splitSymbol(symbol: string): { base: string; quote: ChartQuote }
   return null;
 }
 
+/** Nome do par para exibir: "BTCUSDT" → "BTC/USDT"; símbolo sem cotação conhecida fica como está (ex.: "DXY"). */
+export function pairLabel(symbol: string): string {
+  const s = splitSymbol(symbol);
+  return s ? `${s.base}/${s.quote}` : symbol;
+}
+
 type Bar = { timestamp: number; open: number; high: number; low: number; close: number; volume: number; buyVolume?: number };
 
 /**
