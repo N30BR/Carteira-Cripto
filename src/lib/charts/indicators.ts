@@ -87,7 +87,8 @@ export function mfi(bars: Bar[], period: number): N[] {
   });
 }
 
-const sma = (values: N[], period: number): N[] =>
+/** Média móvel simples dos últimos `period` valores (nulo se faltar algum). */
+export const sma = (values: N[], period: number): N[] =>
   values.map((_, i) => {
     if (i < period - 1) return null;
     const win = values.slice(i - period + 1, i + 1);
@@ -142,7 +143,7 @@ export type VolumeProfile = { bins: ProfileBin[]; pocIndex: number; valueArea: {
  * faixas e reparte o volume de cada vela igualmente entre as faixas que ela toca.
  * POC = faixa com mais volume; área de valor = faixas em volta do POC até somar 70% do volume.
  */
-export function volumeProfile(bars: Bar[], fromIndex: number, toIndex: number, rows: number): VolumeProfile {
+export function volumeProfile(bars: Bar[], fromIndex: number, toIndex: number, rows: number, valueAreaShare = 0.7): VolumeProfile {
   const slice = bars.slice(Math.max(0, fromIndex), Math.min(bars.length - 1, toIndex) + 1);
   if (!slice.length || rows < 1) return { bins: [], pocIndex: -1, valueArea: { low: 0, high: 0 } };
   const lo = Math.min(...slice.map((b) => b.low));
@@ -164,7 +165,7 @@ export function volumeProfile(bars: Bar[], fromIndex: number, toIndex: number, r
   let low = pocIndex;
   let high = pocIndex;
   let acc = bins[pocIndex].volume;
-  while (acc < total * 0.7 && (low > 0 || high < rows - 1)) {
+  while (acc < total * valueAreaShare && (low > 0 || high < rows - 1)) {
     const below = low > 0 ? bins[low - 1].volume : -1;
     const above = high < rows - 1 ? bins[high + 1].volume : -1;
     if (above >= below) acc += bins[++high].volume;

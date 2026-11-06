@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { testDb } from "../helpers/db";
 import { users } from "@/db/schema";
-import { defaultTab, LIMITS } from "@/lib/charts/workspace";
+import { DEFAULT_INTERVALS, defaultTab, LIMITS } from "@/lib/charts/workspace";
 import { getChartPrefs, listChartTabs } from "@/lib/charts/store";
 import { resetChartLimits } from "@/lib/charts/limit";
 
@@ -78,7 +78,7 @@ describe("abas de gráficos na conta", () => {
     expect(getChartPrefs(db(), state.userId).tools.favorites.length).toBeGreaterThan(0);
     const [tab] = listChartTabs(db(), state.userId);
     expect(await saveChartPrefsAction({ visible: ["segment"], favorites: ["fibonacciLine"] }, tab.id)).toEqual({ ok: true });
-    expect(getChartPrefs(db(), state.userId)).toEqual({ tools: { visible: ["segment", "fibonacciLine"], favorites: ["fibonacciLine"] }, activeTabId: tab.id });
+    expect(getChartPrefs(db(), state.userId)).toEqual({ tools: { visible: ["segment", "fibonacciLine"], favorites: ["fibonacciLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [] }, activeTabId: tab.id });
     expect((await saveChartPrefsAction("x" as never, null)).ok).toBe(false);
     // aba de outra pessoa não vira a aba aberta
     const theirs = listChartTabs(db(), other)[0];

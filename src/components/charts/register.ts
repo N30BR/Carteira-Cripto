@@ -3,7 +3,8 @@
 // Indicadores e ferramentas próprios registrados no KLineCharts (uma vez por página).
 // Os cálculos ficam em lib/charts/indicators.ts (testados); aqui só a ligação com o gráfico.
 import { registerIndicator, registerOverlay, type KLineData } from "klinecharts";
-import { atr, deltaSeries, ema, ichimoku, liquidationLevels, mfi, rsi, rsiDivergences, stochRsi, volumeProfile, vwap } from "@/lib/charts/indicators";
+import { atr, deltaSeries, ema, ichimoku, liquidationLevels, mfi, rsi, rsiDivergences, sma, stochRsi, volumeProfile, vwap } from "@/lib/charts/indicators";
+import { registerOverlaysAndAxes } from "./overlays";
 import { alignStep, rebase, type Point } from "@/lib/charts/macro-math";
 
 const UP = "#22c55e";
@@ -20,7 +21,11 @@ const lines = (keys: string[], titles?: string[]) =>
 export const COMPARE_COLORS = ["#f59e0b", "#38bdf8", "#f472b6", "#a3e635", "#e5e7eb", "#2dd4bf", "#fb923c", "#c084fc", "#facc15", "#94a3b8"];
 export type CompareData = { label: string; points: Point[]; color: string };
 
+/** Chave que muda quando as velas mudam (para não recalcular a cada movimento do mouse). */
+const dataKey = (d: KLineData[]) => (d.length ? `${d.length}:${d[0].timestamp}:${d[d.length - 1].timestamp}:${d[d.length - 1].close}` : "0");
+
 export function registerChartExtensions(): void {
+  registerOverlaysAndAxes();
   if (done) return;
   done = true;
 
@@ -49,17 +54,19 @@ export function registerChartExtensions(): void {
     });
   }
 
-  registerIndicator<Row, number>({
+  // MA ribbon: cada linha pode ser EMA ou SMA (extendData.types).
+  registerIndicator<Row, number, { types?: string[] }>({
     name: "MA_RIBBON",
     shortName: "MA ribbon",
     series: "price",
     calcParams: [10, 30, 50, 100],
     precision: 2,
     shouldOhlc: true,
-    regenerateFigures: (params) => params.map((p, i) => ({ key: `e${i}`, title: `EMA ${p}: `, type: "line" })),
+    regenerateFigures: (params) => params.map((p, i) => ({ key: `e${i}`, title: `MA ${p}: `, type: "line" })),
     calc: (data, ind) => {
       const closes = data.map((b) => b.close);
-      const cols = ind.calcParams.map((p) => ema(closes, p));
+      const types = ind.extendData?.types ?? [];
+      const cols = ind.calcParams.map((p, j) => (types[j] === "SMA" ? sma(closes, p) : ema(closes, p)));
       return data.map((_, i) => Object.fromEntries(cols.map((c, j) => [`e${j}`, c[i]])));
     },
   });
@@ -129,6 +136,7 @@ export function registerChartExtensions(): void {
     calc: (data, ind) => mfi(bars(data), ind.calcParams[0]).map((v) => ({ mfi: v })),
   });
 
+  const divMemo = new Map<string, { key: string; divs: ReturnType<typeof rsiDivergences> }>();
   // RSI com as divergências desenhadas (linhas e etiquetas "Bull"/"Bear").
   registerIndicator<Row, number>({
     name: "RSI_DIV",
@@ -140,9 +148,18 @@ export function registerChartExtensions(): void {
     figures: lines(["rsi"], ["RSI"]),
     calc: (data, ind) => rsi(data.map((b) => b.close), ind.calcParams[0]).map((v) => ({ rsi: v })),
     draw: ({ ctx, chart, indicator, xAxis, yAxis }) => {
+      if (!indicator.visible) return false;
       const data = chart.getDataList();
       const values = indicator.result as Row[];
-      const divs = rsiDivergences(data.map((b) => b.close), indicator.calcParams[0], 3);
+      // As divergências só mudam com as velas ou o período: recalcula só nesses casos.
+      const key = `${dataKey(data)}:${indicator.calcParams[0]}`;
+      let memo = divMemo.get(indicator.id);
+      if (!memo || memo.key !== key) {
+        memo = { key, divs: rsiDivergences(data.map((b) => b.close), indicator.calcParams[0], 3) };
+        divMemo.set(indicator.id, memo);
+      }
+      const range = chart.getVisibleRange();
+      const divs = memo.divs.filter((d) => d.to >= range.from && d.from <= range.to);
       ctx.save();
       ctx.font = "11px sans-serif";
       for (const d of divs) {
@@ -172,7 +189,8 @@ export function registerChartExtensions(): void {
     },
   });
 
-  // Volume Profile da faixa visível: barras horizontais à direita, POC e área de valor (70%).
+  const vpMemo = new Map<string, { key: string; vp: ReturnType<typeof volumeProfile> }>();
+  // Volume Profile da faixa visível (estimado: volume repartido entre mínima e máxima de cada vela): POC e área de valor (70%).
   registerIndicator<Row, number>({
     name: "VOLUME_PROFILE",
     shortName: "Volume Profile",
@@ -181,9 +199,18 @@ export function registerChartExtensions(): void {
     figures: [],
     calc: (data) => data.map(() => ({})),
     draw: ({ ctx, chart, indicator, bounding, yAxis }) => {
+      if (!indicator.visible) return false;
       const data = chart.getDataList();
       const range = chart.getVisibleRange();
-      const vp = volumeProfile(bars(data), range.from, range.to - 1, Math.max(4, Math.min(200, indicator.calcParams[0] || 24)));
+      // Recalcula só quando as velas ou a faixa visível mudam (não a cada movimento do mouse).
+      const rows = Math.max(4, Math.min(200, indicator.calcParams[0] || 24));
+      const key = `${dataKey(data)}:${range.from}:${range.to}:${rows}`;
+      let memo = vpMemo.get(indicator.id);
+      if (!memo || memo.key !== key) {
+        memo = { key, vp: volumeProfile(bars(data), range.from, range.to - 1, rows) };
+        vpMemo.set(indicator.id, memo);
+      }
+      const vp = memo.vp;
       if (!vp.bins.length) return false;
       const max = Math.max(...vp.bins.map((b) => b.volume)) || 1;
       const width = bounding.width * 0.25;
@@ -250,6 +277,7 @@ export function registerChartExtensions(): void {
     figures: [],
     calc: (data) => data.map(() => ({})),
     draw: ({ ctx, chart, indicator, bounding, xAxis, yAxis }) => {
+      if (!indicator.visible) return false;
       const data = chart.getDataList();
       const oi = indicator.extendData?.oi ?? [];
       if (!oi.length || !data.length) return false;

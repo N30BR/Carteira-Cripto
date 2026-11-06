@@ -146,3 +146,19 @@ describe("heatmap de liquidações (estimado)", () => {
     expect(levels.find((l) => l.side === "short")!.to).toBeNull();
   });
 });
+
+describe("média simples e área de valor configurável", () => {
+  test("sma: média dos últimos n valores", async () => {
+    const { sma } = await import("@/lib/charts/indicators");
+    expect(sma([1, 2, 3, 4], 2)).toEqual([null, 1.5, 2.5, 3.5]);
+    expect(sma([1, 2], 5)).toEqual([null, null]);
+  });
+
+  test("perfil de volume: área de valor com a % pedida (padrão 70%)", () => {
+    const bars = [10, 20, 30, 40, 50].map((p, i) => ({ timestamp: i, open: p, high: p + 1, low: p, close: p, volume: i === 2 ? 100 : 10 }));
+    const narrow = volumeProfile(bars, 0, 4, 5, 0.5);
+    const wide = volumeProfile(bars, 0, 4, 5, 1);
+    expect(narrow.valueArea.high - narrow.valueArea.low).toBeLessThan(wide.valueArea.high - wide.valueArea.low);
+    expect(volumeProfile(bars, 0, 4, 5)).toEqual(volumeProfile(bars, 0, 4, 5, 0.7));
+  });
+});

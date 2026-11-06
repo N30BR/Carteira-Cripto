@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { KeyRound, Keyboard, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,10 +22,19 @@ export function UserMenu({ username }: { username: string }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem asChild>
-          <Link href="/conta/senha">Trocar senha</Link>
+          <Link href="/conta/senha">
+            <KeyRound /> Trocar senha
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/atalhos">
+            <Keyboard /> Atalhos
+          </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => logoutAction()}>Sair</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => logoutAction()}>
+          <LogOut /> Sair
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

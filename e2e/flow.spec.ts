@@ -265,6 +265,43 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByRole("button", { name: "Indicadores (2)" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Comparar (2)" })).toBeVisible();
 
+  // Desenho: com a ferramenta ativa o 1º clique marca o ponto (mesmo com o mouse tremendo);
+  // clique seleciona e mostra a barra rápida; Ctrl+D duplica; Delete exclui.
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "1", exact: true }).click();
+  await expect(page.getByTestId("chart-pane")).toHaveCount(1);
+  await page.waitForTimeout(800);
+  const paneBox = (await page.getByTestId("chart-pane").boundingBox())!;
+  const at = (fx: number, fy: number) => ({ x: paneBox.x + paneBox.width * fx, y: paneBox.y + paneBox.height * fy });
+  const a = at(0.25, 0.3);
+  const z = at(0.5, 0.2);
+  await page.getByRole("button", { name: "Linha de tendência" }).first().click();
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(a.x + 4, a.y + 3); // clique "tremido" (a biblioteca descartaria)
+  await page.mouse.up();
+  await page.mouse.move(z.x, z.y, { steps: 5 });
+  await page.mouse.click(z.x, z.y);
+  await expect(page.getByTestId("object-toolbar")).toBeVisible(); // recém-desenhado fica selecionado
+  await page.keyboard.press("Control+d");
+  await page.getByRole("button", { name: "Lista de desenhos" }).click();
+  await expect(page.getByRole("list", { name: "Lista de desenhos" }).getByRole("listitem")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Delete");
+  await page.getByRole("button", { name: "Lista de desenhos" }).click();
+  await expect(page.getByRole("list", { name: "Lista de desenhos" }).getByRole("listitem")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  // Tempos da barra: 14 no menu, no máximo 8 marcados
+  await page.getByRole("button", { name: "Personalizar tempos" }).click();
+  await expect(page.getByRole("menuitemcheckbox")).toHaveCount(14);
+  await page.keyboard.press("Escape");
+
+  // Atalhos: só pelo menu de perfil (não é aba)
+  await page.getByRole("button", { name: /admin/ }).click();
+  await page.getByRole("menuitem", { name: "Atalhos" }).click();
+  await expect(page.getByRole("heading", { name: "Atalhos de Teclado" })).toBeVisible();
+  await page.getByLabel("Buscar atalho").fill("duplicar");
+  await expect(page.getByText("Duplicar objeto")).toBeVisible();
+
   // Pendências: tarefa com checklist, progresso, concluir e nota rápida que vira tarefa
   await page.getByRole("link", { name: "Pendências" }).click();
   await expect(page.getByText("Nenhuma tarefa ainda")).toBeVisible();

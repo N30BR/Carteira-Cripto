@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { testDb } from "../helpers/db";
 
-const calls = vi.hoisted(() => ({ symbols: 0, candles: 0, fail: false, symbolsFail: false, oi: 0, oiFail: false }));
+const calls = vi.hoisted(() => ({ symbols: 0, candles: 0, fail: false, symbolsFail: false, oi: 0, oiFail: false, last: null as null | { interval: string; limit: number } }));
 vi.mock("@/lib/prices/binance", async (orig) => ({
   ...(await orig<typeof import("@/lib/prices/binance")>()),
   fetchChartSymbols: async () => {
@@ -20,7 +20,12 @@ vi.mock("@/lib/prices/binance", async (orig) => ({
   },
   fetchCandles: async (symbol: string, interval: string, limit: number, end: number | null) => {
     calls.candles++;
+    calls.last = { interval, limit };
     if (calls.fail) throw new Error("Binance fora");
+    if (interval === "1M") {
+      // 14 meses a partir de jan/2024
+      return Array.from({ length: Math.min(limit, 14) }, (_, i) => ({ timestamp: Date.UTC(2024, i, 1), open: i, high: i + 1, low: i - 1, close: i + 0.5, volume: 1 }));
+    }
     return Array.from({ length: Math.min(limit, 3) }, (_, i) => ({
       timestamp: (end ?? 3_000_000) - (3 - i) * 60_000,
       open: 1,
@@ -44,6 +49,16 @@ beforeEach(() => {
 });
 
 describe("pares e velas", () => {
+  test("6M e 1A: pede as mensais à Binance e junta (no máximo 1000 mensais)", async () => {
+    const half = await getCandles({ symbol: "BTCUSDT", interval: "6M", limit: 2, end: null });
+    expect(calls.last).toEqual({ interval: "1M", limit: 18 });
+    // 14 meses = 2024-S1, 2024-S2, 2025-S1; ficam as 2 últimas
+    expect(half.map((c) => c.timestamp)).toEqual([Date.UTC(2024, 6, 1), Date.UTC(2025, 0, 1)]);
+    expect(half[0]).toMatchObject({ open: 6, close: 11.5, high: 12, low: 5, volume: 6 });
+    await getCandles({ symbol: "BTCUSDT", interval: "1y", limit: 500, end: null });
+    expect(calls.last).toEqual({ interval: "1M", limit: 1000 });
+  });
+
   test("lista de pares guardada por um dia", async () => {
     const db = testDb();
     const now = new Date("2026-11-05T12:00:00Z");

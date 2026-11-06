@@ -4,6 +4,7 @@ import {
   CHART_TOOLS,
   LIMITS,
   defaultPane,
+  DEFAULT_INTERVALS,
   defaultTab,
   sanitizePrefs,
   sanitizeTabState,
@@ -79,7 +80,7 @@ describe("preferências das ferramentas", () => {
     expect(CHART_TOOLS.length).toBeGreaterThanOrEqual(15);
     expect(sanitizePrefs({ visible: ["segment", "segment", "fibonacciLine", "hack"], favorites: ["fibonacciLine", "priceLine"] })).toEqual({
       ok: true,
-      value: { visible: ["segment", "fibonacciLine", "priceLine"], favorites: ["fibonacciLine", "priceLine"] },
+      value: { visible: ["segment", "fibonacciLine", "priceLine"], favorites: ["fibonacciLine", "priceLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [] },
     });
     expect(sanitizePrefs("x").ok).toBe(false);
   });
@@ -114,5 +115,86 @@ describe("revisão: parâmetros de indicador", () => {
     expect(pane([2.5])).toBe(true);
     expect(pane([0])).toBe(false);
     expect(pane([-5])).toBe(false);
+  });
+});
+
+describe("estilo, visibilidade e bloqueio dos desenhos", () => {
+  const pt = { timestamp: 1, value: 1 };
+  const one = (o: object) => sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), overlays: [{ name: "segment", points: [pt, pt], ...o }] }] });
+
+  test("guarda id, cor, espessura, traço, extensão, oculto e bloqueado", () => {
+    const r = one({ id: "d-1", visible: false, locked: true, styles: { color: "#f59e0b", size: 2, style: "dotted", textColor: "#ffffff", extend: "right" } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.panes[0].overlays[0]).toMatchObject({ id: "d-1", visible: false, locked: true, styles: { color: "#f59e0b", size: 2, style: "dotted", extend: "right" } });
+  });
+
+  test("recusa cor fora do formato #rrggbb(aa), espessura absurda, traço ou id inválidos", () => {
+    expect(one({ styles: { color: "red;background:url(x)" } }).ok).toBe(false);
+    expect(one({ styles: { size: 99 } }).ok).toBe(false);
+    expect(one({ styles: { style: "wavy" } }).ok).toBe(false);
+    expect(one({ styles: { extend: "up" } }).ok).toBe(false);
+    expect(one({ id: "<img>" }).ok).toBe(false);
+    expect(one({ visible: "no" }).ok).toBe(false);
+  });
+
+  test("Fibonacci: níveis com valor, cor e visibilidade (até 24)", () => {
+    const fib = (levels: unknown) =>
+      sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), overlays: [{ name: "fibonacciLine", points: [pt, pt], styles: { levels } }] }] });
+    expect(fib([{ value: 0.618, color: "#22c55e", visible: true }]).ok).toBe(true);
+    expect(fib([{ value: "x", color: "#22c55e", visible: true }]).ok).toBe(false);
+    expect(fib(Array.from({ length: 25 }, () => ({ value: 1, color: "#ffffff", visible: true }))).ok).toBe(false);
+  });
+
+  test("novas ferramentas: canal paralelo e perfil de volume de faixa fixa", () => {
+    expect(CHART_TOOLS.map((t) => t.name)).toEqual(expect.arrayContaining(["parallelChannel", "fixedRangeVolumeProfile"]));
+  });
+});
+
+describe("indicadores: estilo por série, legenda, visibilidade e painel", () => {
+  const one = (o: object) => sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), indicators: [{ name: "MA_RIBBON", params: [10, 30], pane: "main", ...o }] }] });
+
+  test("guarda id, visível, painel agrupado, estilos por série e o que esconder da legenda", () => {
+    const r = one({
+      id: "i-1",
+      visible: false,
+      paneKey: "p-2",
+      styles: { e0: { color: "#ffcc80", size: 2, style: "dashed", visible: false } },
+      legend: { name: false, params: true, values: false },
+      options: { types: ["EMA", "SMA"] },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.panes[0].indicators[0]).toMatchObject({ id: "i-1", visible: false, paneKey: "p-2", legend: { name: false, values: false }, options: { types: ["EMA", "SMA"] } });
+  });
+
+  test("recusa chave de série, cor, tipo de média e painel inválidos", () => {
+    expect(one({ styles: { "__proto__x": { color: "#fff" } } }).ok).toBe(false);
+    expect(one({ styles: { e0: { color: "url(x)" } } }).ok).toBe(false);
+    expect(one({ options: { types: ["WMA"] } }).ok).toBe(false);
+    expect(one({ paneKey: "a b" }).ok).toBe(false);
+    expect(one({ legend: { name: "no" } }).ok).toBe(false);
+  });
+});
+
+describe("comparações: sobre o preço ou em painel separado", () => {
+  test("display main/sub opcional", () => {
+    const r = sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), compares: [{ kind: "pair", id: "ETHUSDT", display: "sub" }] }] });
+    expect(r.ok && r.value.panes[0].compares[0]).toEqual({ kind: "pair", id: "ETHUSDT", display: "sub" });
+    expect(sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), compares: [{ kind: "pair", id: "ETHUSDT", display: "x" }] }] }).ok).toBe(false);
+  });
+});
+
+describe("preferências: tempos da barra e indicadores favoritos", () => {
+  test("até 8 tempos conhecidos, na ordem do menor para o maior; indicadores favoritos só conhecidos", () => {
+    const r = sanitizePrefs({ visible: [], favorites: [], intervals: ["1M", "1m", "1M", "6M", "x"], favoriteIndicators: ["RSI", "HACK", "RSI"] });
+    expect(r).toEqual({ ok: true, value: { visible: [], favorites: [], intervals: ["1m", "1M", "6M"], favoriteIndicators: ["RSI"] } });
+    const many = sanitizePrefs({ visible: [], favorites: [], intervals: ["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h", "1d"] });
+    expect(many.ok && many.value.intervals).toHaveLength(8);
+  });
+
+  test("preferências antigas (sem tempos) recebem os padrões; lista vazia também", () => {
+    const r = sanitizePrefs({ visible: ["segment"], favorites: [] });
+    expect(r.ok && r.value.intervals).toEqual(DEFAULT_INTERVALS);
+    const empty = sanitizePrefs({ visible: [], favorites: [], intervals: [] });
+    expect(empty.ok && empty.value.intervals).toEqual(DEFAULT_INTERVALS);
   });
 });

@@ -1,7 +1,7 @@
 import type { Db } from "@/db/client";
 import { cached } from "@/lib/prices/cache";
 import { fetchCandles, fetchChartSymbols, fetchOpenInterest, type Candle, type ChartSymbol } from "@/lib/prices/binance";
-import type { CandleQuery } from "./params";
+import { AGGREGATED, aggregateCandles, type CandleQuery } from "./params";
 
 const DAY = 86_400_000;
 
@@ -44,7 +44,20 @@ export async function isListedSymbol(db: Db, symbol: string, now = new Date()): 
 // Velas em memória (não no banco: rolar o gráfico para trás criaria entradas sem fim).
 // Recentes: alguns segundos a poucos minutos, conforme o tempo do gráfico; antigas (com data final): 1 dia.
 const MAX_ENTRIES = 400;
-const TTL: Record<string, number> = { "1m": 15_000, "5m": 30_000, "15m": 60_000, "1h": 120_000, "4h": 120_000, "1d": 300_000, "1w": 600_000, "1M": 600_000 };
+const TTL: Record<string, number> = {
+  "1m": 15_000,
+  "5m": 30_000,
+  "15m": 60_000,
+  "30m": 60_000,
+  "1h": 120_000,
+  "4h": 120_000,
+  "6h": 120_000,
+  "12h": 300_000,
+  "1d": 300_000,
+  "3d": 600_000,
+  "1w": 600_000,
+  "1M": 600_000,
+};
 const store = new Map<string, { at: number; data: Candle[] }>();
 const inFlight = new Map<string, Promise<Candle[]>>();
 
@@ -54,6 +67,12 @@ export function resetCandleCache(): void {
 }
 
 export async function getCandles(query: CandleQuery, nowMs = Date.now()): Promise<Candle[]> {
+  // 6M e 1A não existem na Binance: junta as mensais (que já passam pelo cache abaixo).
+  const months = AGGREGATED[query.interval];
+  if (months) {
+    const monthly = await getCandles({ ...query, interval: "1M", limit: Math.min(1000, (query.limit + 1) * months) }, nowMs);
+    return aggregateCandles(monthly, query.interval as "6M" | "1y").slice(-query.limit);
+  }
   // Data final no futuro = "mais recentes" (senão ficaria 1 dia em cache como se fosse passado).
   const q = query.end !== null && query.end >= nowMs ? { ...query, end: null } : query;
   const key = `${q.symbol}:${q.interval}:${q.limit}:${q.end ?? "now"}`;
@@ -76,7 +95,22 @@ export async function getCandles(query: CandleQuery, nowMs = Date.now()): Promis
 }
 
 // ---------- open interest (Binance Futures) ----------
-const OI_PERIOD: Record<string, string> = { "1m": "5m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1d", "1M": "1d" };
+const OI_PERIOD: Record<string, string> = {
+  "1m": "5m",
+  "5m": "5m",
+  "15m": "15m",
+  "30m": "30m",
+  "1h": "1h",
+  "4h": "4h",
+  "6h": "6h",
+  "12h": "12h",
+  "1d": "1d",
+  "3d": "1d",
+  "1w": "1d",
+  "1M": "1d",
+  "6M": "1d",
+  "1y": "1d",
+};
 const OI_TTL = 5 * 60_000;
 const OI_FAIL_TTL = 60_000;
 const oiStore = new Map<string, { at: number; data: [number, number][] }>();

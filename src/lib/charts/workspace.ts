@@ -80,21 +80,67 @@ export const CHART_TOOLS: { name: string; label: string }[] = [
   { name: "verticalRayLine", label: "Raio vertical" },
   { name: "verticalSegment", label: "Segmento vertical" },
   { name: "priceLine", label: "Linha de preço" },
+  { name: "parallelChannel", label: "Canal paralelo" },
   { name: "parallelStraightLine", label: "Linhas paralelas" },
   { name: "priceChannelLine", label: "Canal de preço" },
   { name: "fibonacciLine", label: "Retração de Fibonacci" },
   { name: "rectangle", label: "Retângulo" },
   { name: "measure", label: "Medir (preço e %)" },
+  { name: "fixedRangeVolumeProfile", label: "Perfil de volume (faixa fixa)" },
   { name: "simpleAnnotation", label: "Anotação" },
   { name: "simpleTag", label: "Etiqueta" },
 ];
 const TOOL_NAMES = new Set(CHART_TOOLS.map((t) => t.name));
 export const DEFAULT_FAVORITE_TOOLS = ["segment", "horizontalStraightLine", "fibonacciLine", "rectangle"];
 
-export type IndicatorState = { name: string; params: number[]; pane: "main" | "sub" };
-export type OverlayState = { name: string; points: { timestamp: number; value: number }[]; text?: string };
+export const LINE_STYLES = ["solid", "dashed", "dotted"] as const;
+export type LineStyleName = (typeof LINE_STYLES)[number];
+export const EXTENDS = ["none", "left", "right", "both"] as const;
+export type ExtendName = (typeof EXTENDS)[number];
+export const MA_TYPES = ["EMA", "SMA"] as const;
+export type MaType = (typeof MA_TYPES)[number];
+
+/** Aparência de uma série de indicador (por chave da série, ex.: "e0", "macd"). */
+export type SeriesStyle = { color?: string; size?: number; style?: LineStyleName; visible?: boolean };
+export type IndicatorState = {
+  /** Identificador da instância (copiar cria outro). */
+  id?: string;
+  name: string;
+  params: number[];
+  pane: "main" | "sub";
+  /** Indicadores de painel com a mesma chave ficam no mesmo painel ("Mover para painel existente"). */
+  paneKey?: string;
+  visible?: boolean;
+  styles?: Record<string, SeriesStyle>;
+  /** O que mostrar na legenda (falso = escondido). O cálculo continua. */
+  legend?: { name?: boolean; params?: boolean; values?: boolean };
+  /** Opções além dos períodos (ex.: tipo de cada média do MA ribbon). */
+  options?: { types?: MaType[] };
+};
+export type FibLevel = { value: number; color: string; visible: boolean };
+export type OverlayStyleState = {
+  color?: string;
+  size?: number;
+  style?: LineStyleName;
+  textColor?: string;
+  extend?: ExtendName;
+  /** Níveis do Fibonacci. */
+  levels?: FibLevel[];
+  /** Perfil de volume: linhas de preço e % da área de valor. */
+  rows?: number;
+  valueArea?: number;
+};
+export type OverlayState = {
+  id?: string;
+  name: string;
+  points: { timestamp: number; value: number }[];
+  text?: string;
+  styles?: OverlayStyleState;
+  visible?: boolean;
+  locked?: boolean;
+};
 /** Série comparada na mesma divisão: outro par da Binance (ex.: ouro PAXGUSDT) ou série macro do FRED. */
-export type CompareState = { kind: "pair"; id: string } | { kind: "macro"; id: MacroId };
+export type CompareState = ({ kind: "pair"; id: string } | { kind: "macro"; id: MacroId }) & { display?: "main" | "sub" };
 export type PaneState = {
   symbol: string;
   interval: ChartInterval;
@@ -105,7 +151,10 @@ export type PaneState = {
   compares: CompareState[];
 };
 export type TabState = { layout: ChartLayout; panes: PaneState[] };
-export type ToolPrefs = { visible: string[]; favorites: string[] };
+export type ToolPrefs = { visible: string[]; favorites: string[]; intervals: ChartInterval[]; favoriteIndicators: string[] };
+/** Tempos que aparecem na barra superior (no máximo 8). */
+export const MAX_BAR_INTERVALS = 8;
+export const DEFAULT_INTERVALS: ChartInterval[] = ["1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M"];
 
 export const defaultPane = (symbol = "BTCUSDT"): PaneState => ({
   symbol,
@@ -117,7 +166,12 @@ export const defaultPane = (symbol = "BTCUSDT"): PaneState => ({
   compares: [],
 });
 export const defaultTab = (): TabState => ({ layout: 1, panes: [defaultPane()] });
-export const defaultPrefs = (): ToolPrefs => ({ visible: CHART_TOOLS.map((t) => t.name), favorites: [...DEFAULT_FAVORITE_TOOLS] });
+export const defaultPrefs = (): ToolPrefs => ({
+  visible: CHART_TOOLS.map((t) => t.name),
+  favorites: [...DEFAULT_FAVORITE_TOOLS],
+  intervals: [...DEFAULT_INTERVALS],
+  favoriteIndicators: [],
+});
 
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -125,6 +179,105 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 // Sem caracteres de controle nem invisíveis/de direção.
 const SAFE_TEXT = /^[^\p{Cc}\p{Cf}]*$/u;
+const COLOR = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+const ID = /^[A-Za-z0-9_-]{1,40}$/;
+const SERIES_KEY = /^[a-zA-Z][a-zA-Z0-9]{0,19}$/;
+const isBool = (v: unknown): v is boolean => typeof v === "boolean";
+const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => (list as readonly unknown[]).includes(v);
+
+/** Cor/espessura/traço comuns a séries e desenhos; null = inválido. */
+function sanitizeLine(v: Record<string, unknown>): { color?: string; size?: number; style?: LineStyleName } | null {
+  const out: { color?: string; size?: number; style?: LineStyleName } = {};
+  if (v.color !== undefined) {
+    if (typeof v.color !== "string" || !COLOR.test(v.color)) return null;
+    out.color = v.color;
+  }
+  if (v.size !== undefined) {
+    if (!isNum(v.size) || v.size < 0.5 || v.size > 10) return null;
+    out.size = v.size;
+  }
+  if (v.style !== undefined) {
+    if (!oneOf(LINE_STYLES, v.style)) return null;
+    out.style = v.style;
+  }
+  return out;
+}
+
+function sanitizeIndicatorExtras(v: Record<string, unknown>, out: IndicatorState): string | null {
+  if (v.id !== undefined) {
+    if (typeof v.id !== "string" || !ID.test(v.id)) return "Indicador inválido";
+    out.id = v.id;
+  }
+  if (v.paneKey !== undefined) {
+    if (typeof v.paneKey !== "string" || !ID.test(v.paneKey)) return "Painel do indicador inválido";
+    out.paneKey = v.paneKey;
+  }
+  if (v.visible !== undefined) {
+    if (!isBool(v.visible)) return "Indicador inválido";
+    out.visible = v.visible;
+  }
+  if (v.styles !== undefined) {
+    if (!isObj(v.styles) || Object.keys(v.styles).length > 20) return "Estilo do indicador inválido";
+    const styles: Record<string, SeriesStyle> = {};
+    for (const [key, raw] of Object.entries(v.styles)) {
+      if (!SERIES_KEY.test(key) || !isObj(raw)) return "Estilo do indicador inválido";
+      const line = sanitizeLine(raw);
+      if (!line || (raw.visible !== undefined && !isBool(raw.visible))) return "Estilo do indicador inválido";
+      styles[key] = { ...line, ...(raw.visible === undefined ? {} : { visible: raw.visible as boolean }) };
+    }
+    out.styles = styles;
+  }
+  if (v.legend !== undefined) {
+    if (!isObj(v.legend)) return "Legenda do indicador inválida";
+    const legend: NonNullable<IndicatorState["legend"]> = {};
+    for (const k of ["name", "params", "values"] as const) {
+      if (v.legend[k] === undefined) continue;
+      if (!isBool(v.legend[k])) return "Legenda do indicador inválida";
+      legend[k] = v.legend[k] as boolean;
+    }
+    out.legend = legend;
+  }
+  if (v.options !== undefined) {
+    if (!isObj(v.options)) return "Opções do indicador inválidas";
+    const t = v.options.types;
+    if (t !== undefined && (!Array.isArray(t) || t.length > LIMITS.paramsPerIndicator || !t.every((x) => oneOf(MA_TYPES, x)))) return "Opções do indicador inválidas";
+    out.options = t === undefined ? {} : { types: t as MaType[] };
+  }
+  return null;
+}
+
+function sanitizeOverlayStyles(v: unknown): OverlayStyleState | null {
+  if (!isObj(v)) return null;
+  const line = sanitizeLine(v);
+  if (!line) return null;
+  const out: OverlayStyleState = { ...line };
+  if (v.textColor !== undefined) {
+    if (typeof v.textColor !== "string" || !COLOR.test(v.textColor)) return null;
+    out.textColor = v.textColor;
+  }
+  if (v.extend !== undefined) {
+    if (!oneOf(EXTENDS, v.extend)) return null;
+    out.extend = v.extend;
+  }
+  if (v.levels !== undefined) {
+    if (!Array.isArray(v.levels) || v.levels.length > 24) return null;
+    const levels: FibLevel[] = [];
+    for (const l of v.levels) {
+      if (!isObj(l) || !isNum(l.value) || Math.abs(l.value) > 100 || typeof l.color !== "string" || !COLOR.test(l.color) || !isBool(l.visible)) return null;
+      levels.push({ value: l.value, color: l.color, visible: l.visible });
+    }
+    out.levels = levels;
+  }
+  if (v.rows !== undefined) {
+    if (!Number.isInteger(v.rows) || (v.rows as number) < 4 || (v.rows as number) > 200) return null;
+    out.rows = v.rows as number;
+  }
+  if (v.valueArea !== undefined) {
+    if (!isNum(v.valueArea) || v.valueArea < 10 || v.valueArea > 100) return null;
+    out.valueArea = v.valueArea;
+  }
+  return out;
+}
 
 function sanitizeIndicator(v: unknown): R<IndicatorState> {
   if (!isObj(v) || typeof v.name !== "string" || !INDICATOR_NAMES.has(v.name)) return fail("Indicador inválido");
@@ -132,7 +285,9 @@ function sanitizeIndicator(v: unknown): R<IndicatorState> {
     return fail("Parâmetros do indicador inválidos");
   }
   if (v.pane !== "main" && v.pane !== "sub") return fail("Painel do indicador inválido");
-  return { ok: true, value: { name: v.name, params: v.params as number[], pane: v.pane } };
+  const out: IndicatorState = { name: v.name, params: v.params as number[], pane: v.pane };
+  const err = sanitizeIndicatorExtras(v, out);
+  return err ? fail(err) : { ok: true, value: out };
 }
 
 function sanitizeOverlay(v: unknown): R<OverlayState> {
@@ -148,13 +303,29 @@ function sanitizeOverlay(v: unknown): R<OverlayState> {
     if (typeof v.text !== "string" || v.text.length > LIMITS.overlayText || !SAFE_TEXT.test(v.text)) return fail("Texto do desenho inválido");
     out.text = v.text;
   }
+  if (v.id !== undefined) {
+    if (typeof v.id !== "string" || !ID.test(v.id)) return fail("Desenho inválido");
+    out.id = v.id;
+  }
+  for (const k of ["visible", "locked"] as const) {
+    if (v[k] === undefined) continue;
+    if (!isBool(v[k])) return fail("Desenho inválido");
+    out[k] = v[k] as boolean;
+  }
+  if (v.styles !== undefined) {
+    const st = sanitizeOverlayStyles(v.styles);
+    if (!st) return fail("Estilo do desenho inválido");
+    out.styles = st;
+  }
   return { ok: true, value: out };
 }
 
 function sanitizeCompare(v: unknown): R<CompareState> {
   if (!isObj(v)) return fail("Comparação inválida");
-  if (v.kind === "pair" && typeof v.id === "string" && /^[A-Z0-9]{2,20}$/.test(v.id) && splitSymbol(v.id)) return { ok: true, value: { kind: "pair", id: v.id } };
-  if (v.kind === "macro" && (MACRO_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "macro", id: v.id as MacroId } };
+  if (v.display !== undefined && v.display !== "main" && v.display !== "sub") return fail("Comparação inválida");
+  const display = v.display === undefined ? {} : { display: v.display as "main" | "sub" };
+  if (v.kind === "pair" && typeof v.id === "string" && /^[A-Z0-9]{2,20}$/.test(v.id) && splitSymbol(v.id)) return { ok: true, value: { kind: "pair", id: v.id, ...display } };
+  if (v.kind === "macro" && (MACRO_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "macro", id: v.id as MacroId, ...display } };
   return fail("Comparação inválida");
 }
 
@@ -219,5 +390,10 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
   const pick = (list: unknown[]) => [...new Set(list.filter((t): t is string => typeof t === "string" && TOOL_NAMES.has(t)))];
   const favorites = pick(v.favorites);
   const visible = [...new Set([...pick(v.visible), ...favorites])];
-  return { ok: true, value: { visible, favorites } };
+  // Tempos: só conhecidos, sem repetição, do menor para o maior, no máximo 8.
+  const rawIntervals = Array.isArray(v.intervals) ? v.intervals : [];
+  const intervals = CHART_INTERVALS.filter((i) => rawIntervals.includes(i)).slice(0, MAX_BAR_INTERVALS);
+  const rawFav = Array.isArray(v.favoriteIndicators) ? v.favoriteIndicators : [];
+  const favoriteIndicators = [...new Set(rawFav.filter((n): n is string => typeof n === "string" && INDICATOR_NAMES.has(n)))];
+  return { ok: true, value: { visible, favorites, intervals: intervals.length ? intervals : [...DEFAULT_INTERVALS], favoriteIndicators } };
 }

@@ -3,36 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FLUSH_PENDING_EVENT } from "@/lib/modules";
-import {
-  AlignJustify,
-  ArrowRight,
-  ArrowUp,
-  DollarSign,
-  Equal,
-  Eye,
-  EyeOff,
-  GripHorizontal,
-  GripVertical,
-  LayoutGrid,
-  Magnet,
-  MessageSquare,
-  Minus,
-  MoveDiagonal,
-  MoveUpRight,
-  Plus,
-  Rows3,
-  Ruler,
-  Search,
-  SeparatorVertical,
-  Settings2,
-  Slash,
-  Square,
-  Star,
-  Tag,
-  Trash2,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, EyeOff, LayoutGrid, ListTree, Magnet, Plus, Search, Settings2, Star, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -44,7 +15,7 @@ import {
   saveChartPrefsAction,
   saveChartTabAction,
 } from "@/app/(app)/graficos/actions";
-import { CHART_INTERVALS, CHART_QUOTES, type ChartInterval } from "@/lib/charts/params";
+import { CHART_QUOTES, type ChartInterval } from "@/lib/charts/params";
 import type { ChartTab } from "@/lib/charts/store";
 import {
   CHART_INDICATORS,
@@ -56,6 +27,7 @@ import {
   type ChartScale,
   type ChartType,
   type CompareState,
+  type IndicatorState,
   type OverlayState,
   type PaneState,
   type TabState,
@@ -63,15 +35,18 @@ import {
 } from "@/lib/charts/workspace";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
 import { safeAction } from "@/lib/safe-action";
+import { matches } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
-import type { PaneHandle } from "./chart-pane";
+import type { IndicatorAction, PaneHandle } from "./chart-pane";
+import { IndicatorMenu, IndicatorSettingsDialog, indicatorLabel, newIndicatorId, type Figure, type MenuTarget } from "./indicator-ui";
+import { ObjectSettingsDialog, ObjectToolbar, ObjectsDialog } from "./object-ui";
+import { FavoritesBar, IntervalBar, ToolGroups } from "./toolbar";
 
 // O gráfico usa o canvas do navegador: carregado só no cliente.
 const ChartPane = dynamic(() => import("./chart-pane").then((m) => m.ChartPane), { ssr: false });
 
 export type SymbolOption = { symbol: string; base: string; quote: string };
 
-const INTERVAL_LABEL: Record<ChartInterval, string> = { "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "D", "1w": "S", "1M": "M" };
 const TYPE_LABEL: Record<ChartType, string> = { candle: "Velas", ohlc: "Barras", area: "Área", line: "Linha" };
 const SCALE_LABEL: Record<ChartScale, string> = { normal: "Normal", logarithm: "Log", percentage: "%" };
 // Atalhos de período (rodapé): escolhem o tempo do gráfico que cobre esse período.
@@ -88,24 +63,26 @@ const RANGES: { label: string; interval: ChartInterval }[] = [
 ];
 const GRID: Record<ChartLayout, string> = { 1: "grid-cols-1", 2: "grid-cols-1 md:grid-cols-2", 4: "grid-cols-2 grid-rows-2", 8: "grid-cols-2 grid-rows-4 md:grid-cols-4 md:grid-rows-2" };
 const TOOL_LABEL = Object.fromEntries(CHART_TOOLS.map((t) => [t.name, t.label]));
-const TOOL_ICON: Record<string, LucideIcon> = {
-  segment: Slash,
-  rayLine: MoveUpRight,
-  straightLine: MoveDiagonal,
-  horizontalStraightLine: Minus,
-  horizontalRayLine: ArrowRight,
-  horizontalSegment: GripHorizontal,
-  verticalStraightLine: SeparatorVertical,
-  verticalRayLine: ArrowUp,
-  verticalSegment: GripVertical,
-  priceLine: DollarSign,
-  parallelStraightLine: Equal,
-  priceChannelLine: Rows3,
-  fibonacciLine: AlignJustify,
-  rectangle: Square,
-  measure: Ruler,
-  simpleAnnotation: MessageSquare,
-  simpleTag: Tag,
+const uid = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+/** Indicadores e desenhos antigos (sem id) ganham um, para menus, cópias e seleção. */
+function withIds(state: TabState): TabState {
+  const missing = state.panes.some((p) => p.indicators.some((i) => !i.id) || p.overlays.some((o) => !o.id));
+  if (!missing) return state;
+  return {
+    ...state,
+    panes: state.panes.map((p) => ({
+      ...p,
+      indicators: p.indicators.map((i) => (i.id ? i : { ...i, id: uid("i") })),
+      overlays: p.overlays.map((o) => (o.id ? o : { ...o, id: uid("d") })),
+    })),
+  };
+}
+
+/** O foco está num campo de texto (aí os atalhos do gráfico não valem)? */
+const typing = (t: EventTarget | null) => {
+  const el = t as HTMLElement | null;
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
 };
 
 function Seg<T extends string | number>({ value, options, onChange, label, render }: { value: T; options: readonly T[]; onChange: (v: T) => void; label: string; render: (v: T) => string }) {
@@ -126,6 +103,8 @@ function Seg<T extends string | number>({ value, options, onChange, label, rende
   );
 }
 
+type Sel = { pane: number; id: string };
+
 export function ChartWorkspace({
   initialTabs,
   initialPrefs,
@@ -135,7 +114,7 @@ export function ChartWorkspace({
   initialPrefs: { tools: ToolPrefs; activeTabId: number | null };
   symbols: SymbolOption[];
 }) {
-  const [tabs, setTabs] = useState(initialTabs);
+  const [tabs, setTabs] = useState(() => initialTabs.map((t) => ({ ...t, state: withIds(t.state) })));
   const [activeId, setActiveId] = useState(
     initialTabs.some((t) => t.id === initialPrefs.activeTabId) ? (initialPrefs.activeTabId as number) : initialTabs[0].id,
   );
@@ -144,11 +123,21 @@ export function ChartWorkspace({
   const [magnet, setMagnet] = useState(false);
   const [hideDrawings, setHideDrawings] = useState(false);
   const [hideIndicators, setHideIndicators] = useState(false);
-  const [dialog, setDialog] = useState<null | "symbol" | "indicators" | "tools" | "compare">(null);
+  const [dialog, setDialog] = useState<null | "symbol" | "indicators" | "tools" | "compare" | "objects">(null);
+  // Desenho selecionado (barra rápida), desenho com as configurações abertas e ferramenta em uso.
+  const [selected, setSelected] = useState<Sel | null>(null);
+  const [settingsFor, setSettingsFor] = useState<Sel | null>(null);
+  const [drawing, setDrawing] = useState<{ pane: number; tool: string } | null>(null);
+  // Menu e configurações de indicador (ícones ao lado do nome).
+  const [indMenu, setIndMenu] = useState<(MenuTarget & { pane: number }) | null>(null);
+  const [indSettings, setIndSettings] = useState<{ pane: number; index: number; figures: Figure[] } | null>(null);
   // Avisos por janela (o aviso de uma janela não apaga o de outra).
   const [errors, setErrors] = useState<Record<number, string | null>>({});
   const error = Object.values(errors).filter(Boolean).join(" · ") || null;
   const handles = useRef<(PaneHandle | null)[]>([]);
+  const root = useRef<HTMLDivElement>(null);
+  // O último clique foi dentro do gráfico? (atalhos só valem no contexto do gráfico)
+  const focusInside = useRef(false);
   // Um salvamento pendente por aba: editar outra aba não cancela o da primeira.
   const pending = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; state: TabState }>());
 
@@ -165,19 +154,35 @@ export function ChartWorkspace({
       if (!r.ok) toast.error(r.error);
     });
   }
-  // Salva a aba na conta ~1 s depois da última mudança.
+  // Salva a aba na conta ~1 s depois da última mudança (estados consolidados, não cada movimento).
+  function scheduleSave(id: number, state: TabState) {
+    clearTimeout(pending.current.get(id)?.timer);
+    pending.current.set(id, { state, timer: setTimeout(() => flushSave(id), 1000) });
+  }
+  // Mudança numa divisão (usa o estado mais recente: o gráfico avisa de desenhos a qualquer momento).
+  function updatePaneOf(tabId: number, index: number, patch: Partial<PaneState>) {
+    setTabs((list) =>
+      list.map((t) => {
+        if (t.id !== tabId) return t;
+        const state = { ...t.state, panes: t.state.panes.map((p, i) => (i === index ? { ...p, ...patch } : p)) };
+        scheduleSave(tabId, state);
+        return { ...t, state };
+      }),
+    );
+  }
+  const updatePane = (patch: Partial<PaneState>, index = paneIndex) => updatePaneOf(tab.id, index, patch);
   function updateTab(next: TabState) {
     setTabs((list) => list.map((t) => (t.id === tab.id ? { ...t, state: next } : t)));
-    const id = tab.id;
-    clearTimeout(pending.current.get(id)?.timer);
-    pending.current.set(id, { state: next, timer: setTimeout(() => flushSave(id), 1000) });
+    scheduleSave(tab.id, next);
   }
-  const updatePane = (patch: Partial<PaneState>, index = paneIndex) =>
-    updateTab({ ...tab.state, panes: tab.state.panes.map((p, i) => (i === index ? { ...p, ...patch } : p)) });
 
   function savePrefs(nextTools: ToolPrefs, nextActive: number) {
     void safeAction(() => saveChartPrefsAction(nextTools, nextActive));
   }
+  const changePrefs = (next: ToolPrefs) => {
+    setTools(next);
+    savePrefs(next, tab.id);
+  };
   // Ao sair da página (ou esconder a aba do navegador), salva o que estiver pendente em vez de descartar.
   const flushAll = useRef(() => {});
   useEffect(() => {
@@ -200,9 +205,76 @@ export function ChartWorkspace({
     };
   }, []);
 
+  // ---------- Desenho selecionado ----------
+  const selectedObject = selected ? (tab.state.panes[selected.pane]?.overlays.find((o) => o.id === selected.id) ?? null) : null;
+  const settingsObject = settingsFor ? (tab.state.panes[settingsFor.pane]?.overlays.find((o) => o.id === settingsFor.id) ?? null) : null;
+  const objectOps = (sel: Sel) => {
+    const h = handles.current[sel.pane];
+    return {
+      update: (patch: Partial<OverlayState>) => h?.updateOverlay(sel.id, patch),
+      settings: () => setSettingsFor(sel),
+      duplicate: () => {
+        const copy = h?.duplicateOverlay(sel.id);
+        if (copy) setSelected({ pane: sel.pane, id: copy });
+      },
+      hide: () => {
+        h?.updateOverlay(sel.id, { visible: false });
+        setSelected(null);
+        toast("Desenho oculto. Para mostrar de novo, use a lista de desenhos.");
+      },
+      remove: () => {
+        h?.removeOverlay(sel.id);
+        setSelected(null);
+      },
+      order: (to: "front" | "back" | "forward" | "backward") => h?.orderOverlay(sel.id, to),
+    };
+  };
+
+  // Atalhos (Delete, Ctrl+D, Ctrl+O, Esc): só no contexto do gráfico e fora de campos de texto.
+  const keyState = useRef({ selected, drawing, dialog, settingsFor, indSettings });
+  useEffect(() => {
+    keyState.current = { selected, drawing, dialog, settingsFor, indSettings };
+  });
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      focusInside.current = !!root.current?.contains(e.target as Node);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const k = keyState.current;
+      // Janela ou menu aberto: as teclas são deles (o Esc que fecha uma janela não tira a seleção).
+      const overlayOpen = !!document.querySelector('[role="dialog"][data-state="open"], [role="menu"][data-state="open"]');
+      if (typing(e.target) || overlayOpen || k.dialog || k.settingsFor || k.indSettings || !focusInside.current) return;
+      if (matches(e, "charts.cancel")) {
+        if (k.drawing && handles.current[k.drawing.pane]?.cancelDraw()) return;
+        if (k.selected) setSelected(null);
+        return;
+      }
+      if (!k.selected) return;
+      const ops = objectOps(k.selected);
+      if (matches(e, "charts.delete")) {
+        e.preventDefault();
+        ops.remove();
+      } else if (matches(e, "charts.duplicate")) {
+        e.preventDefault();
+        ops.duplicate();
+      } else if (matches(e, "charts.hide")) {
+        e.preventDefault();
+        ops.hide();
+      }
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    // Na captura: roda antes de a janela aberta tratar (e fechar com) o Esc.
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, []);
+
   function selectTab(id: number) {
     setActiveId(id);
     setActivePane(0);
+    setSelected(null);
     savePrefs(tools, id);
   }
 
@@ -212,7 +284,7 @@ export function ChartWorkspace({
     const r = await safeAction(() => createChartTabAction(name));
     if (!r.ok) return toast.error(r.error);
     const id = (r as { ok: true; id: number }).id;
-    setTabs((list) => [...list, { id, name, state: { layout: 1, panes: [defaultPane(pane.symbol)] } }]);
+    setTabs((list) => [...list, { id, name, state: withIds({ layout: 1, panes: [defaultPane(pane.symbol)] }) }]);
     selectTab(id);
   }
 
@@ -236,18 +308,52 @@ export function ChartWorkspace({
 
   function setLayout(layout: ChartLayout) {
     const panes = [...tab.state.panes];
-    while (panes.length < layout) panes.push(defaultPane(pane.symbol));
+    while (panes.length < layout) panes.push(withIds({ layout: 1, panes: [defaultPane(pane.symbol)] }).panes[0]);
     updateTab({ layout, panes: panes.slice(0, layout) });
     if (activePane >= layout) setActivePane(0);
+    setSelected(null);
   }
 
-  const favorites = tools.favorites.filter((t) => tools.visible.includes(t));
-  const others = tools.visible.filter((t) => !tools.favorites.includes(t));
-  const draw = (tool: string) => handles.current[paneIndex]?.draw(tool);
+  const draw = (tool: string) => {
+    setSelected(null);
+    handles.current[paneIndex]?.draw(tool);
+    setDrawing({ pane: paneIndex, tool });
+  };
   const forAll = (fn: (h: PaneHandle) => void) => handles.current.forEach((h) => h && fn(h));
+  const toggleFavorite = (t: string) =>
+    changePrefs({
+      ...tools,
+      favorites: tools.favorites.includes(t) ? tools.favorites.filter((x) => x !== t) : [...tools.favorites, t],
+      visible: [...new Set([...tools.visible, t])],
+    });
+
+  // Ícones ao lado do nome de um indicador.
+  function indicatorAction(paneI: number, a: IndicatorAction) {
+    const p = tab.state.panes[paneI];
+    const index = p.indicators.findIndex((i) => i.id === a.id);
+    if (index < 0) return; // comparações não têm esses ícones
+    const ind = p.indicators[index];
+    if (a.action === "hide" || a.action === "show") {
+      updatePane({ indicators: p.indicators.map((x, j) => (j === index ? { ...x, visible: x.visible === false } : x)) }, paneI);
+    } else if (a.action === "settings") {
+      setIndSettings({ pane: paneI, index, figures: handles.current[paneI]?.getFigures(a.id) ?? [] });
+    } else if (a.action === "remove") {
+      if (window.confirm(`Apagar ${indicatorLabel(ind.name)} deste gráfico?`)) updatePane({ indicators: p.indicators.filter((_, j) => j !== index) }, paneI);
+    } else if (a.action === "more") {
+      setIndMenu({ pane: paneI, index, x: a.x, y: a.y });
+    }
+  }
+  const toggleFavoriteIndicator = (name: string) =>
+    changePrefs({
+      ...tools,
+      favoriteIndicators: tools.favoriteIndicators.includes(name) ? tools.favoriteIndicators.filter((x) => x !== name) : [...tools.favoriteIndicators, name],
+    });
+
+  const activeTool = drawing && drawing.pane === paneIndex ? drawing.tool : null;
+  const iconBtn = "grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted";
 
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={root} className="flex flex-col gap-2">
       {/* Abas de trabalho */}
       <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Abas de gráficos">
         {tabs.map((t) => (
@@ -283,7 +389,12 @@ export function ChartWorkspace({
         <Button size="sm" variant="outline" onClick={() => setDialog("symbol")} aria-label="Escolher par">
           <Search /> {pane.symbol}
         </Button>
-        <Seg label="Tempo do gráfico" value={pane.interval} options={CHART_INTERVALS} onChange={(interval) => updatePane({ interval })} render={(v) => INTERVAL_LABEL[v]} />
+        <IntervalBar
+          value={pane.interval}
+          shown={tools.intervals}
+          onChange={(interval) => updatePane({ interval })}
+          onShownChange={(intervals) => changePrefs({ ...tools, intervals })}
+        />
         <Seg label="Tipo de gráfico" value={pane.chartType} options={["candle", "ohlc", "area", "line"] as const} onChange={(chartType) => updatePane({ chartType })} render={(v) => TYPE_LABEL[v]} />
         <Seg label="Escala" value={pane.scale} options={["normal", "logarithm", "percentage"] as const} onChange={(scale) => updatePane({ scale })} render={(v) => SCALE_LABEL[v]} />
         <Button size="sm" variant="outline" onClick={() => setDialog("indicators")}>
@@ -292,6 +403,7 @@ export function ChartWorkspace({
         <Button size="sm" variant="outline" onClick={() => setDialog("compare")}>
           Comparar ({pane.compares.length})
         </Button>
+        <FavoritesBar prefs={tools} activeTool={activeTool} onDraw={draw} />
         <div className="ml-auto flex items-center gap-1.5">
           <LayoutGrid className="size-4 text-muted-foreground" />
           <Seg label="Layout" value={tab.state.layout} options={CHART_LAYOUTS} onChange={setLayout} render={(v) => String(v)} />
@@ -303,25 +415,7 @@ export function ChartWorkspace({
       <div className="flex gap-2">
         {/* Barra lateral de ferramentas */}
         <div className="flex w-10 shrink-0 flex-col items-center gap-1 rounded-lg border bg-card py-1.5" aria-label="Ferramentas de desenho">
-          {[...favorites, ...others].map((t, i) => {
-            const Icon = TOOL_ICON[t] ?? Slash;
-            return (
-              <button
-                key={t}
-                type="button"
-                title={TOOL_LABEL[t]}
-                aria-label={TOOL_LABEL[t]}
-                onClick={() => draw(t)}
-                className={cn(
-                  "relative grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground",
-                  i === favorites.length - 1 && favorites.length > 0 && others.length > 0 && "mb-1 after:absolute after:-bottom-1 after:h-px after:w-6 after:bg-border",
-                )}
-              >
-                <Icon className="size-4" />
-                {favorites.includes(t) && <Star className="absolute top-0.5 right-0.5 size-2 fill-amber-400 text-amber-400" />}
-              </button>
-            );
-          })}
+          <ToolGroups prefs={tools} activeTool={activeTool} onDraw={draw} onToggleFavorite={toggleFavorite} />
           <div className="my-1 w-6 border-t" />
           <button
             type="button"
@@ -332,7 +426,7 @@ export function ChartWorkspace({
               setMagnet(!magnet);
               forAll((h) => h.setMagnet(!magnet));
             }}
-            className={cn("grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted", magnet && "bg-muted text-foreground")}
+            className={cn(iconBtn, magnet && "bg-muted text-foreground")}
           >
             <Magnet className="size-4" />
           </button>
@@ -344,7 +438,7 @@ export function ChartWorkspace({
               setHideDrawings(!hideDrawings);
               forAll((h) => h.setHidden("drawings", !hideDrawings));
             }}
-            className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted"
+            className={iconBtn}
           >
             {hideDrawings ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           </button>
@@ -356,26 +450,27 @@ export function ChartWorkspace({
               setHideIndicators(!hideIndicators);
               forAll((h) => h.setHidden("indicators", !hideIndicators));
             }}
-            className={cn("grid size-8 place-items-center rounded text-[10px] font-semibold text-muted-foreground hover:bg-muted", hideIndicators && "line-through")}
+            className={cn(iconBtn, "text-[10px] font-semibold", hideIndicators && "line-through")}
           >
             IND
+          </button>
+          <button type="button" title="Lista de desenhos (mostrar ocultos)" aria-label="Lista de desenhos" onClick={() => setDialog("objects")} className={iconBtn}>
+            <ListTree className="size-4" />
           </button>
           <button
             type="button"
             title="Apagar os desenhos do gráfico selecionado"
             aria-label="Apagar desenhos"
-            onClick={() => window.confirm("Apagar todos os desenhos deste gráfico?") && handles.current[paneIndex]?.clearDrawings()}
-            className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
+            onClick={() => {
+              if (!window.confirm("Apagar todos os desenhos deste gráfico?")) return;
+              handles.current[paneIndex]?.clearDrawings();
+              setSelected(null);
+            }}
+            className={cn(iconBtn, "hover:text-destructive")}
           >
             <Trash2 className="size-4" />
           </button>
-          <button
-            type="button"
-            title="Personalizar ferramentas"
-            aria-label="Personalizar ferramentas"
-            onClick={() => setDialog("tools")}
-            className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted"
-          >
+          <button type="button" title="Personalizar ferramentas" aria-label="Personalizar ferramentas" onClick={() => setDialog("tools")} className={iconBtn}>
             <Settings2 className="size-4" />
           </button>
         </div>
@@ -388,10 +483,22 @@ export function ChartWorkspace({
               pane={p}
               active={i === paneIndex}
               onActivate={() => setActivePane(i)}
-              onOverlays={(overlays: OverlayState[]) => updatePane({ overlays }, i)}
+              onOverlays={(overlays: OverlayState[]) => updatePaneOf(tab.id, i, { overlays })}
               onError={(message) => setErrors((all) => (all[i] === message ? all : { ...all, [i]: message }))}
+              onSelect={(id) => setSelected(id ? { pane: i, id } : null)}
+              onObjectSettings={(id) => setSettingsFor({ pane: i, id })}
+              onIndicatorAction={(a) => indicatorAction(i, a)}
+              onDrawingChange={(on) => setDrawing((d) => (on ? d : d?.pane === i ? null : d))}
               handleRef={(h) => (handles.current[i] = h)}
-            />
+            >
+              {selected?.pane === i && selectedObject && <ObjectToolbar object={selectedObject} actions={objectOps(selected)} />}
+              {/* Aviso flutuante (não empurra o gráfico enquanto se marcam os pontos). */}
+              {drawing?.pane === i && (
+                <p role="status" className="pointer-events-none absolute bottom-9 left-1/2 z-20 -translate-x-1/2 rounded-md bg-popover/90 px-2.5 py-1 text-xs text-muted-foreground shadow">
+                  Desenhando: {TOOL_LABEL[drawing.tool]}. Clique para marcar os pontos — Esc cancela.
+                </p>
+              )}
+            </ChartPane>
           ))}
         </div>
       </div>
@@ -406,16 +513,56 @@ export function ChartWorkspace({
       </div>
 
       <SymbolDialog open={dialog === "symbol"} onClose={() => setDialog(null)} symbols={symbols} onPick={(symbol) => (updatePane({ symbol }), setDialog(null))} />
-      <IndicatorsDialog open={dialog === "indicators"} onClose={() => setDialog(null)} pane={pane} onChange={(indicators) => updatePane({ indicators })} />
-      <CompareDialog open={dialog === "compare"} onClose={() => setDialog(null)} pane={pane} symbols={symbols} onChange={(compares) => updatePane({ compares })} />
-      <ToolsDialog
-        open={dialog === "tools"}
+      <IndicatorsDialog
+        open={dialog === "indicators"}
         onClose={() => setDialog(null)}
-        prefs={tools}
-        onChange={(next) => {
-          setTools(next);
-          savePrefs(next, tab.id);
+        pane={pane}
+        favorites={tools.favoriteIndicators}
+        onFavorite={toggleFavoriteIndicator}
+        onChange={(indicators) => updatePane({ indicators })}
+      />
+      <CompareDialog open={dialog === "compare"} onClose={() => setDialog(null)} pane={pane} symbols={symbols} onChange={(compares) => updatePane({ compares })} />
+      <ToolsDialog open={dialog === "tools"} onClose={() => setDialog(null)} prefs={tools} onChange={changePrefs} />
+      <ObjectsDialog
+        open={dialog === "objects"}
+        onClose={() => setDialog(null)}
+        objects={pane.overlays}
+        onToggle={(o, patch) => o.id && handles.current[paneIndex]?.updateOverlay(o.id, patch)}
+        onRemove={(o) => o.id && handles.current[paneIndex]?.removeOverlay(o.id)}
+        onSelect={(o) => {
+          if (!o.id) return;
+          setDialog(null);
+          setSettingsFor({ pane: paneIndex, id: o.id });
         }}
+      />
+      <ObjectSettingsDialog
+        open={!!settingsFor}
+        object={settingsObject}
+        onClose={() => setSettingsFor(null)}
+        onApply={(patch) => settingsFor && handles.current[settingsFor.pane]?.updateOverlay(settingsFor.id, patch)}
+      />
+      <IndicatorMenu
+        target={indMenu}
+        indicators={indMenu ? tab.state.panes[indMenu.pane].indicators : []}
+        favorites={tools.favoriteIndicators}
+        onClose={() => setIndMenu(null)}
+        onFavorite={toggleFavoriteIndicator}
+        onSettings={(index) => {
+          if (!indMenu) return;
+          const id = tab.state.panes[indMenu.pane].indicators[index]?.id ?? "";
+          setIndSettings({ pane: indMenu.pane, index, figures: handles.current[indMenu.pane]?.getFigures(id) ?? [] });
+          setIndMenu(null);
+        }}
+        onChange={(indicators) => indMenu && updatePane({ indicators }, indMenu.pane)}
+      />
+      <IndicatorSettingsDialog
+        open={!!indSettings}
+        indicator={indSettings ? (tab.state.panes[indSettings.pane]?.indicators[indSettings.index] ?? null) : null}
+        figures={indSettings?.figures ?? []}
+        onClose={() => setIndSettings(null)}
+        onApply={(next) =>
+          indSettings && updatePane({ indicators: tab.state.panes[indSettings.pane].indicators.map((x, j) => (j === indSettings.index ? next : x)) }, indSettings.pane)
+        }
       />
     </div>
   );
@@ -454,9 +601,26 @@ function SymbolDialog({ open, onClose, symbols, onPick }: { open: boolean; onClo
   );
 }
 
-function IndicatorsDialog({ open, onClose, pane, onChange }: { open: boolean; onClose: () => void; pane: PaneState; onChange: (i: PaneState["indicators"]) => void }) {
+function IndicatorsDialog({
+  open,
+  onClose,
+  pane,
+  favorites,
+  onFavorite,
+  onChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  pane: PaneState;
+  favorites: string[];
+  onFavorite: (name: string) => void;
+  onChange: (i: IndicatorState[]) => void;
+}) {
   const [q, setQ] = useState("");
-  const list = CHART_INDICATORS.filter((i) => !q.trim() || i.label.toLowerCase().includes(q.trim().toLowerCase()));
+  // Favoritos primeiro.
+  const list = CHART_INDICATORS.filter((i) => !q.trim() || i.label.toLowerCase().includes(q.trim().toLowerCase())).sort(
+    (a, b) => Number(favorites.includes(b.name)) - Number(favorites.includes(a.name)),
+  );
   const full = pane.indicators.length >= LIMITS.indicatorsPerPane;
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -468,19 +632,31 @@ function IndicatorsDialog({ open, onClose, pane, onChange }: { open: boolean; on
           <div className="flex flex-col gap-2">
             <Input aria-label="Buscar indicador" placeholder="Buscar indicador" value={q} onChange={(e) => setQ(e.target.value)} />
             <ul className="max-h-80 overflow-auto">
-              {list.map((i) => (
-                <li key={i.name}>
-                  <button
-                    type="button"
-                    disabled={full}
-                    onClick={() => onChange([...pane.indicators, { name: i.name, params: i.params, pane: i.pane }])}
-                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
-                  >
-                    {i.label}
-                    <span className="text-xs text-muted-foreground">{i.pane === "main" ? "no preço" : "painel"}</span>
-                  </button>
-                </li>
-              ))}
+              {list.map((i) => {
+                const fav = favorites.includes(i.name);
+                return (
+                  <li key={i.name} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={fav ? `Tirar ${i.label} dos favoritos` : `Favoritar ${i.label}`}
+                      aria-pressed={fav}
+                      onClick={() => onFavorite(i.name)}
+                      className="grid size-7 place-items-center rounded hover:bg-muted"
+                    >
+                      <Star className={cn("size-3.5", fav ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={full}
+                      onClick={() => onChange([...pane.indicators, { id: newIndicatorId(), name: i.name, params: i.params, pane: i.pane }])}
+                      className="flex min-w-0 flex-1 items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+                    >
+                      {i.label}
+                      <span className="text-xs text-muted-foreground">{i.pane === "main" ? "no preço" : "painel"}</span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
           <div className="flex flex-col gap-2">
@@ -489,8 +665,9 @@ function IndicatorsDialog({ open, onClose, pane, onChange }: { open: boolean; on
             </p>
             <ul className="flex max-h-80 flex-col gap-1.5 overflow-auto" aria-label="Indicadores no gráfico">
               {pane.indicators.map((ind, idx) => (
-                <li key={`${idx}-${ind.name}-${ind.params.join(",")}`} className="flex items-center gap-2 text-sm">
-                  <span className="min-w-0 flex-1 truncate">{CHART_INDICATORS.find((c) => c.name === ind.name)?.label ?? ind.name}</span>
+                <li key={`${ind.id ?? idx}-${ind.params.join(",")}`} className="flex items-center gap-2 text-sm">
+                  <span className={cn("min-w-0 flex-1 truncate", ind.visible === false && "text-muted-foreground line-through")}>{indicatorLabel(ind.name)}</span>
+                  {/* Ajuste rápido dos períodos: é o mesmo dado da janela de configurações. */}
                   <Input
                     aria-label={`Parâmetros de ${ind.name}`}
                     className="h-7 w-28 text-xs"
@@ -521,14 +698,38 @@ function IndicatorsDialog({ open, onClose, pane, onChange }: { open: boolean; on
 
 function ToolsDialog({ open, onClose, prefs, onChange }: { open: boolean; onClose: () => void; prefs: ToolPrefs; onChange: (p: ToolPrefs) => void }) {
   const toggle = (list: string[], t: string) => (list.includes(t) ? list.filter((x) => x !== t) : [...list, t]);
+  const move = (t: string, dir: -1 | 1) => {
+    const list = [...prefs.favorites];
+    const i = list.indexOf(t);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    onChange({ ...prefs, favorites: list });
+  };
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Personalizar ferramentas</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">Escolha quais aparecem na barra lateral e quais são favoritas (ficam no topo).</p>
-        <ul className="flex max-h-96 flex-col gap-1 overflow-auto">
+        <p className="text-sm text-muted-foreground">Escolha quais aparecem nos menus da barra lateral e quais são favoritas (barra de acesso rápido, na ordem abaixo).</p>
+        {prefs.favorites.length > 0 && (
+          <ol className="flex flex-col gap-1 rounded-md border p-2" aria-label="Ordem das favoritas">
+            {prefs.favorites.map((t, i) => (
+              <li key={t} className="flex items-center gap-2 text-sm">
+                <Star className="size-3.5 fill-amber-400 text-amber-400" />
+                <span className="flex-1">{TOOL_LABEL[t] ?? t}</span>
+                <Button size="icon-sm" variant="ghost" aria-label={`Subir ${TOOL_LABEL[t] ?? t}`} disabled={i === 0} onClick={() => move(t, -1)}>
+                  <ArrowUp />
+                </Button>
+                <Button size="icon-sm" variant="ghost" aria-label={`Descer ${TOOL_LABEL[t] ?? t}`} disabled={i === prefs.favorites.length - 1} onClick={() => move(t, 1)}>
+                  <ArrowDown />
+                </Button>
+              </li>
+            ))}
+          </ol>
+        )}
+        <ul className="flex max-h-80 flex-col gap-1 overflow-auto">
           {CHART_TOOLS.map((t) => {
             const visible = prefs.visible.includes(t.name);
             const fav = prefs.favorites.includes(t.name);
@@ -538,16 +739,14 @@ function ToolsDialog({ open, onClose, prefs, onChange }: { open: boolean; onClos
                   type="checkbox"
                   aria-label={`Mostrar ${t.label}`}
                   checked={visible}
-                  onChange={() =>
-                    onChange({ visible: toggle(prefs.visible, t.name), favorites: visible ? prefs.favorites.filter((x) => x !== t.name) : prefs.favorites })
-                  }
+                  onChange={() => onChange({ ...prefs, visible: toggle(prefs.visible, t.name), favorites: visible ? prefs.favorites.filter((x) => x !== t.name) : prefs.favorites })}
                 />
                 <span className="flex-1">{t.label}</span>
                 <button
                   type="button"
                   aria-label={fav ? `Tirar ${t.label} dos favoritos` : `Favoritar ${t.label}`}
                   aria-pressed={fav}
-                  onClick={() => onChange({ visible: fav ? prefs.visible : [...new Set([...prefs.visible, t.name])], favorites: toggle(prefs.favorites, t.name) })}
+                  onClick={() => onChange({ ...prefs, visible: fav ? prefs.visible : [...new Set([...prefs.visible, t.name])], favorites: toggle(prefs.favorites, t.name) })}
                 >
                   <Star className={cn("size-4", fav ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />
                 </button>
@@ -584,6 +783,8 @@ function CompareDialog({
   }, [q, symbols]);
   const labelOf = (c: CompareState) =>
     c.kind === "macro" ? (MACRO_SERIES.find((m) => m.id === c.id)?.label ?? c.id) : c.id === "PAXGUSDT" ? "Ouro (PAXG/USDT)" : c.id === "XAUTUSDT" ? "Ouro (XAUT/USDT)" : c.id;
+  // Onde aparece: escolha da pessoa, ou o padrão (pares e liquidez sobre o preço; juros em painel).
+  const displayOf = (c: CompareState) => c.display ?? (c.kind === "macro" && MACRO_SERIES.find((m) => m.id === c.id)?.pane === "sub" ? "sub" : "main");
   const item = (c: CompareState, label: string, hint?: string) => (
     <button
       key={c.kind + c.id}
@@ -603,7 +804,7 @@ function CompareDialog({
           <DialogTitle>Comparar na mesma janela</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          Pares e liquidez aparecem sobre o preço, começando no mesmo ponto (desempenho relativo). Juros aparecem num painel próprio, em %.
+          Sobre o preço, a comparação começa no mesmo ponto (desempenho relativo, sem distorcer o preço). Em painel separado, aparece com os valores reais.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1">
@@ -623,6 +824,15 @@ function CompareDialog({
               {pane.compares.map((c, i) => (
                 <li key={c.kind + c.id} className="flex items-center gap-2 text-sm">
                   <span className="min-w-0 flex-1 truncate">{labelOf(c)}</span>
+                  <select
+                    aria-label={`Onde mostrar ${labelOf(c)}`}
+                    value={displayOf(c)}
+                    onChange={(e) => onChange(pane.compares.map((x, j) => (j === i ? { ...x, display: e.target.value as "main" | "sub" } : x)))}
+                    className="h-7 rounded-md border bg-background px-1 text-xs"
+                  >
+                    <option value="main">Sobre o preço</option>
+                    <option value="sub">Painel separado</option>
+                  </select>
                   <Button size="icon-sm" variant="ghost" aria-label={`Remover comparação ${labelOf(c)}`} onClick={() => onChange(pane.compares.filter((_, j) => j !== i))}>
                     <X />
                   </Button>
