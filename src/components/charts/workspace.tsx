@@ -34,12 +34,14 @@ import {
   type ToolPrefs,
 } from "@/lib/charts/workspace";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
+import { ONCHAIN_SERIES } from "@/lib/charts/onchain-ids";
 import { safeAction } from "@/lib/safe-action";
 import { matches } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import type { IndicatorAction, PaneHandle } from "./chart-pane";
 import { IndicatorMenu, IndicatorSettingsDialog, indicatorLabel, newIndicatorId, type Figure, type MenuTarget } from "./indicator-ui";
-import { ObjectSettingsDialog, ObjectToolbar, ObjectsDialog } from "./object-ui";
+import { ColorPicker, ObjectSettingsDialog, ObjectToolbar, ObjectsDialog, WidthMenu } from "./object-ui";
+import { COMPARE_COLORS } from "@/lib/charts/colors";
 import { FavoritesBar, IntervalBar, ToolGroups } from "./toolbar";
 
 // O gráfico usa o canvas do navegador: carregado só no cliente.
@@ -773,7 +775,12 @@ function CompareDialog({
   onChange: (c: CompareState[]) => void;
 }) {
   const [q, setQ] = useState("");
+  const [oq, setOq] = useState("");
   const full = pane.compares.length >= LIMITS.comparesPerPane;
+  const onchain = ONCHAIN_SERIES.filter((o) => {
+    const t = oq.trim().toLowerCase();
+    return !t || [o.short, o.name, o.description, o.purpose].join(" ").toLowerCase().includes(t);
+  });
   const has = (c: CompareState) => pane.compares.some((x) => x.kind === c.kind && x.id === c.id);
   const add = (c: CompareState) => !full && !has(c) && onChange([...pane.compares, c]);
   const gold = symbols.filter((s) => s.symbol === "PAXGUSDT" || s.symbol === "XAUTUSDT");
@@ -782,9 +789,29 @@ function CompareDialog({
     return t ? symbols.filter((s) => s.symbol.includes(t)).slice(0, 30) : [];
   }, [q, symbols]);
   const labelOf = (c: CompareState) =>
-    c.kind === "macro" ? (MACRO_SERIES.find((m) => m.id === c.id)?.label ?? c.id) : c.id === "PAXGUSDT" ? "Ouro (PAXG/USDT)" : c.id === "XAUTUSDT" ? "Ouro (XAUT/USDT)" : c.id;
-  // Onde aparece: escolha da pessoa, ou o padrão (pares e liquidez sobre o preço; juros em painel).
-  const displayOf = (c: CompareState) => c.display ?? (c.kind === "macro" && MACRO_SERIES.find((m) => m.id === c.id)?.pane === "sub" ? "sub" : "main");
+    c.kind === "macro"
+      ? (MACRO_SERIES.find((m) => m.id === c.id)?.label ?? c.id)
+      : c.kind === "onchain"
+        ? (ONCHAIN_SERIES.find((o) => o.id === c.id)?.short ?? c.id)
+        : c.id === "PAXGUSDT"
+          ? "Ouro (PAXG/USDT)"
+          : c.id === "XAUTUSDT"
+            ? "Ouro (XAUT/USDT)"
+            : c.id;
+  // Onde aparece: escolha da pessoa, ou o padrão (pares e liquidez sobre o preço; juros e on-chain sem US$ em painel;
+  // on-chain em US$ sobre o preço só no BTCUSDT).
+  const displayOf = (c: CompareState) =>
+    c.display ??
+    (c.kind === "macro"
+      ? MACRO_SERIES.find((m) => m.id === c.id)?.pane === "sub"
+        ? "sub"
+        : "main"
+      : c.kind === "onchain"
+        ? ONCHAIN_SERIES.find((o) => o.id === c.id)?.unit === "usd" && pane.symbol === "BTCUSDT"
+          ? "main"
+          : "sub"
+        : "main");
+  const patch = (i: number, p: Partial<CompareState>) => onChange(pane.compares.map((x, j) => (j === i ? ({ ...x, ...p } as CompareState) : x)));
   const item = (c: CompareState, label: string, hint?: string) => (
     <button
       key={c.kind + c.id}
@@ -799,7 +826,7 @@ function CompareDialog({
   );
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Comparar na mesma janela</DialogTitle>
         </DialogHeader>
@@ -812,6 +839,32 @@ function CompareDialog({
             {gold.map((g) => item({ kind: "pair", id: g.symbol }, labelOf({ kind: "pair", id: g.symbol }), "Binance"))}
             <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Macro (FRED)</p>
             {MACRO_SERIES.map((m) => item({ kind: "macro", id: m.id }, m.label, m.pane === "sub" ? "painel" : "rebase"))}
+            <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">On-chain (rede Bitcoin)</p>
+            <Input aria-label="Buscar indicador on-chain" placeholder="Buscar (ex.: SOPR, ciclo)" value={oq} onChange={(e) => setOq(e.target.value)} />
+            <ul className="max-h-56 overflow-auto" aria-label="Indicadores on-chain">
+              {onchain.map((o) => {
+                const c: CompareState = { kind: "onchain", id: o.id };
+                return (
+                  <li key={o.id}>
+                    <button
+                      type="button"
+                      disabled={full || has(c)}
+                      onClick={() => add(c)}
+                      aria-label={`${o.short} — ${o.name}`}
+                      className="flex w-full flex-col rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+                    >
+                      <span>
+                        <span className="font-medium">{o.short}</span> <span className="text-xs text-muted-foreground">{o.name}</span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">{o.description}</span>
+                      <span className="text-xs text-muted-foreground/80">{o.purpose}</span>
+                      {o.note && <span className="text-[11px] text-amber-400/80">{o.note}</span>}
+                    </button>
+                  </li>
+                );
+              })}
+              {!onchain.length && <li className="px-2 py-2 text-xs text-muted-foreground">Nenhum indicador encontrado.</li>}
+            </ul>
             <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Outro par</p>
             <Input aria-label="Buscar par para comparar" placeholder="Buscar (ex.: ETHUSDT)" value={q} onChange={(e) => setQ(e.target.value)} />
             <div className="max-h-40 overflow-auto">{pairs.map((s) => item({ kind: "pair", id: s.symbol }, `${s.base}/${s.quote}`))}</div>
@@ -822,12 +875,17 @@ function CompareDialog({
             </p>
             <ul className="flex flex-col gap-1" aria-label="Comparações no gráfico">
               {pane.compares.map((c, i) => (
-                <li key={c.kind + c.id} className="flex items-center gap-2 text-sm">
-                  <span className="min-w-0 flex-1 truncate">{labelOf(c)}</span>
+                <li key={c.kind + c.id} className="flex items-center gap-1 text-sm">
+                  <span className={cn("min-w-0 flex-1 truncate", c.visible === false && "text-muted-foreground line-through")}>{labelOf(c)}</span>
+                  <ColorPicker label={`Cor de ${labelOf(c)}`} value={c.color ?? COMPARE_COLORS[i % COMPARE_COLORS.length]} onChange={(color) => patch(i, { color })} />
+                  <WidthMenu value={c.size ?? 1.5} onChange={(size) => patch(i, { size })} />
+                  <Button size="icon-sm" variant="ghost" aria-label={c.visible === false ? `Mostrar ${labelOf(c)}` : `Ocultar ${labelOf(c)}`} onClick={() => patch(i, { visible: c.visible === false })}>
+                    {c.visible === false ? <EyeOff /> : <Eye />}
+                  </Button>
                   <select
                     aria-label={`Onde mostrar ${labelOf(c)}`}
                     value={displayOf(c)}
-                    onChange={(e) => onChange(pane.compares.map((x, j) => (j === i ? { ...x, display: e.target.value as "main" | "sub" } : x)))}
+                    onChange={(e) => patch(i, { display: e.target.value as "main" | "sub" })}
                     className="h-7 rounded-md border bg-background px-1 text-xs"
                   >
                     <option value="main">Sobre o preço</option>

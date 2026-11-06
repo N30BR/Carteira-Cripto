@@ -6,6 +6,7 @@ import type { ChartInterval } from "@/lib/charts/params";
 import { splitSymbol } from "@/lib/charts/params";
 import type { IndicatorState, OverlayState, OverlayStyleState, PaneState } from "@/lib/charts/workspace";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
+import { onchainInfo } from "@/lib/charts/onchain-ids";
 import type { Point } from "@/lib/charts/macro-math";
 import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
@@ -655,7 +656,7 @@ export function ChartPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indicatorKey, pane.symbol, pane.interval]);
 
-  // Comparações: busca os dados (par da Binance no mesmo tempo, ou série do FRED) e desenha as linhas.
+  // Comparações: busca os dados (par da Binance no mesmo tempo, série do FRED ou on-chain) e desenha as linhas.
   // Sobre o preço (começando no mesmo ponto) ou em painel separado, conforme a escolha de cada uma.
   const compareIds = useRef<string[]>([]);
   const compareKey = JSON.stringify(pane.compares);
@@ -670,7 +671,25 @@ export function ChartPane({
         let points: Point[];
         let label: string;
         let sub: boolean;
-        if (cmp.kind === "pair") {
+        // Sobre o preço sem rebase (mesma unidade: US$ do BTC) e linha de referência no painel.
+        let raw = false;
+        let reference: number | undefined;
+        let dated = false;
+        if (cmp.kind === "onchain") {
+          const info = onchainInfo(cmp.id);
+          const res = await fetch(`/api/onchain?${new URLSearchParams({ id: cmp.id })}`);
+          const body = (await res.json().catch(() => null)) as { points?: Point[]; source?: string; stale?: boolean; error?: string } | null;
+          if (!res.ok || !body?.points) throw new Error(body?.error ?? "Dados indisponíveis");
+          points = body.points;
+          label = `${info?.short ?? cmp.id}${body.source === "calculo" ? " (cálculo)" : ""}${body.stale ? " · guardado" : ""}`;
+          const onBtcUsd = pane.symbol === "BTCUSDT";
+          const display = cmp.display ?? (info?.unit === "usd" && onBtcUsd ? "main" : "sub");
+          sub = display === "sub";
+          // Em US$ e no BTCUSDT: direto na escala do preço; outras unidades sobre o preço: normalizado (rebase).
+          raw = !sub && info?.unit === "usd" && onBtcUsd;
+          reference = sub ? info?.reference : undefined;
+          dated = true;
+        } else if (cmp.kind === "pair") {
           const data = await loadCandles(cmp.id, pane.interval, null, 1000);
           points = data.map((k) => [k.timestamp, k.close]);
           label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : cmp.id;
@@ -684,15 +703,36 @@ export function ChartPane({
           sub = cmp.display ? cmp.display === "sub" : meta?.pane === "sub";
         }
         if (cancelled) return;
-        const color = COMPARE_COLORS[slot % COMPARE_COLORS.length];
+        const color = cmp.color ?? COMPARE_COLORS[slot % COMPARE_COLORS.length];
         const id = c.createIndicator(
           {
-            name: `${sub ? "MACRO" : "COMPARE"}_${slot}`,
+            name: `${sub ? "MACRO" : raw ? "RAW" : "COMPARE"}_${slot}`,
             shortName: label,
-            extendData: { label, points, color },
-            styles: { lines: [{ color, size: 1.5 }] },
+            visible: cmp.visible !== false,
+            extendData: { label, points, color, ...(reference !== undefined ? { levels: [reference] } : {}) },
+            styles: { lines: [{ color, size: cmp.size ?? 1.5 }] },
             ...(sub ? {} : { paneId: "candle_pane" }),
-          },
+            // Linha de referência (ex.: SOPR = 1) no painel próprio.
+            ...(reference !== undefined ? { draw: (p: Parameters<typeof drawLevels>[0]) => drawLevels(p) } : {}),
+            // On-chain diário: o cursor mostra a observação disponível e a data dela (sem interpolar).
+            ...(dated
+              ? {
+                  createTooltipDataSource: ({ indicator, crosshair }: { indicator: Indicator; crosshair: { timestamp?: number } }) => {
+                    const t = crosshair.timestamp ?? Date.now();
+                    let obs: Point | undefined;
+                    for (let lo = 0, hi = points.length - 1; lo <= hi; ) {
+                      const mid = (lo + hi) >> 1;
+                      if (points[mid][0] <= t) {
+                        obs = points[mid];
+                        lo = mid + 1;
+                      } else hi = mid - 1;
+                    }
+                    const text = obs ? `${formatValue(obs[1], Math.abs(obs[1]) >= 100 ? 2 : 4, true)} (${new Date(obs[0]).toLocaleDateString("pt-BR", { timeZone: "UTC" })})` : "n/a";
+                    return { name: indicator.shortName, calcParamsText: "", legends: [{ title: { text: "", color: "#a1a1aa" }, value: { text, color } }], features: [] };
+                  },
+                }
+              : {}),
+          } as never,
           !sub,
         );
         if (id) compareIds.current.push(id);

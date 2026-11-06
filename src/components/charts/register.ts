@@ -17,8 +17,8 @@ const bars = (d: KLineData[]) => d.map((b) => ({ ...b, volume: b.volume ?? 0 }))
 const lines = (keys: string[], titles?: string[]) =>
   keys.map((key, i) => ({ key, title: `${titles?.[i] ?? key.toUpperCase()}: `, type: "line" }));
 
-/** Cores das séries comparadas (uma por comparação). */
-export const COMPARE_COLORS = ["#f59e0b", "#38bdf8", "#f472b6", "#a3e635", "#e5e7eb", "#2dd4bf", "#fb923c", "#c084fc", "#facc15", "#94a3b8"];
+import { COMPARE_COLORS } from "@/lib/charts/colors";
+export { COMPARE_COLORS };
 export type CompareData = { label: string; points: Point[]; color: string };
 
 /** Chave que muda quando as velas mudam (para não recalcular a cada movimento do mouse). */
@@ -43,6 +43,15 @@ export function registerChartExtensions(): void {
         const aligned = alignStep(pts, data.map((b) => b.timestamp));
         return rebase(aligned, data.map((b) => b.close)).map((v) => ({ v }));
       },
+    });
+    // Na janela do preço sem rebase: mesma unidade do preço (ex.: preço realizado do BTC em US$).
+    registerIndicator<Row, number, CompareData>({
+      name: `RAW_${slot}`,
+      shortName: "Comparar",
+      series: "price",
+      precision: 2,
+      figures: [{ key: "v", title: "", type: "line" }],
+      calc: (data, ind) => alignStep(ind.extendData?.points ?? [], data.map((b) => b.timestamp)).map((v) => ({ v })),
     });
     // Em painel próprio: o valor real (ex.: juros em %).
     registerIndicator<Row, number, CompareData>({

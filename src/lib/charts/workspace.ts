@@ -1,6 +1,7 @@
 // Estado das abas da aba Gráficos (o que é salvo na conta) e a validação de tudo que vem do navegador.
 // Sem dependências de banco ou navegador: usado no servidor (actions) e no cliente (tela).
 import { MACRO_IDS, type MacroId } from "./macro-ids";
+import { ONCHAIN_IDS, type OnchainId } from "./onchain-ids";
 import { CHART_INTERVALS, splitSymbol, type ChartInterval } from "./params";
 
 export const CHART_TYPES = ["candle", "ohlc", "area", "line"] as const;
@@ -141,7 +142,12 @@ export type OverlayState = {
   locked?: boolean;
 };
 /** Série comparada na mesma divisão: outro par da Binance (ex.: ouro PAXGUSDT) ou série macro do FRED. */
-export type CompareState = ({ kind: "pair"; id: string } | { kind: "macro"; id: MacroId }) & { display?: "main" | "sub" };
+export type CompareState = ({ kind: "pair"; id: string } | { kind: "macro"; id: MacroId } | { kind: "onchain"; id: OnchainId }) & {
+  display?: "main" | "sub";
+  color?: string;
+  size?: number;
+  visible?: boolean;
+};
 export type PaneState = {
   symbol: string;
   interval: ChartInterval;
@@ -355,9 +361,16 @@ function sanitizeOverlay(v: unknown): R<OverlayState> {
 function sanitizeCompare(v: unknown): R<CompareState> {
   if (!isObj(v)) return fail("Comparação inválida");
   if (v.display !== undefined && v.display !== "main" && v.display !== "sub") return fail("Comparação inválida");
-  const display = v.display === undefined ? {} : { display: v.display as "main" | "sub" };
-  if (v.kind === "pair" && typeof v.id === "string" && /^[A-Z0-9]{2,20}$/.test(v.id) && splitSymbol(v.id)) return { ok: true, value: { kind: "pair", id: v.id, ...display } };
-  if (v.kind === "macro" && (MACRO_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "macro", id: v.id as MacroId, ...display } };
+  const line = sanitizeLine({ color: v.color, size: v.size });
+  if (!line || (v.visible !== undefined && !isBool(v.visible))) return fail("Comparação inválida");
+  const extra = {
+    ...(v.display === undefined ? {} : { display: v.display as "main" | "sub" }),
+    ...line,
+    ...(v.visible === undefined ? {} : { visible: v.visible as boolean }),
+  };
+  if (v.kind === "pair" && typeof v.id === "string" && /^[A-Z0-9]{2,20}$/.test(v.id) && splitSymbol(v.id)) return { ok: true, value: { kind: "pair", id: v.id, ...extra } };
+  if (v.kind === "macro" && (MACRO_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "macro", id: v.id as MacroId, ...extra } };
+  if (v.kind === "onchain" && (ONCHAIN_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "onchain", id: v.id as OnchainId, ...extra } };
   return fail("Comparação inválida");
 }
 

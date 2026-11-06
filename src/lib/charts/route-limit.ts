@@ -44,3 +44,18 @@ export function allowOpenInterestRequest(userId: number): boolean {
 export function resetOpenInterestRouteLimits(): void {
   oiLimiter.reset();
 }
+
+// Rota on-chain (Coin Metrics e BGeometrics), em cache de 12–24 h.
+const onchainLimiter = createWindowLimiter(60, 60_000);
+
+export function allowOnchainRequest(userId: number): boolean {
+  const key = String(userId);
+  if (onchainLimiter.limited(key)) return false;
+  onchainLimiter.hit(key);
+  return true;
+}
+
+/** Só para testes. */
+export function resetOnchainRouteLimits(): void {
+  onchainLimiter.reset();
+}

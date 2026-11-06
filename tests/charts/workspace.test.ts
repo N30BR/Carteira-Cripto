@@ -226,3 +226,17 @@ describe("ferramentas novas aparecem para quem já tinha preferências salvas", 
     expect(r.ok && r.value.known).toEqual(CHART_TOOLS.map((t) => t.name));
   });
 });
+
+describe("comparações on-chain e aparência das comparações", () => {
+  const cmp = (c: unknown) => sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), compares: [c] }] });
+  test("aceita indicadores on-chain conhecidos com cor, espessura e visibilidade", () => {
+    const r = cmp({ kind: "onchain", id: "NUPL", display: "sub", color: "#22c55e", size: 2, visible: false });
+    expect(r.ok && r.value.panes[0].compares[0]).toEqual({ kind: "onchain", id: "NUPL", display: "sub", color: "#22c55e", size: 2, visible: false });
+  });
+  test("recusa on-chain desconhecido, cor e espessura inválidas", () => {
+    expect(cmp({ kind: "onchain", id: "HACK" }).ok).toBe(false);
+    expect(cmp({ kind: "onchain", id: "NUPL", color: "red" }).ok).toBe(false);
+    expect(cmp({ kind: "pair", id: "ETHUSDT", size: 50 }).ok).toBe(false);
+    expect(cmp({ kind: "pair", id: "ETHUSDT", visible: "x" }).ok).toBe(false);
+  });
+});
