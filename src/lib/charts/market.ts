@@ -1,6 +1,6 @@
 import type { Db } from "@/db/client";
 import { cached } from "@/lib/prices/cache";
-import { fetchCandles, fetchChartSymbols, type Candle, type ChartSymbol } from "@/lib/prices/binance";
+import { fetchCandles, fetchChartSymbols, fetchOpenInterest, type Candle, type ChartSymbol } from "@/lib/prices/binance";
 import type { CandleQuery } from "./params";
 
 const DAY = 86_400_000;
@@ -45,4 +45,25 @@ export async function getCandles(q: CandleQuery, nowMs = Date.now()): Promise<Ca
     .finally(() => inFlight.delete(key));
   inFlight.set(key, job);
   return job;
+}
+
+// ---------- open interest (Binance Futures) ----------
+const OI_PERIOD: Record<string, string> = { "1m": "5m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1d", "1M": "1d" };
+const OI_TTL = 5 * 60_000;
+const oiStore = new Map<string, { at: number; data: [number, number][] }>();
+
+export function resetOpenInterestCache(): void {
+  oiStore.clear();
+}
+
+/** Open interest do perpétuo no período do gráfico (5 min em cache; poucos pares × poucos períodos). */
+export async function getOpenInterest(symbol: string, interval: string, nowMs = Date.now()): Promise<[number, number][]> {
+  const period = OI_PERIOD[interval];
+  const key = `${symbol}:${period}`;
+  const hit = oiStore.get(key);
+  if (hit && nowMs - hit.at < OI_TTL) return hit.data;
+  const data = await fetchOpenInterest(symbol, period);
+  oiStore.set(key, { at: nowMs, data });
+  while (oiStore.size > 200) oiStore.delete(oiStore.keys().next().value as string);
+  return data;
 }

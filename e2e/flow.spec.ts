@@ -233,6 +233,18 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByRole("button", { name: /^RSI\s*painel$/ }).click();
   await expect(page.getByRole("list", { name: "Indicadores no gráfico" }).getByText("RSI", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
+  // Delta e heatmap de liquidações (estimado, com o open interest da Binance Futures)
+  await page.getByRole("button", { name: /^Indicadores/ }).click();
+  await page.getByRole("button", { name: /^Heatmap de liquidações/ }).click();
+  await page.getByRole("button", { name: /^Delta/ }).click();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(800);
+  await expect(page.getByText(/Liquidações:/)).toHaveCount(0);
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT + "/q-liq.png" });
+  await page.getByRole("button", { name: /^Indicadores/ }).click();
+  for (let i = 0; i < 2; i++) await page.getByRole("button", { name: /^Remover/ }).last().click();
+  await page.keyboard.press("Escape");
+
   // Comparar: ouro (PAXG) sobre o preço; juros sem chave do FRED mostram aviso, sem quebrar
   await page.getByRole("button", { name: /^Comparar/ }).click();
   await page.getByRole("button", { name: "Ouro (PAXG/USDT) Binance" }).click();
@@ -249,6 +261,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByRole("tab").first().getByRole("button").first().click();
   await expect(page.getByTestId("chart-pane")).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Indicadores (2)" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Comparar (2)" })).toBeVisible();
 
   // Pendências: tarefa com checklist, progresso, concluir e nota rápida que vira tarefa
   await page.getByRole("link", { name: "Pendências" }).click();

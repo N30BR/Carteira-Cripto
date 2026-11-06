@@ -24,6 +24,7 @@ export default defineConfig({
         PORT: "3100",
         DATABASE_PATH: dbPath,
         BINANCE_BASE_URL: "http://localhost:4010",
+        BINANCE_FUTURES_BASE_URL: "http://localhost:4010",
         ADMIN_USERNAME: "admin",
         ADMIN_PASSWORD: "senha-forte-123",
         COOKIE_SECURE: "false",

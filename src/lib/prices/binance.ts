@@ -34,8 +34,10 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function get<T>(path: string, params: Record<string, string>, timeoutMs = TIMEOUT_MS): Promise<T> {
-  const base = process.env.BINANCE_BASE_URL || "https://data-api.binance.vision";
+async function get<T>(path: string, params: Record<string, string>, timeoutMs = TIMEOUT_MS, futures = false): Promise<T> {
+  const base = futures
+    ? process.env.BINANCE_FUTURES_BASE_URL || "https://fapi.binance.com"
+    : process.env.BINANCE_BASE_URL || "https://data-api.binance.vision";
   const url = `${base}${path}?${new URLSearchParams(params)}`;
   const request = () => fetch(url, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
 
@@ -51,7 +53,8 @@ async function get<T>(path: string, params: Record<string, string>, timeoutMs = 
       return (await res.json()) as T;
     } catch (e) {
       // Erro do pedido (ex.: símbolo inválido) não significa que a Binance está fora: não pausa.
-      if (!(e instanceof BinanceError && e.isRequestError)) pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS;
+      // Falha da Futures (ex.: bloqueio regional) não pausa os preços do dashboard.
+      if (!futures && !(e instanceof BinanceError && e.isRequestError)) pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS;
       throw e;
     }
   });
@@ -149,7 +152,8 @@ export async function fetchChartSymbols(): Promise<ChartSymbol[]> {
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
-export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
+/** Vela OHLCV; buyVolume = volume de compras agressoras (taker buy), base do delta. */
+export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number; buyVolume?: number };
 
 /** Velas OHLCV (horário de abertura). `end` = data final em ms (para carregar o passado), ou null para as mais recentes. */
 export async function fetchCandles(symbol: string, interval: string, limit: number, end: number | null): Promise<Candle[]> {
@@ -165,6 +169,24 @@ export async function fetchCandles(symbol: string, interval: string, limit: numb
       low: Number(k[3]),
       close: Number(k[4]),
       volume: Number(k[5]),
+      ...(Number.isFinite(Number(k[9])) ? { buyVolume: Number(k[9]) } : {}),
     }))
     .filter((c) => [c.timestamp, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite));
+}
+
+/**
+ * Histórico de open interest (contratos em aberto) do perpétuo na Binance Futures, em moedas.
+ * A Binance guarda só os últimos 30 dias. Período: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h ou 1d.
+ */
+export async function fetchOpenInterest(symbol: string, period: string): Promise<[number, number][]> {
+  const body = await get<{ timestamp?: number; sumOpenInterest?: string }[]>(
+    "/futures/data/openInterestHist",
+    { symbol, period, limit: "500" },
+    TIMEOUT_MS,
+    true,
+  );
+  if (!Array.isArray(body)) throw new Error(`Binance Futures: sem open interest para ${symbol}`);
+  return body
+    .map((o) => [Number(o.timestamp), Number(o.sumOpenInterest)] as [number, number])
+    .filter(([t, v]) => Number.isFinite(t) && Number.isFinite(v));
 }

@@ -29,3 +29,18 @@ export function allowMacroRequest(userId: number): boolean {
 export function resetMacroRouteLimits(): void {
   macroLimiter.reset();
 }
+
+// Rota de open interest (Binance Futures), em cache de 5 min.
+const oiLimiter = createWindowLimiter(60, 60_000);
+
+export function allowOpenInterestRequest(userId: number): boolean {
+  const key = String(userId);
+  if (oiLimiter.limited(key)) return false;
+  oiLimiter.hit(key);
+  return true;
+}
+
+/** Só para testes. */
+export function resetOpenInterestRouteLimits(): void {
+  oiLimiter.reset();
+}

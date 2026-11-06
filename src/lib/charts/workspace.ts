@@ -37,8 +37,11 @@ export const CHART_INDICATORS: { name: string; label: string; pane: "main" | "su
   { name: "ICHIMOKU", label: "Ichimoku", pane: "main", params: [9, 26, 52] },
   { name: "VOLUME_PROFILE", label: "Volume Profile (faixa visível)", pane: "main", params: [24] },
   { name: "AVP", label: "Preço médio (AVP)", pane: "main", params: [] },
+  { name: "LIQ_HEATMAP", label: "Heatmap de liquidações (estimado)", pane: "main", params: [] },
   // Em painel próprio
   { name: "VOL", label: "Volume", pane: "sub", params: [5, 10, 20] },
+  { name: "DELTA", label: "Delta (compras − vendas agressoras)", pane: "sub", params: [] },
+  { name: "CVD", label: "CVD (delta acumulado)", pane: "sub", params: [] },
   { name: "MACD", label: "MACD", pane: "sub", params: [12, 26, 9] },
   { name: "RSI", label: "RSI", pane: "sub", params: [6, 12, 24] },
   { name: "RSI_DIV", label: "RSI com divergências", pane: "sub", params: [14] },

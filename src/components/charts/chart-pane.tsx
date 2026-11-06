@@ -49,6 +49,17 @@ const STYLES = {
   overlay: { text, rectText: text },
 };
 
+/**
+ * Divide a altura entre o preço e os painéis de indicador: o preço fica com pelo menos 40%;
+ * cada painel entre 36 e 120 px.
+ */
+function fitPanes(c: Chart, height: number) {
+  const subPanes = [...new Set(c.getIndicators().map((i) => i.paneId))].filter((id) => id !== "candle_pane");
+  if (!subPanes.length || height <= 0) return;
+  const each = Math.max(36, Math.min(120, Math.floor((height * 0.6 - 30) / subPanes.length)));
+  for (const id of subPanes) c.setPaneOptions({ id, height: each, minHeight: 30 });
+}
+
 /** Casas decimais do preço: mais casas para preços pequenos (ex.: pares em BTC). */
 function precisionFor(price: number): number {
   if (!(price > 0)) return 2;
@@ -102,7 +113,11 @@ export function ChartPane({
     if (!node) return;
     const c = init(node, { locale: "en-US", styles: STYLES, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
     chart.current = c;
-    const ro = new ResizeObserver(() => c?.resize());
+    const ro = new ResizeObserver(() => {
+      if (!c) return;
+      fitPanes(c, node.clientHeight);
+      c.resize();
+    });
     ro.observe(node);
     return () => {
       ro.disconnect();
@@ -228,9 +243,20 @@ export function ChartPane({
     for (const ind of pane.indicators) {
       const id = c.createIndicator({ name: ind.name, calcParams: ind.params, ...(ind.pane === "main" ? { paneId: "candle_pane" } : {}) }, ind.pane === "main");
       if (id) indicatorIds.current.push(id);
+      // Heatmap de liquidações: busca o open interest do perpétuo e entrega ao indicador.
+      if (id && ind.name === "LIQ_HEATMAP") {
+        fetch(`/api/open-interest?${new URLSearchParams({ symbol: pane.symbol, interval: pane.interval })}`)
+          .then(async (res) => {
+            if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "indisponível");
+            const oi = (await res.json()) as [number, number][];
+            chart.current?.overrideIndicator({ id, name: "LIQ_HEATMAP", extendData: { oi } });
+          })
+          .catch((e) => cb.current.onError(`Liquidações: ${e instanceof Error ? e.message : "indisponível"}`));
+      }
     }
+    fitPanes(c, el.current?.clientHeight ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [indicatorKey]);
+  }, [indicatorKey, pane.symbol, pane.interval]);
 
   // Comparações: busca os dados (par da Binance no mesmo tempo, ou série do FRED) e desenha as linhas.
   const compareIds = useRef<string[]>([]);
@@ -271,6 +297,7 @@ export function ChartPane({
           !sub,
         );
         if (id) compareIds.current.push(id);
+        if (sub) fitPanes(c, el.current?.clientHeight ?? 0);
       } catch (e) {
         cb.current.onError(`Comparação ${cmp.id}: ${e instanceof Error ? e.message : "indisponível"}`);
       }

@@ -48,6 +48,17 @@ const server = http.createServer((req, res) => {
     return send(symbols.map((s) => ({ symbol: s, lastPrice: PRICES[s].last, priceChangePercent: PRICES[s].change })));
   }
   const pair = url.searchParams.get("symbol") ?? "";
+  // Binance Futures: open interest subindo e descendo (heatmap de liquidações).
+  if (url.pathname === "/futures/data/openInterestHist" && pair === "BTCUSDT") {
+    const now = Date.now();
+    return send(
+      Array.from({ length: 500 }, (_, i) => ({
+        symbol: pair,
+        sumOpenInterest: String(80_000 + Math.sin(i / 5) * 2_000 + i * 10),
+        timestamp: now - (499 - i) * DAY,
+      })),
+    );
+  }
   if (url.pathname === "/api/v3/klines" && PRICES[pair]) {
     const limit = Number(url.searchParams.get("limit"));
     return send(url.searchParams.get("interval") === "1d" ? klines(pair, limit, DAY) : klines(pair, limit, HOUR));

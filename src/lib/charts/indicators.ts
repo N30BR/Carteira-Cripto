@@ -204,3 +204,70 @@ export function rsiDivergences(closes: number[], period: number, lookback: numbe
   }
   return out;
 }
+
+/** Delta por vela (compras agressoras − vendas agressoras) e CVD (delta acumulado). */
+export function deltaSeries(bars: (Bar & { buyVolume?: number })[]): { delta: N[]; cvd: N[] } {
+  let acc = 0;
+  const delta: N[] = [];
+  const cvd: N[] = [];
+  for (const b of bars) {
+    if (typeof b.buyVolume === "number" && typeof b.volume === "number") {
+      const d = b.buyVolume - (b.volume - b.buyVolume);
+      acc += d;
+      delta.push(d);
+    } else delta.push(null);
+    cvd.push(acc);
+  }
+  return { delta, cvd };
+}
+
+export type LiqLevel = { side: "long" | "short"; price: number; from: number; to: number | null; notional: number };
+
+/** Faixas de alavancagem típicas usadas na estimativa (peso = fatia das posições novas). */
+export const DEFAULT_LEVERAGE_TIERS = [
+  { leverage: 10, weight: 0.35 },
+  { leverage: 25, weight: 0.3 },
+  { leverage: 50, weight: 0.2 },
+  { leverage: 100, weight: 0.15 },
+];
+const MAINTENANCE = 0.005;
+
+/**
+ * Níveis ESTIMADOS de liquidação: quando o open interest (OI) sobe numa vela, as posições novas
+ * (metade compradas, metade vendidas, ao preço típico da vela) são distribuídas pelas faixas de
+ * alavancagem; o nível de liquidação de cada uma fica abaixo (compras) ou acima (vendas) do preço.
+ * Um nível é considerado liquidado (to = índice da vela) quando o preço o atinge depois.
+ */
+export function liquidationLevels(
+  bars: Bar[],
+  oi: [number, number][],
+  tiers: { leverage: number; weight: number }[] = DEFAULT_LEVERAGE_TIERS,
+): LiqLevel[] {
+  const sorted = [...oi].sort((a, b) => a[0] - b[0]);
+  let k = -1;
+  const oiAt = bars.map((b) => {
+    while (k + 1 < sorted.length && sorted[k + 1][0] <= b.timestamp) k++;
+    return k >= 0 ? sorted[k][1] : null;
+  });
+  const levels: LiqLevel[] = [];
+  for (let i = 1; i < bars.length; i++) {
+    const prev = oiAt[i - 1];
+    const cur = oiAt[i];
+    if (prev === null || cur === null || cur <= prev) continue;
+    const price = (bars[i].high + bars[i].low + bars[i].close) / 3;
+    const half = ((cur - prev) * price) / 2;
+    for (const t of tiers) {
+      levels.push({ side: "long", price: price * (1 - 1 / t.leverage + MAINTENANCE), from: i, to: null, notional: half * t.weight });
+      levels.push({ side: "short", price: price * (1 + 1 / t.leverage - MAINTENANCE), from: i, to: null, notional: half * t.weight });
+    }
+  }
+  for (const l of levels) {
+    for (let j = l.from + 1; j < bars.length; j++) {
+      if (l.side === "long" ? bars[j].low <= l.price : bars[j].high >= l.price) {
+        l.to = j;
+        break;
+      }
+    }
+  }
+  return levels;
+}

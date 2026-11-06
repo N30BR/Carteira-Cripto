@@ -3,7 +3,7 @@
 // Indicadores e ferramentas próprios registrados no KLineCharts (uma vez por página).
 // Os cálculos ficam em lib/charts/indicators.ts (testados); aqui só a ligação com o gráfico.
 import { registerIndicator, registerOverlay, type KLineData } from "klinecharts";
-import { atr, ema, ichimoku, mfi, rsi, rsiDivergences, stochRsi, volumeProfile, vwap } from "@/lib/charts/indicators";
+import { atr, deltaSeries, ema, ichimoku, liquidationLevels, mfi, rsi, rsiDivergences, stochRsi, volumeProfile, vwap } from "@/lib/charts/indicators";
 import { alignStep, rebase, type Point } from "@/lib/charts/macro-math";
 
 const UP = "#22c55e";
@@ -205,6 +205,71 @@ export function registerChartExtensions(): void {
       ctx.moveTo(0, yPoc);
       ctx.lineTo(bounding.width, yPoc);
       ctx.stroke();
+      ctx.restore();
+      return false;
+    },
+  });
+
+  // Delta por vela (compras − vendas agressoras): barras verdes/vermelhas.
+  registerIndicator<Row>({
+    name: "DELTA",
+    shortName: "Delta",
+    precision: 2,
+    shouldFormatBigNumber: true,
+    figures: [
+      {
+        key: "delta",
+        title: "Delta: ",
+        type: "bar",
+        baseValue: 0,
+        styles: ({ data }) => {
+          const v = data.current?.delta ?? 0;
+          return { color: (v ?? 0) >= 0 ? UP : DOWN };
+        },
+      },
+    ],
+    calc: (data) => deltaSeries(data as never).delta.map((delta) => ({ delta })),
+  });
+
+  // CVD: delta acumulado.
+  registerIndicator<Row>({
+    name: "CVD",
+    shortName: "CVD",
+    precision: 2,
+    shouldFormatBigNumber: true,
+    figures: lines(["cvd"], ["CVD"]),
+    calc: (data) => deltaSeries(data as never).cvd.map((cvd) => ({ cvd })),
+  });
+
+  // Heatmap de liquidações ESTIMADO (open interest da Binance Futures + faixas de alavancagem).
+  registerIndicator<Row, number, { oi: [number, number][]; note?: string }>({
+    name: "LIQ_HEATMAP",
+    shortName: "Liquidações (estimado)",
+    series: "price",
+    figures: [],
+    calc: (data) => data.map(() => ({})),
+    draw: ({ ctx, chart, indicator, bounding, xAxis, yAxis }) => {
+      const data = chart.getDataList();
+      const oi = indicator.extendData?.oi ?? [];
+      if (!oi.length || !data.length) return false;
+      const levels = liquidationLevels(bars(data), oi);
+      const max = Math.max(...levels.map((l) => l.notional)) || 1;
+      const range = chart.getVisibleRange();
+      ctx.save();
+      for (const l of levels) {
+        const end = l.to ?? data.length + 5;
+        if (end < range.from || l.from > range.to) continue;
+        const x1 = xAxis.convertToPixel(l.from);
+        const x2 = Math.min(bounding.width, xAxis.convertToPixel(end));
+        const y = yAxis.convertToPixel(l.price);
+        if (y < 0 || y > bounding.height) continue;
+        const alpha = 0.12 + 0.75 * Math.sqrt(l.notional / max);
+        ctx.fillStyle = l.to === null ? `rgba(250, 204, 21, ${alpha})` : `rgba(139, 124, 246, ${alpha * 0.5})`;
+        ctx.fillRect(x1, y - 1.5, Math.max(1, x2 - x1), 3);
+      }
+      ctx.fillStyle = "#a1a1aa";
+      ctx.font = "11px Geist, sans-serif";
+      ctx.fillText("Liquidações estimadas (OI Binance Futures, até 30 dias)", 8, bounding.height - 8);
       ctx.restore();
       return false;
     },

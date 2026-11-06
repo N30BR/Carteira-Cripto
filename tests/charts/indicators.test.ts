@@ -101,3 +101,48 @@ describe("Divergências do RSI", () => {
     expect(div.every((d) => d.to > d.from)).toBe(true);
   });
 });
+
+describe("delta e CVD", () => {
+  test("delta = compras agressoras − vendas agressoras; CVD acumula", async () => {
+    const { deltaSeries } = await import("@/lib/charts/indicators");
+    const bars = [
+      { ...bar(0, 10), volume: 10, buyVolume: 7 },
+      { ...bar(1, 10), volume: 10, buyVolume: 2 },
+      { ...bar(2, 10), volume: 4 }, // sem dado de compras: delta indisponível, CVD mantém
+    ];
+    expect(deltaSeries(bars)).toEqual({ delta: [4, -6, null], cvd: [4, -2, -2] });
+  });
+});
+
+describe("heatmap de liquidações (estimado)", () => {
+  test("aumento de OI abre níveis de liquidação de compras abaixo e de vendas acima, conforme a alavancagem", async () => {
+    const { liquidationLevels } = await import("@/lib/charts/indicators");
+    const bars = [bar(0, 100, { high: 100, low: 100 }), bar(1, 100, { high: 100, low: 100 })];
+    const oi = [
+      [0, 1000],
+      [3_600_000, 1010], // +10 contratos a ~US$ 100 = US$ 1.000 de posições novas
+    ] as [number, number][];
+    const levels = liquidationLevels(bars, oi, [{ leverage: 10, weight: 1 }]);
+    const longs = levels.filter((l) => l.side === "long");
+    const shorts = levels.filter((l) => l.side === "short");
+    expect(longs).toHaveLength(1);
+    expect(longs[0].price).toBeCloseTo(90.5, 6); // 100 × (1 − 1/10 + 0,5% de margem de manutenção)
+    expect(shorts[0].price).toBeCloseTo(109.5, 6);
+    expect(longs[0].notional).toBeCloseTo(500, 6); // metade compradores, metade vendedores
+    expect(longs[0].to).toBeNull(); // ainda não atingido
+  });
+
+  test("o nível some (é liquidado) quando o preço passa por ele; queda de OI não cria níveis", async () => {
+    const { liquidationLevels } = await import("@/lib/charts/indicators");
+    const bars = [bar(0, 100, { high: 100, low: 100 }), bar(1, 100, { high: 100, low: 100 }), bar(2, 85, { high: 100, low: 85 })];
+    const oi = [
+      [0, 1000],
+      [3_600_000, 1010],
+      [7_200_000, 990],
+    ] as [number, number][];
+    const levels = liquidationLevels(bars, oi, [{ leverage: 10, weight: 1 }]);
+    expect(levels).toHaveLength(2);
+    expect(levels.find((l) => l.side === "long")!.to).toBe(2);
+    expect(levels.find((l) => l.side === "short")!.to).toBeNull();
+  });
+});
