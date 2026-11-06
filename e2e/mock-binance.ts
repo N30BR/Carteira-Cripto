@@ -17,7 +17,12 @@ function klines(pair: string, count: number, stepMs: number): unknown[][] {
   return Array.from({ length: count }, (_, i) => {
     const close = now - (count - 1 - i) * stepMs;
     const price = from + ((to - from) * i) / (count - 1);
-    return [close - stepMs, "0", "0", "0", String(price), "0", close];
+    // Abertura, máxima, mínima e volume plausíveis (a aba Gráficos desenha velas); o fechamento segue a reta.
+    const wave = Math.sin(i / 3) * (to - from || price) * 0.01;
+    const open = price - wave;
+    const high = Math.max(open, price) + Math.abs(wave) * 0.6;
+    const low = Math.min(open, price) - Math.abs(wave) * 0.6;
+    return [close - stepMs, String(open), String(high), String(low), String(price), String(100 + (i % 7) * 20), close];
   });
 }
 

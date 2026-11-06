@@ -1,0 +1,22 @@
+import { getDb } from "@/db/client";
+import { requireUser } from "@/lib/auth/current";
+import { listChartSymbols } from "@/lib/charts/market";
+import { getChartPrefs, listChartTabs } from "@/lib/charts/store";
+import { ChartWorkspace } from "@/components/charts/workspace";
+
+export const metadata = { title: "Gráficos · BlackHole Dashboard" };
+
+export default async function ChartsPage() {
+  const user = await requireUser();
+  const db = getDb();
+  const tabs = listChartTabs(db, user.id);
+  const prefs = getChartPrefs(db, user.id);
+  const symbols = await listChartSymbols(db);
+
+  return (
+    // Usa a largura toda da tela (o gráfico precisa de espaço).
+    <div className="relative left-1/2 w-screen max-w-[100vw] -translate-x-1/2 px-3 md:px-6">
+      <ChartWorkspace initialTabs={tabs} initialPrefs={prefs} symbols={symbols} />
+    </div>
+  );
+}

@@ -223,6 +223,25 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.104,00");
   await expect(page.getByText(/Totais do período \(01\//)).toBeVisible();
 
+  // Gráficos: velas desenhadas, layout 4, indicador, nova aba; tudo salvo na conta
+  await page.getByRole("link", { name: "Gráficos" }).click();
+  await expect(page.getByTestId("chart-pane")).toHaveCount(1);
+  await expect(page.getByTestId("chart-pane").locator("canvas").first()).toBeVisible();
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "4" }).click();
+  await expect(page.getByTestId("chart-pane")).toHaveCount(4);
+  await page.getByRole("button", { name: /Indicadores/ }).click();
+  await page.getByRole("button", { name: /^RSI\s*painel$/ }).click();
+  await expect(page.getByRole("list", { name: "Indicadores no gráfico" }).getByText("RSI", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Nova aba" }).click();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await page.waitForTimeout(1500); // salvamento automático (~1 s)
+  await page.reload();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await page.getByRole("tab").first().getByRole("button").first().click();
+  await expect(page.getByTestId("chart-pane")).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "Indicadores (2)" })).toBeVisible();
+
   // Pendências: tarefa com checklist, progresso, concluir e nota rápida que vira tarefa
   await page.getByRole("link", { name: "Pendências" }).click();
   await expect(page.getByText("Nenhuma tarefa ainda")).toBeVisible();

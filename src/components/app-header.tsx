@@ -12,6 +12,7 @@ export function AppHeader({ user }: { user: SessionUser }) {
     { href: "/faturas", label: "Faturas" },
     { href: "/transacoes", label: "Transações" },
     { href: "/resumo", label: "Resumo" },
+    { href: "/graficos", label: "Gráficos" },
     { href: "/lancamentos", label: "Lançamentos" },
     { href: "/ativos", label: "Ativos" },
     { href: "/pendencias", label: "Pendências" },
