@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FLUSH_PENDING_EVENT } from "@/lib/modules";
 import {
   AlignJustify,
   ArrowRight,
@@ -189,9 +190,12 @@ export function ChartWorkspace({
     const onLeave = () => flushAll.current();
     document.addEventListener("visibilitychange", onHide);
     window.addEventListener("pagehide", onLeave);
+    // "Personalizar abas" pede para salvar antes de desligar o módulo (senão o salvamento seria recusado).
+    window.addEventListener(FLUSH_PENDING_EVENT, onLeave);
     return () => {
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", onLeave);
+      window.removeEventListener(FLUSH_PENDING_EVENT, onLeave);
       flushAll.current();
     };
   }, []);

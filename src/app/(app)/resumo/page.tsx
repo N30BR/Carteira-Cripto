@@ -166,6 +166,13 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
     );
   };
   const offLabels = MODULES.filter((m) => ["crypto", "fiat", "invoices", "transactions"].includes(m.key) && disabled.includes(m.key)).map((m) => m.menuLabel);
+  // A fórmula descrita cita só o que entrou na conta.
+  const on = (k: string) => !disabled.includes(k as (typeof disabled)[number]);
+  const balances = [on("crypto") && "cripto total atual", on("fiat") && "reais"].filter(Boolean).join(" e ");
+  const plus = [balances && `Saldos (${balances})`, on("transactions") && "entradas"].filter(Boolean).join(" + ");
+  const minus = [on("invoices") && "faturas", on("transactions") && "saídas"].filter(Boolean).join(" e ");
+  const formula = plus && minus ? `${plus} − ${minus} de ${periodLabel}` : plus ? `${plus}${on("transactions") ? ` de ${periodLabel}` : ""}` : minus ? `− ${minus} de ${periodLabel}` : "";
+  const nothingOn = !formula;
   const variation = byKey.variation as (typeof summary.components)[number] | undefined;
   const items = summary.components.map((c) => ({ ...c, short: SHORT[c.key] }));
 
@@ -202,14 +209,20 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
               <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-400">
                 <Info className="size-3.5" /> Consolidação estimada (sem conciliação)
               </span>
-              <p>
-                Saldos (cripto total atual e reais) + entradas − faturas e saídas de {periodLabel}. Não é o patrimônio efetivo:
-                um gasto que já baixou o saldo de uma conta aparece de novo como fatura ou saída.
-              </p>
-              <p className="text-xs">
-                A variação cripto serve só para comparar o período: o saldo cripto atual já a inclui, então ela não é somada nem
-                descontada.
-              </p>
+              {nothingOn ? (
+                <p data-testid="sum-empty">Nenhum módulo financeiro ligado. Ligue Cripto, R$, Faturas ou Transações em Personalizar abas.</p>
+              ) : (
+                <p>
+                  {formula}. Não é o patrimônio efetivo: um gasto que já baixou o saldo de uma conta aparece de novo como fatura ou
+                  saída.
+                </p>
+              )}
+              {on("crypto") && (
+                <p className="text-xs">
+                  A variação cripto serve só para comparar o período: o saldo cripto atual já a inclui, então ela não é somada nem
+                  descontada.
+                </p>
+              )}
               {offLabels.length > 0 && <p>Fora da conta (módulo desligado em Personalizar abas): {offLabels.join(", ")}.</p>}
               {summary.missing.includes("crypto") && !crypto.empty && <p className="text-amber-400">Saldo cripto fora da conta: preços ou cotação indisponíveis.</p>}
               {!summary.missing.includes("crypto") && summary.missing.includes("variation") && !crypto.empty && (

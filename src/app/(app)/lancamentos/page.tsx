@@ -27,7 +27,8 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/lancame
   ensureDefaultAccounts(db, user.id);
   const [from, to] = monthRange(month);
   // O que falta pagar de cada compra até a última parcela (inclusive parcelas de meses anteriores não pagas).
-  const open = openPurchases(listInstallments(db, user.id, "2000-01", "2099-12", { unpaidOnly: true }), month);
+  // Seção escondida não carrega nem envia dados ao navegador.
+  const open = showInvoices ? openPurchases(listInstallments(db, user.id, "2000-01", "2099-12", { unpaidOnly: true }), month) : [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -39,9 +40,9 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/lancame
         key={month}
         month={month}
         today={today}
-        rows={listInstallments(db, user.id, month, month)}
-        categories={listCategories(db, user.id)}
-        accounts={listCardAccounts(db, user.id)}
+        rows={showInvoices ? listInstallments(db, user.id, month, month) : []}
+        categories={showInvoices ? listCategories(db, user.id) : []}
+        accounts={showInvoices ? listCardAccounts(db, user.id) : []}
         transactions={showTransactions ? listTransactions(db, user.id, from, to) : []}
         open={Object.fromEntries(open.map((o) => [o.expenseId, { remainingCount: o.remainingCount, remainingCents: o.remainingCents }]))}
         overdue={open.reduce(

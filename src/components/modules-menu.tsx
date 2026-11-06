@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { setModulesAction } from "@/app/(app)/modules-actions";
-import { MODULES, moduleForPath, type ModuleKey } from "@/lib/modules";
+import { FLUSH_PENDING_EVENT, MODULES, moduleForPath, type ModuleKey } from "@/lib/modules";
 import { safeAction } from "@/lib/safe-action";
 
 /**
@@ -29,6 +29,8 @@ export function ModulesMenu({ disabled: initial }: { disabled: ModuleKey[] }) {
     const next = on ? disabled.filter((k) => k !== key) : [...disabled, key];
     const before = disabled;
     setDisabled(next);
+    // Salva o que estiver pendente (ex.: desenho nos Gráficos) antes de o módulo ser desligado.
+    window.dispatchEvent(new Event(FLUSH_PENDING_EVENT));
     start(async () => {
       const r = await safeAction(() => setModulesAction(next));
       if (!r.ok) {

@@ -18,6 +18,12 @@ export const MODULES: ModuleInfo[] = [
   { key: "todos", label: "Pendências", menuLabel: "Pendências", href: "/pendencias" },
 ];
 
+/**
+ * Evento disparado antes de salvar a personalização: telas com salvamento pendente (ex.: Gráficos)
+ * enviam o que falta enquanto o módulo ainda está ligado. As actions rodam na ordem em que são chamadas.
+ */
+export const FLUSH_PENDING_EVENT = "bh:flush-pending";
+
 /** Para onde ir quando a aba atual foi desligada: a primeira ativa, ou Lançamentos. */
 export function firstActiveHref(disabled: readonly ModuleKey[]): string {
   return MODULES.find((m) => !disabled.includes(m.key))?.href ?? "/lancamentos";

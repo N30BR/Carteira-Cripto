@@ -10,6 +10,7 @@ vi.mock("@/lib/auth/current", () => ({ requireUser: async () => ({ id: state.use
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import { renameAccountAction } from "@/app/(app)/ativos/fiat-actions";
+import { createCardAccountAction, createCategoryAction } from "@/app/(app)/lancamentos/actions";
 import { setModulesAction } from "@/app/(app)/modules-actions";
 import { resetModuleLimits } from "@/lib/auth/modules";
 import { resetFiatLimits } from "@/lib/fiat/limit";
@@ -37,6 +38,12 @@ describe("módulo desligado bloqueia as ações no servidor, sem apagar nada", (
     expect(listAccounts(db(), state.userId).map((a) => a.name)).toEqual(["Banco"]);
     setDisabledModules(db(), state.userId, []);
     expect((await renameAccountAction(acc.id, "Outro")).ok).toBe(true);
+  });
+
+  test("Faturas desligado: categorias e contas de cartão (só usadas nas faturas) também ficam bloqueadas", async () => {
+    setDisabledModules(db(), state.userId, ["invoices"]);
+    await expect(createCategoryAction("Viagem")).rejects.toThrow(/NEXT_REDIRECT/);
+    await expect(createCardAccountAction("Cartão X", "PF")).rejects.toThrow(/NEXT_REDIRECT/);
   });
 
   test("salvar a personalização: valida a lista, vale só para o próprio usuário e diz para onde ir", async () => {

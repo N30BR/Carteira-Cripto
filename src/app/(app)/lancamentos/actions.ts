@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
-import { requireUser } from "@/lib/auth/current";
 import { requireModule } from "@/lib/auth/modules";
 import { createCardAccount, deleteCardAccount, setCardClosingDay, setCardDueDay, updateCardAccount, type Side } from "@/lib/cards/accounts";
 import { createCategory, deleteCategory, renameCategory, type Result } from "@/lib/cards/categories";
@@ -107,7 +106,7 @@ export async function toggleInstallmentAction(installmentId: number, paid: boole
 }
 
 export async function createCategoryAction(rawName: string): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const name = validateLabel(String(rawName ?? ""), 40, "um nome");
   if (!name.ok) return name;
@@ -117,7 +116,7 @@ export async function createCategoryAction(rawName: string): Promise<Result> {
 }
 
 export async function renameCategoryAction(id: number, rawName: string): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(id)) return CAT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const name = validateLabel(String(rawName ?? ""), 40, "um nome");
@@ -128,7 +127,7 @@ export async function renameCategoryAction(id: number, rawName: string): Promise
 }
 
 export async function deleteCategoryAction(id: number): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(id)) return CAT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = deleteCategory(getDb(), user.id, id);
@@ -137,7 +136,7 @@ export async function deleteCategoryAction(id: number): Promise<Result> {
 }
 
 export async function createCardAccountAction(rawName: string, kind: Side): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!isSide(kind)) return { ok: false, error: "Escolha PF ou PJ" };
   const name = validateLabel(String(rawName ?? ""), 30, "um nome");
@@ -148,7 +147,7 @@ export async function createCardAccountAction(rawName: string, kind: Side): Prom
 }
 
 export async function updateCardAccountAction(id: number, rawName: string, kind: Side): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (!isSide(kind)) return { ok: false, error: "Escolha PF ou PJ" };
@@ -160,7 +159,7 @@ export async function updateCardAccountAction(id: number, rawName: string, kind:
 }
 
 export async function deleteCardAccountAction(id: number): Promise<Result> {
-  const user = await requireUser();
+  const user = await requireModule("invoices");
   if (!Number.isInteger(id)) return ACCOUNT_NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = deleteCardAccount(getDb(), user.id, id);
