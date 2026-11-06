@@ -9,7 +9,7 @@ const mkUser = (db: ReturnType<typeof testDb>, u: string) =>
 
 describe("módulos (configuração central)", () => {
   test("sete módulos podem ser desligados; Lançamentos e Ativos não estão na lista", () => {
-    expect(MODULES.map((m) => m.key)).toEqual(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "todos"]);
+    expect(MODULES.map((m) => m.key)).toEqual(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "todos"]);
     expect(MODULES.map((m) => m.href)).not.toContain("/lancamentos");
     expect(MODULES.map((m) => m.href)).not.toContain("/ativos");
   });
@@ -23,7 +23,7 @@ describe("módulos (configuração central)", () => {
   test("primeira aba ativa segue a ordem da barra; sem nenhuma, vai para Lançamentos", () => {
     expect(firstActiveHref([])).toBe("/");
     expect(firstActiveHref(["crypto"])).toBe("/fiduciario");
-    expect(firstActiveHref(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "todos"])).toBe("/lancamentos");
+    expect(firstActiveHref(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "todos"])).toBe("/lancamentos");
   });
 
   test("descobre o módulo pela rota (inclui subpáginas); rotas fixas não têm módulo", () => {

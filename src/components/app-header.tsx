@@ -17,6 +17,7 @@ export function AppHeader({ user, disabled }: { user: SessionUser; disabled: Mod
     ...mod("transactions", { href: "/transacoes", label: "Transações" }),
     ...mod("summary", { href: "/resumo", label: "Resumo" }),
     ...mod("charts", { href: "/graficos", label: "Gráficos" }),
+    ...mod("news", { href: "/noticias", label: "Notícias" }),
     { href: "/lancamentos", label: "Lançamentos" },
     { href: "/ativos", label: "Ativos" },
     ...mod("todos", { href: "/pendencias", label: "Pendências" }),
@@ -24,7 +25,7 @@ export function AppHeader({ user, disabled }: { user: SessionUser; disabled: Mod
   ];
   return (
     <header className="border-b border-border/60 bg-background">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 md:h-14 md:flex-nowrap md:py-0">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 md:h-14 md:flex-nowrap md:py-0">
         <Link href="/sobre" aria-label="Sobre o BlackHole Dashboard" className="shrink-0">
           <Logo />
         </Link>
