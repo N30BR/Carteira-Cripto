@@ -290,3 +290,29 @@ export const transactions = sqliteTable(
   },
   (t) => [index("transactions_user_date").on(t.userId, t.date)],
 );
+
+/** Abas da aba Gráficos (até 10 por pessoa): layout e estado de cada divisão, em JSON validado. */
+export const chartTabs = sqliteTable(
+  "chart_tabs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    position: integer("position").notNull(),
+    state: text("state").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("chart_tabs_user").on(t.userId)],
+);
+
+/** Preferências da aba Gráficos por pessoa: ferramentas visíveis e favoritas, aba aberta. */
+export const chartPrefs = sqliteTable("chart_prefs", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  tools: text("tools").notNull(),
+  activeTabId: integer("active_tab_id"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});

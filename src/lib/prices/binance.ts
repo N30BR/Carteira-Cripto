@@ -132,3 +132,39 @@ export async function fetchPairKlines(pair: string, days: 30 | 365 | 1000): Prom
     .map((k) => [Number(k[6]), Number(k[4])] as PricePoint)
     .filter(([t, p]) => Number.isFinite(t) && Number.isFinite(p));
 }
+
+export type ChartSymbol = { symbol: string; base: string; quote: string };
+
+/** Pares do mercado à vista cotados em USDT, BTC ou ETH (para a aba Gráficos). */
+export async function fetchChartSymbols(): Promise<ChartSymbol[]> {
+  const body = await get<{ symbols?: { symbol: string; baseAsset: string; quoteAsset: string; status: string }[] }>(
+    "/api/v3/exchangeInfo",
+    { permissions: "SPOT", symbolStatus: "TRADING" },
+    LISTING_TIMEOUT_MS,
+  );
+  if (!Array.isArray(body.symbols)) throw new Error("Binance: exchangeInfo sem símbolos");
+  return body.symbols
+    .filter((s) => s.status === "TRADING" && ["USDT", "BTC", "ETH"].includes(s.quoteAsset) && /^[A-Z0-9]{2,20}$/.test(s.symbol))
+    .map((s) => ({ symbol: s.symbol, base: s.baseAsset, quote: s.quoteAsset }))
+    .sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
+
+/** Velas OHLCV (horário de abertura). `end` = data final em ms (para carregar o passado), ou null para as mais recentes. */
+export async function fetchCandles(symbol: string, interval: string, limit: number, end: number | null): Promise<Candle[]> {
+  const params: Record<string, string> = { symbol, interval, limit: String(limit) };
+  if (end !== null) params.endTime = String(end);
+  const body = await get<unknown[][]>("/api/v3/klines", params);
+  if (!Array.isArray(body)) throw new Error(`Binance: sem velas para ${symbol}`);
+  return body
+    .map((k) => ({
+      timestamp: Number(k[0]),
+      open: Number(k[1]),
+      high: Number(k[2]),
+      low: Number(k[3]),
+      close: Number(k[4]),
+      volume: Number(k[5]),
+    }))
+    .filter((c) => [c.timestamp, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite));
+}
