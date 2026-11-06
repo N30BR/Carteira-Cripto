@@ -47,6 +47,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByRole("button", { name: "Modo discreto" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-discreet", "");
   expect(await afterContent("[data-testid=total] .priv")).toBe('"***"');
+  expect(await afterContent("header .priv")).toBe('"***"'); // nome do usuário escondido
   expect(await afterContent("tbody .priv")).toBe('"***"');
   await expect(page.getByRole("row", { name: /BTC/ })).toContainText("US$ 60.000,00"); // preço continua visível
   // percentuais continuam visíveis (participação e variações)

@@ -15,7 +15,9 @@ export function UserMenu({ username }: { username: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost">{username} ▾</Button>
+        <Button variant="ghost">
+          <span className="priv">{username}</span> ▾
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem asChild>
