@@ -61,6 +61,8 @@ export function ExpenseFormFields({
   submitLabel,
   onSubmit,
   onDone,
+  layout = "row",
+  onCancel,
 }: {
   initial: ExpenseForm;
   categories: Category[];
@@ -71,6 +73,9 @@ export function ExpenseFormFields({
   submitLabel: string;
   onSubmit: (f: ExpenseForm) => Promise<Result>;
   onDone?: () => void;
+  /** "row": em fileira na página; "modal": em janela, com Cancelar (mesmos campos e regras). */
+  layout?: "row" | "modal";
+  onCancel?: () => void;
 }) {
   const [f, setF] = useState<ExpenseForm>(initial);
   const [error, setError] = useState<string>();
@@ -109,17 +114,19 @@ export function ExpenseFormFields({
     });
   }
 
-  return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.6fr_0.8fr_auto_1.1fr_minmax(250px,1.6fr)_auto] lg:items-end">
+  const descField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-desc">Descrição do custo *</Label>
           <Input id="exp-desc" placeholder="Ex.: Assinatura Netflix" value={f.description} onChange={(e) => set("description", e.target.value)} maxLength={80} />
         </div>
+  );
+  const amountField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-amount">Valor (R$) *</Label>
           <Input id="exp-amount" inputMode="decimal" placeholder="0,00" value={f.amount} onChange={(e) => set("amount", e.target.value)} />
         </div>
+  );
+  const installmentsField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-current" className="gap-1">
             Parcelas
@@ -150,6 +157,8 @@ export function ExpenseFormFields({
             />
           </div>
         </div>
+  );
+  const categoryField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-cat">Categoria</Label>
           <select
@@ -166,6 +175,8 @@ export function ExpenseFormFields({
             ))}
           </select>
         </div>
+  );
+  const accountField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-account">Cartão / Conta *</Label>
           <div className="flex gap-2">
@@ -184,12 +195,13 @@ export function ExpenseFormFields({
             {accountsButton}
           </div>
         </div>
+  );
+  const submitButton = (
         <Button type="submit" disabled={pending} className="h-9">
           <Plus /> {submitLabel}
         </Button>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[auto_auto_auto_auto_1fr] lg:items-end">
+  );
+  const modeField = (
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-medium">O valor informado é</span>
           <Toggle
@@ -202,6 +214,8 @@ export function ExpenseFormFields({
             ]}
           />
         </div>
+  );
+  const refMonthField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-ref">Mês da fatura (parcela atual)</Label>
           <Input id="exp-ref" type="month" className="[color-scheme:dark]" value={f.refMonth} onChange={(e) => set("refMonth", e.target.value)} />
@@ -209,6 +223,8 @@ export function ExpenseFormFields({
             <span className="text-[11px] text-muted-foreground">Pelo fechamento (dia {closingDay}) e a data da compra</span>
           )}
         </div>
+  );
+  const dateField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-date">Data da compra</Label>
           <Input
@@ -219,7 +235,8 @@ export function ExpenseFormFields({
             onChange={(e) => setF((s) => withInvoice({ ...s, purchaseDate: e.target.value }))}
           />
         </div>
-        {!editing && (
+  );
+  const statusField = !editing && (
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium">Status da parcela atual</span>
             <Toggle
@@ -232,13 +249,14 @@ export function ExpenseFormFields({
               ]}
             />
           </div>
-        )}
+  );
+  const notesField = (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-notes">Observações</Label>
           <Input id="exp-notes" placeholder="Opcional" value={f.notes} onChange={(e) => set("notes", e.target.value)} maxLength={500} />
         </div>
-      </div>
-
+  );
+  const summary = (
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-muted-foreground">{preview ? <span className="priv">{preview}</span> : "Informe o valor e as parcelas para ver o resumo."}</span>
         {error && (
@@ -247,6 +265,61 @@ export function ExpenseFormFields({
           </span>
         )}
       </div>
+  );
+
+  if (layout === "modal") {
+    // Em janela: os mesmos campos, regras e validações, em linhas mais largas.
+    return (
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <div className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
+          {descField}
+          {amountField}
+          {installmentsField}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+          {categoryField}
+          {accountField}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[auto_1fr_1fr] sm:items-end">
+          {modeField}
+          {refMonthField}
+          {dateField}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-end">
+          {statusField}
+          {notesField}
+        </div>
+        {summary}
+        <div className="flex justify-end gap-2 border-t pt-4">
+          {onCancel && (
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancelar
+            </Button>
+          )}
+          {submitButton}
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.6fr_0.8fr_auto_1.1fr_minmax(250px,1.6fr)_auto] lg:items-end">
+        {descField}
+        {amountField}
+        {installmentsField}
+        {categoryField}
+        {accountField}
+        {submitButton}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[auto_auto_auto_auto_1fr] lg:items-end">
+        {modeField}
+        {refMonthField}
+        {dateField}
+        {statusField}
+        {notesField}
+      </div>
+      {summary}
     </form>
   );
 }

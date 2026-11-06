@@ -32,7 +32,7 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/lancame
 
   return (
     <div className="flex flex-col gap-6">
-      <PageTitle title="Lançamentos" subtitle="Registre faturas e transações financeiras, com controle por categorias e cartões." />
+      <PageTitle title="Lançamentos" subtitle="Registre faturas e transações financeiras com mais clareza, separando cadastro e visualização." />
       {!showInvoices && !showTransactions && <ModulesEmpty what="Os módulos Faturas e Transações" />}
       <LaunchesView
         showInvoices={showInvoices}

@@ -27,11 +27,16 @@ export function TransactionFormRow({
   editId = null,
   submitLabel,
   onDone,
+  layout = "row",
+  onCancel,
 }: {
   initial: Draft;
   editId?: number | null;
   submitLabel: string;
   onDone?: () => void;
+  /** "row": em fileira; "modal": em janela, com Cancelar (mesmos campos e regras). */
+  layout?: "row" | "modal";
+  onCancel?: () => void;
 }) {
   const [f, setF] = useState<Draft>(initial);
   const [error, setError] = useState<string>();
@@ -54,9 +59,16 @@ export function TransactionFormRow({
     });
   }
 
+  const modal = layout === "modal";
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_2fr_minmax(130px,1fr)_auto] lg:items-end">
+    <form onSubmit={submit} className={modal ? "flex flex-col gap-4" : "flex flex-col gap-2"}>
+      <div
+        className={
+          modal
+            ? "grid gap-3 sm:grid-cols-2 sm:items-end"
+            : "grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_2fr_minmax(130px,1fr)_auto] lg:items-end"
+        }
+      >
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${prefix}-date`}>Data *</Label>
           <Input
@@ -91,14 +103,28 @@ export function TransactionFormRow({
           <Label htmlFor={`${prefix}-amount`}>Valor (R$) *</Label>
           <Input id={`${prefix}-amount`} inputMode="decimal" placeholder="0,00" value={f.amount} onChange={(e) => set("amount", e.target.value)} />
         </div>
-        <Button type="submit" disabled={pending} className="h-9">
-          <Plus /> {submitLabel}
-        </Button>
+        {!modal && (
+          <Button type="submit" disabled={pending} className="h-9">
+            <Plus /> {submitLabel}
+          </Button>
+        )}
       </div>
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
+      )}
+      {modal && (
+        <div className="flex justify-end gap-2 border-t pt-4">
+          {onCancel && (
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancelar
+            </Button>
+          )}
+          <Button type="submit" disabled={pending} className="h-9">
+            <Plus /> {submitLabel}
+          </Button>
+        </div>
       )}
     </form>
   );
@@ -113,6 +139,8 @@ export function TransactionsTable({
   kindHeader = "Entrada / Saída",
   currency = "BRL",
   factor = 1,
+  pageSize,
+  formLayout = "row",
 }: {
   items: Transaction[];
   emptyText: string;
@@ -120,6 +148,10 @@ export function TransactionsTable({
   /** Moeda de exibição; `factor` converte centavos de real em unidades mínimas dela. */
   currency?: RefCurrency;
   factor?: number;
+  /** Linhas por página (sem valor: todas numa página só). */
+  pageSize?: number;
+  /** Disposição do formulário de edição. */
+  formLayout?: "row" | "modal";
 }) {
   const [filter, setFilter] = useState<"ALL" | "in" | "out">("ALL");
   const [search, setSearch] = useState("");
@@ -130,7 +162,11 @@ export function TransactionsTable({
     const q = search.trim().toLowerCase();
     return q ? items.filter((t) => t.description.toLowerCase().includes(q)) : items;
   }, [items, search]);
-  const visible = filter === "ALL" ? searched : searched.filter((t) => t.kind === filter);
+  const filtered = filter === "ALL" ? searched : searched.filter((t) => t.kind === filter);
+  const [page, setPage] = useState(0);
+  const pages = pageSize ? Math.max(1, Math.ceil(filtered.length / pageSize)) : 1;
+  const current = Math.min(page, pages - 1);
+  const visible = pageSize ? filtered.slice(current * pageSize, (current + 1) * pageSize) : filtered;
 
   function remove(t: Transaction) {
     if (!confirm(`Excluir "${t.description}" (${dateBr(t.date)})? Essa ação não pode ser desfeita.`)) return;
@@ -147,7 +183,10 @@ export function TransactionsTable({
         <FilterTabs
           label="Filtrar transações"
           value={filter}
-          onChange={setFilter}
+          onChange={(v) => {
+            setFilter(v);
+            setPage(0);
+          }}
           options={[
             { value: "ALL", label: "Todas", count: searched.length },
             { value: "in", label: "Entradas", count: searched.filter((t) => t.kind === "in").length },
@@ -161,7 +200,10 @@ export function TransactionsTable({
             placeholder="Buscar por descrição..."
             className="pl-8"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(0);
+            }}
           />
         </div>
       </div>
@@ -220,9 +262,10 @@ export function TransactionsTable({
           </TableBody>
         </Table>
       </div>
+      {pageSize && filtered.length > 0 && <Pager label="transações" shown={visible.length} total={filtered.length} page={current} pages={pages} onPage={setPage} />}
 
       <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
-        <DialogContent className="sm:max-w-4xl">
+        <DialogContent className={formLayout === "modal" ? "sm:max-w-2xl" : "sm:max-w-4xl"}>
           <DialogHeader>
             <DialogTitle>Editar transação</DialogTitle>
           </DialogHeader>
@@ -233,10 +276,38 @@ export function TransactionsTable({
               submitLabel="Salvar"
               initial={{ date: editing.date, kind: editing.kind, description: editing.description, amount: centsToInput(editing.amountCents) }}
               onDone={() => setEditing(null)}
+              layout={formLayout}
+              onCancel={() => setEditing(null)}
             />
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** Paginação simples: "Mostrando X de Y" e páginas. */
+export function Pager({ label, shown, total, page, pages, onPage }: { label: string; shown: number; total: number; page: number; pages: number; onPage: (p: number) => void }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      <span>
+        Mostrando {shown} de {total} {label}
+      </span>
+      {pages > 1 && (
+        <nav aria-label={`Páginas de ${label}`} className="flex items-center gap-1">
+          <Button size="icon-sm" variant="outline" aria-label="Página anterior" disabled={page === 0} onClick={() => onPage(page - 1)}>
+            ‹
+          </Button>
+          {Array.from({ length: pages }, (_, i) => (
+            <Button key={i} size="icon-sm" variant={i === page ? "default" : "outline"} aria-current={i === page ? "page" : undefined} onClick={() => onPage(i)}>
+              {i + 1}
+            </Button>
+          ))}
+          <Button size="icon-sm" variant="outline" aria-label="Próxima página" disabled={page === pages - 1} onClick={() => onPage(page + 1)}>
+            ›
+          </Button>
+        </nav>
+      )}
     </div>
   );
 }

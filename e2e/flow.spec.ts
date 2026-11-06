@@ -117,13 +117,17 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Lançamentos: compra de R$ 1.200,00 em 3× no Cartão PJ
   await page.getByRole("link", { name: "Lançamentos" }).click();
   await expect(page.getByRole("link", { name: "Lançamentos" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Lançamento de Faturas" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Faturas", exact: true })).toBeVisible();
+  // Cadastro em janela: "+ Nova Fatura" abre o formulário completo
+  await page.getByRole("button", { name: "Nova Fatura" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Nova Fatura" })).toBeVisible();
   await page.getByLabel("Descrição do custo *").fill("Cadeira");
   await page.locator("#exp-amount").fill("1.200,00");
   await page.getByLabel("Total de parcelas", { exact: true }).fill("3");
   await page.getByRole("radio", { name: "o total" }).click();
   await page.selectOption("#exp-account", { label: "Cartão PJ" });
-  await page.getByRole("button", { name: "Lançar Fatura" }).click();
+  await page.getByRole("button", { name: "Salvar Fatura" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   const cadeira = page.getByRole("row", { name: /Cadeira/ });
   await expect(cadeira).toContainText("R$ 400,00");
   await expect(cadeira).toContainText("1 / 3");
@@ -133,9 +137,11 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByLabel("Dia de vencimento de Cartão PJ").fill("10");
   await page.getByLabel("Dia de vencimento de Cartão PJ").press("Enter");
   await expect(page.getByRole("row", { name: /Cadeira/ })).toContainText("vence 10/");
-  // Editar abre com o valor do jeito que foi lançado (aqui, o total)
+  // Editar abre a mesma janela, com o valor do jeito que foi lançado (aqui, o total)
   await page.getByRole("button", { name: "Editar Cadeira" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Editar Fatura" })).toBeVisible();
   await expect(page.getByRole("dialog").getByRole("radio", { name: "o total" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#exp-desc")).toHaveValue("Cadeira");
   await page.keyboard.press("Escape");
   await expect(cadeira).toContainText("Cartão PJ");
   await expect(page.getByTestId("month-total")).toHaveText("Total: R$ 400,00");
@@ -144,7 +150,8 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Até a última parcela: paga a 1ª de 3, faltam 2 (R$ 800,00)
   await expect(page.getByRole("row", { name: /Cadeira/ })).toContainText("faltam 2 • R$ 800,00");
 
-  // Contas: cadastrar uma terceira conta pelo "+ Adicionar"
+  // Contas: cadastrar uma terceira conta pelo "+ Adicionar" (dentro da janela de Nova Fatura)
+  await page.getByRole("button", { name: "Nova Fatura" }).click();
   await page.getByRole("button", { name: "Gerenciar contas" }).click();
   await page.getByLabel("Nova conta", { exact: true }).fill("Nubank");
   await page.getByRole("button", { name: "Criar" }).click();
@@ -159,13 +166,17 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByLabel("Nome da conta Nubank")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("#exp-account option:checked")).toHaveText("Cartão PF");
+  await page.getByRole("button", { name: "Cancelar" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // Lançamento de Transações: uma entrada e uma saída
   const tx = async (kind: "in" | "out", description: string, amount: string) => {
+    await page.getByRole("button", { name: "Nova Transação" }).click();
     await page.selectOption("#tx-kind", kind);
     await page.locator("#tx-desc").fill(description);
     await page.locator("#tx-amount").fill(amount);
-    await page.getByRole("button", { name: "Lançar Transação" }).click();
+    await page.getByRole("button", { name: "Salvar Transação" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("table", { name: "Transações" }).getByRole("row", { name: new RegExp(description) })).toBeVisible();
   };
   await tx("in", "Recebimento de serviço", "2.500,00");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { ArrowLeftRight, FileText, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, CalendarDays, CircleCheck, CreditCard, FilePlus2, FileText, Hourglass, Info, Layers, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,8 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { categoryColor, tagStyle } from "@/components/cards/colors";
-import { FilterTabs, SectionTitle, TotalChip, TotalsBar, accountColors, brl, dateBr } from "@/components/finance/ui";
-import { TransactionFormRow, TransactionsTable, emptyDraft } from "@/components/finance/transactions";
+import { IconBox, SectionTitle, StatCard, TotalChip, TotalsBar, accountColors, brl, dateBr } from "@/components/finance/ui";
+import { Pager, TransactionFormRow, TransactionsTable, emptyDraft } from "@/components/finance/transactions";
 import { MonthPicker } from "@/components/month-picker";
 import { Priv } from "@/components/priv";
 import type { CardAccount } from "@/lib/cards/accounts";
@@ -37,6 +37,8 @@ import {
 import { DueDays } from "./due-days";
 import { ExpenseFormFields } from "./expense-form";
 
+/** Linhas por página nas listas de faturas e transações. */
+const PAGE_SIZE = 10;
 const centsToInput = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
 const selectClass =
   "h-9 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:bg-input/30";
@@ -112,7 +114,6 @@ export function LaunchesView({
   const [category, setCategory] = useState<string>("ALL");
   const [status, setStatus] = useState<"ALL" | "paid" | "pending">("ALL");
   const [search, setSearch] = useState("");
-  const [editing, setEditing] = useState<InstallmentRow | null>(null);
   const [pending, start] = useTransition();
   const colors = accountColors(accounts);
   const colorOf = (id: number) => colors[id] ?? "#94A3B8";
@@ -149,236 +150,349 @@ export function LaunchesView({
     });
   }
 
+  // Janelas de cadastro/edição (o formulário completo de antes, em janela).
+  const [invoiceDialog, setInvoiceDialog] = useState<null | { row: InstallmentRow | null }>(null);
+  const [txDialog, setTxDialog] = useState(false);
+  const [invoicePage, setInvoicePage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const page = Math.min(invoicePage, pageCount - 1);
+  const pageRows = visible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const paidCount = rows.filter((r) => r.paid).length;
+  const txIn = transactions.filter((t) => t.kind === "in").reduce((s, t) => s + t.amountCents, 0);
+  const txOut = transactions.filter((t) => t.kind === "out").reduce((s, t) => s + t.amountCents, 0);
+  const resetPage = () => setInvoicePage(0);
+  const editingRow = invoiceDialog?.row ?? null;
+
   return (
     <div className="flex flex-col gap-6">
-      {showInvoices && (
+      {/* Barra do mês: referência, categorias e aviso */}
       <Card>
-        <CardContent className="flex flex-col gap-5">
-          <SectionTitle
-            icon={FileText}
-            title="Lançamento de Faturas"
-            subtitle="Insira, edite e acompanhe os custos do mês, com parcelamento e categorização."
-            right={
-              <div className="flex flex-wrap items-center gap-2">
-                <CategoriesDialog categories={categories} />
-                <MonthPicker month={month} />
-              </div>
-            }
-          />
-          <DueDays accounts={accounts} colors={colors} />
-          <div className="border-t pt-5">
-            <ExpenseFormFields
-              initial={emptyForm(month, today, accounts[0]?.id ?? 0)}
-              categories={categories}
-              accounts={accounts}
-              accountsButton={<AccountsDialog accounts={accounts} />}
-              submitLabel="Lançar Fatura"
-              onSubmit={(f) => saveExpenseAction(null, f)}
-              onDone={() => toast.success("Fatura lançada")}
-            />
-          </div>
-
-          {overdue.count > 0 && (
-            <p role="status" className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
-              {overdue.count} parcela{overdue.count > 1 ? "s" : ""} de meses anteriores ainda não marcada{overdue.count > 1 ? "s" : ""} como
-              paga{overdue.count > 1 ? "s" : ""} (<Priv>{brl(overdue.cents)}</Priv>). Ela{overdue.count > 1 ? "s" : ""} continua
-              {overdue.count > 1 ? "m" : ""} em aberto até ser{overdue.count > 1 ? "em" : ""} paga{overdue.count > 1 ? "s" : ""}: volte ao mês dela
-              {overdue.count > 1 ? "s" : ""} para marcar.
-            </p>
-          )}
-
-          <div className="flex flex-wrap items-center gap-3 border-t pt-5">
-            <FilterTabs
-              label="Filtrar por conta"
-              value={account}
-              onChange={setAccount}
-              options={[
-                { value: "ALL", label: "Todas", count: base.length },
-                ...accounts.map((a) => ({ value: String(a.id), label: a.name, count: base.filter((r) => r.accountId === a.id).length })),
-              ]}
-            />
-            <select aria-label="Filtrar por categoria" className={selectClass} value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="ALL">Todas as categorias</option>
-              {categories.map((c) => (
-                <option key={c.id} value={String(c.id)}>
-                  {c.name}
-                </option>
-              ))}
-              <option value="NONE">{NO_CATEGORY}</option>
-            </select>
-            <select
-              aria-label="Filtrar por status"
-              className={selectClass}
-              value={status}
-              onChange={(e) => setStatus(e.target.value as "ALL" | "paid" | "pending")}
-            >
-              <option value="ALL">Todos os status</option>
-              <option value="paid">Pago</option>
-              <option value="pending">Pendente</option>
-            </select>
-            <div className="relative ml-auto w-full sm:w-72">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="Buscar por descrição"
-                placeholder="Buscar por descrição..."
-                className="pl-8"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+        <CardContent className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-3">
+            <IconBox icon={CalendarDays} color="#8b7cf6" />
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Mês de referência</span>
+              <MonthPicker month={month} />
             </div>
           </div>
-
-          <div className="overflow-x-auto rounded-xl border">
-            <Table aria-label="Faturas do mês">
-              <TableHeader className="bg-muted/50">
-                <TableRow>
-                  <TableHead>Descrição do custo</TableHead>
-                  <TableHead className="text-center">Categoria</TableHead>
-                  <TableHead className="text-center">Cartão / Conta</TableHead>
-                  <TableHead className="text-right">Valor (R$)</TableHead>
-                  <TableHead className="text-center">Parcelas</TableHead>
-                  <TableHead className="text-center">Mês (Fatura)</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="text-center">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visible.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                      {rows.length === 0 ? `Nenhum lançamento em ${monthLabel(month)}.` : "Nenhum lançamento com esses filtros."}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  visible.map((r) => (
-                    <TableRow key={r.installmentId}>
-                      <TableCell className="font-medium" title={r.notes || undefined}>
-                        {r.description}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Tag color={categoryColor(r.categoryId)}>{r.categoryName ?? NO_CATEGORY}</Tag>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="inline-flex items-center gap-1">
-                          <Tag color={colorOf(r.accountId)}>{r.accountName}</Tag>
-                          <span className="text-[10px] font-semibold text-muted-foreground" title={`Natureza da despesa: ${r.nature}`}>
-                            {r.nature}
-                          </span>
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        <Priv>{brl(r.amountCents)}</Priv>
-                      </TableCell>
-                      <TableCell className="text-center tabular-nums">
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
-                          {r.number} / {r.installments}
-                        </span>
-                        {r.installments > 1 && (
-                          <span className="priv block text-[11px] text-muted-foreground">
-                            {open[r.expenseId] ? `faltam ${open[r.expenseId].remainingCount} • ${brl(open[r.expenseId].remainingCents)}` : "quitada"}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {monthLabel(r.invoiceMonth)}
-                        <span className="block text-[11px] text-muted-foreground">
-                          vence{" "}
-                          {dateBr(
-                            dueDate(
-                              r.invoiceMonth,
-                              accounts.find((a) => a.id === r.accountId)?.dueDay ?? null,
-                              accounts.find((a) => a.id === r.accountId)?.closingDay ?? null,
-                            ),
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() => toggle(r)}
-                          title="Clique para alternar"
-                          className="rounded-full border px-2 py-0.5 text-xs font-medium"
-                          style={tagStyle(r.paid ? "#22C55E" : "#F59E0B")}
-                        >
-                          {r.paid ? "Pago" : "Pendente"}
-                        </button>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-center gap-1">
-                          <Button size="icon-sm" variant="ghost" className="text-sky-400" aria-label={`Editar ${r.description}`} onClick={() => setEditing(r)}>
-                            <Pencil />
-                          </Button>
-                          <Button
-                            size="icon-sm"
-                            variant="ghost"
-                            className="text-destructive"
-                            aria-label={`Excluir ${r.description}`}
-                            disabled={pending}
-                            onClick={() => remove(r)}
-                          >
-                            <Trash2 />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <TotalsBar
-            label={`Totais do mês (${monthLabel(month)})`}
-            final={<span data-testid="month-total">Total: <Priv>{brl(totals.total)}</Priv></span>}
-          >
-            {accounts.map((a) => (
-              <TotalChip key={a.id} color={colors[a.id]}>
-                {a.name}: <Priv>{brl(totals.byAccount[a.id] ?? 0)}</Priv>
-              </TotalChip>
-            ))}
-          </TotalsBar>
+          {showInvoices && <CategoriesDialog categories={categories} />}
+          <p className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+            <Info className="size-4 shrink-0 text-[#8b7cf6]" />
+            Cadastre novas faturas e transações pelos botões abaixo. Os lançamentos ficam sempre visíveis em listas organizadas.
+          </p>
         </CardContent>
       </Card>
+
+      {showInvoices && (
+        <Card>
+          <CardContent className="flex flex-col gap-5">
+            <SectionTitle
+              icon={FileText}
+              title="Faturas"
+              subtitle="Visualize e gerencie as faturas registradas no mês selecionado."
+              right={
+                <Button onClick={() => setInvoiceDialog({ row: null })}>
+                  <Plus /> Nova Fatura
+                </Button>
+              }
+            />
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
+              <StatCard compact icon={Layers} color="#8b7cf6" title="Lançamentos">
+                {rows.length}
+              </StatCard>
+              <StatCard compact icon={Hourglass} color="#F59E0B" title="Pendentes">
+                {rows.length - paidCount}
+              </StatCard>
+              <StatCard compact icon={CircleCheck} color="#22C55E" title="Pagos">
+                {paidCount}
+              </StatCard>
+              {accounts.map((a) => (
+                <StatCard compact key={a.id} icon={CreditCard} color={colorOf(a.id)} title={a.name}>
+                  {rows.filter((r) => r.accountId === a.id).length}
+                </StatCard>
+              ))}
+            </div>
+
+            {/* Fechamento e vencimento de cada cartão (configuração que já existia). */}
+            <DueDays accounts={accounts} colors={colors} />
+
+            {overdue.count > 0 && (
+              <p role="status" className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+                {overdue.count} parcela{overdue.count > 1 ? "s" : ""} de meses anteriores ainda não marcada{overdue.count > 1 ? "s" : ""} como
+                paga{overdue.count > 1 ? "s" : ""} (<Priv>{brl(overdue.cents)}</Priv>). Ela{overdue.count > 1 ? "s" : ""} continua
+                {overdue.count > 1 ? "m" : ""} em aberto até ser{overdue.count > 1 ? "em" : ""} paga{overdue.count > 1 ? "s" : ""}: volte ao mês dela
+                {overdue.count > 1 ? "s" : ""} para marcar.
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-end gap-3 border-t pt-5">
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Categoria
+                <select
+                  aria-label="Filtrar por categoria"
+                  className={selectClass}
+                  value={category}
+                  onChange={(e) => {
+                    setCategory(e.target.value);
+                    resetPage();
+                  }}
+                >
+                  <option value="ALL">Todas as categorias</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </option>
+                  ))}
+                  <option value="NONE">{NO_CATEGORY}</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Status
+                <select
+                  aria-label="Filtrar por status"
+                  className={selectClass}
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value as "ALL" | "paid" | "pending");
+                    resetPage();
+                  }}
+                >
+                  <option value="ALL">Todos os status</option>
+                  <option value="paid">Pago</option>
+                  <option value="pending">Pendente</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Cartão / Conta
+                <select
+                  aria-label="Filtrar por conta"
+                  className={selectClass}
+                  value={account}
+                  onChange={(e) => {
+                    setAccount(e.target.value);
+                    resetPage();
+                  }}
+                >
+                  <option value="ALL">Todos os cartões ({base.length})</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.name} ({base.filter((r) => r.accountId === a.id).length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="relative ml-auto w-full sm:w-72">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  aria-label="Buscar por descrição"
+                  placeholder="Buscar por descrição..."
+                  className="pl-8"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    resetPage();
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border">
+              <Table aria-label="Faturas do mês">
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Descrição do custo</TableHead>
+                    <TableHead className="text-center">Categoria</TableHead>
+                    <TableHead className="text-center">Cartão / Conta</TableHead>
+                    <TableHead className="text-right">Valor (R$)</TableHead>
+                    <TableHead className="text-center">Parcelas</TableHead>
+                    <TableHead className="text-center">Mês (Fatura)</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead className="text-center">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visible.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                        {rows.length === 0 ? `Nenhum lançamento em ${monthLabel(month)}.` : "Nenhum lançamento com esses filtros."}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    pageRows.map((r) => (
+                      <TableRow key={r.installmentId}>
+                        <TableCell className="font-medium" title={r.notes || undefined}>
+                          {r.description}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Tag color={categoryColor(r.categoryId)}>{r.categoryName ?? NO_CATEGORY}</Tag>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="inline-flex items-center gap-1">
+                            <Tag color={colorOf(r.accountId)}>{r.accountName}</Tag>
+                            <span className="text-[10px] font-semibold text-muted-foreground" title={`Natureza da despesa: ${r.nature}`}>
+                              {r.nature}
+                            </span>
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          <Priv>{brl(r.amountCents)}</Priv>
+                        </TableCell>
+                        <TableCell className="text-center tabular-nums">
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
+                            {r.number} / {r.installments}
+                          </span>
+                          {r.installments > 1 && (
+                            <span className="priv block text-[11px] text-muted-foreground">
+                              {open[r.expenseId] ? `faltam ${open[r.expenseId].remainingCount} • ${brl(open[r.expenseId].remainingCents)}` : "quitada"}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {monthLabel(r.invoiceMonth)}
+                          <span className="block text-[11px] text-muted-foreground">
+                            vence{" "}
+                            {dateBr(
+                              dueDate(
+                                r.invoiceMonth,
+                                accounts.find((a) => a.id === r.accountId)?.dueDay ?? null,
+                                accounts.find((a) => a.id === r.accountId)?.closingDay ?? null,
+                              ),
+                            )}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={() => toggle(r)}
+                            title="Clique para alternar"
+                            className="rounded-full border px-2 py-0.5 text-xs font-medium"
+                            style={tagStyle(r.paid ? "#22C55E" : "#F59E0B")}
+                          >
+                            {r.paid ? "Pago" : "Pendente"}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-center gap-1">
+                            <Button size="icon-sm" variant="ghost" className="text-sky-400" aria-label={`Editar ${r.description}`} onClick={() => setInvoiceDialog({ row: r })}>
+                              <Pencil />
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="ghost"
+                              className="text-destructive"
+                              aria-label={`Excluir ${r.description}`}
+                              disabled={pending}
+                              onClick={() => remove(r)}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            {visible.length > 0 && <Pager label="faturas" shown={pageRows.length} total={visible.length} page={page} pages={pageCount} onPage={setInvoicePage} />}
+
+            <TotalsBar
+              label={`Totais do mês (${monthLabel(month)})`}
+              final={
+                <span data-testid="month-total">
+                  Total: <Priv>{brl(totals.total)}</Priv>
+                </span>
+              }
+            >
+              {accounts.map((a) => (
+                <TotalChip key={a.id} color={colors[a.id]}>
+                  {a.name}: <Priv>{brl(totals.byAccount[a.id] ?? 0)}</Priv>
+                </TotalChip>
+              ))}
+            </TotalsBar>
+          </CardContent>
+        </Card>
       )}
 
       {showTransactions && (
-      <Card>
-        <CardContent className="flex flex-col gap-5">
-          <SectionTitle
-            icon={ArrowLeftRight}
-            title="Lançamento de Transações"
-            subtitle="Registre entradas e saídas avulsas (receitas, pagamentos, transferências, etc.)."
-          />
-          <div className="border-t pt-5">
-            <TransactionFormRow key={month} initial={emptyDraft(txDefaultDate)} submitLabel="Lançar Transação" />
-          </div>
-          <TransactionsTable items={transactions} emptyText={`Nenhuma transação em ${monthLabel(month)}.`} />
-        </CardContent>
-      </Card>
+        <Card>
+          <CardContent className="flex flex-col gap-5">
+            <SectionTitle
+              icon={ArrowLeftRight}
+              title="Transações"
+              subtitle="Visualize entradas e saídas avulsas (receitas, pagamentos, transferências, etc.)."
+              right={
+                <Button onClick={() => setTxDialog(true)}>
+                  <Plus /> Nova Transação
+                </Button>
+              }
+            />
+            <div className="grid gap-3 sm:grid-cols-3">
+              <StatCard compact icon={ArrowUp} color="#22C55E" title="Entradas">
+                <Priv>{brl(txIn)}</Priv>
+              </StatCard>
+              <StatCard compact icon={ArrowDown} color="#EF4444" title="Saídas">
+                <Priv>{brl(txOut)}</Priv>
+              </StatCard>
+              <StatCard compact icon={ArrowLeftRight} color="#60A5FA" title="Saldo">
+                <Priv>{brl(txIn - txOut)}</Priv>
+              </StatCard>
+            </div>
+            <TransactionsTable items={transactions} emptyText={`Nenhuma transação em ${monthLabel(month)}.`} pageSize={PAGE_SIZE} formLayout="modal" />
+          </CardContent>
+        </Card>
       )}
 
-      <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
-        <DialogContent className="sm:max-w-5xl">
+      {/* Nova fatura / editar fatura: o formulário completo, na mesma janela. */}
+      <Dialog open={invoiceDialog !== null} onOpenChange={(v) => !v && setInvoiceDialog(null)}>
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Editar lançamento</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <FilePlus2 className="size-5 text-[#8b7cf6]" /> {editingRow ? "Editar Fatura" : "Nova Fatura"}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              {editingRow ? "As parcelas são recalculadas; as que já estavam pagas continuam pagas." : "Cadastre uma nova fatura para controle e acompanhamento."}
+            </p>
           </DialogHeader>
-          {editing && (
+          {invoiceDialog && (
             <ExpenseFormFields
-              key={editing.installmentId}
-              initial={formFromRow(editing)}
+              key={editingRow ? editingRow.installmentId : "new"}
+              layout="modal"
+              initial={editingRow ? formFromRow(editingRow) : emptyForm(month, today, accounts[0]?.id ?? 0)}
               categories={categories}
               accounts={accounts}
-              editing
-              submitLabel="Salvar"
-              onSubmit={(f) => saveExpenseAction(editing.expenseId, f)}
+              accountsButton={editingRow ? undefined : <AccountsDialog accounts={accounts} />}
+              editing={!!editingRow}
+              submitLabel={editingRow ? "Salvar alterações" : "Salvar Fatura"}
+              onSubmit={(f) => saveExpenseAction(editingRow ? editingRow.expenseId : null, f)}
+              onCancel={() => setInvoiceDialog(null)}
               onDone={() => {
-                setEditing(null);
-                toast.success("Lançamento atualizado");
+                setInvoiceDialog(null);
+                toast.success(editingRow ? "Lançamento atualizado" : "Fatura lançada");
               }}
             />
           )}
-          <p className="text-xs text-muted-foreground">As parcelas são recalculadas; as que já estavam pagas continuam pagas.</p>
+        </DialogContent>
+      </Dialog>
+
+      {/* Nova transação: o formulário completo, em janela. */}
+      <Dialog open={txDialog} onOpenChange={setTxDialog}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Nova Transação</DialogTitle>
+            <p className="text-sm text-muted-foreground">Registre uma entrada ou saída avulsa.</p>
+          </DialogHeader>
+          {txDialog && (
+            <TransactionFormRow
+              initial={emptyDraft(txDefaultDate)}
+              submitLabel="Salvar Transação"
+              layout="modal"
+              onCancel={() => setTxDialog(false)}
+              onDone={() => setTxDialog(false)}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
