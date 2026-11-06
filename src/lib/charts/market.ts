@@ -70,8 +70,10 @@ export async function getCandles(query: CandleQuery, nowMs = Date.now()): Promis
   // 2D, 6M e 1A não existem na Binance: junta as diárias/mensais (que já passam pelo cache abaixo).
   const agg = AGGREGATED[query.interval];
   if (agg) {
-    const base = await getCandles({ ...query, interval: agg.base, limit: Math.min(1000, (query.limit + 1) * agg.count) }, nowMs);
-    return aggregateCandles(base, query.interval as "2d" | "6M" | "1y").slice(-query.limit);
+    const want = Math.min(1000, (query.limit + 1) * agg.count);
+    const base = await getCandles({ ...query, interval: agg.base, limit: want }, nowMs);
+    // Veio a quantidade pedida: o histórico foi cortado e o 1º grupo pode estar incompleto.
+    return aggregateCandles(base, query.interval as "2d" | "6M" | "1y", { dropPartialFirst: base.length >= want }).slice(-query.limit);
   }
   // Data final no futuro = "mais recentes" (senão ficaria 1 dia em cache como se fosse passado).
   const q = query.end !== null && query.end >= nowMs ? { ...query, end: null } : query;

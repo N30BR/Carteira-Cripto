@@ -48,3 +48,29 @@ export function spendBudget(db: Db, now = new Date(), src: Source = "bgeometrics
   const b = current(db, src, now);
   writeCache(db, key(src), { ...b, dayCount: b.dayCount + 1, hourCount: b.hourCount + 1 }, 2 * DAY, now);
 }
+
+// ---------- falhas guardadas (sobrevivem a reinícios) ----------
+type Failure = { count: number; at: number };
+const failKey = (k: string) => `onchain:failure:${k}:v1`;
+
+/**
+ * Pode tentar de novo depois de falhas? 1ª falha: espera 1 h; 2ª: 4 h; da 3ª em diante, só na janela da série
+ * (uma série que falha sempre não gasta a cota das outras).
+ */
+export function failureAllows(db: Db, key: string, slot: number | null, now = new Date()): boolean {
+  const f = readCache<Failure>(db, failKey(key), now)?.data;
+  if (!f || f.count <= 0) return true;
+  const since = now.getTime() - f.at;
+  if (f.count === 1) return since >= HOUR;
+  if (f.count === 2) return since >= 4 * HOUR;
+  return since >= 4 * HOUR && (slot === null || windowOf(now) === slot);
+}
+
+export function recordFailure(db: Db, key: string, now = new Date()): void {
+  const f = readCache<Failure>(db, failKey(key), now)?.data;
+  writeCache(db, failKey(key), { count: (f?.count ?? 0) + 1, at: now.getTime() }, 30 * DAY, now);
+}
+
+export function clearFailure(db: Db, key: string, now = new Date()): void {
+  if (readCache<Failure>(db, failKey(key), now)?.data?.count) writeCache(db, failKey(key), { count: 0, at: now.getTime() }, DAY, now);
+}

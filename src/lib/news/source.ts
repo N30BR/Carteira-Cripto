@@ -3,6 +3,7 @@
 // Alternativas pagas (não contratadas): Trading Economics, Financial Modeling Prep, Finnhub — exigem chave e plano.
 import type { Db } from "@/db/client";
 import { readCache, writeCache } from "@/lib/prices/cache";
+import { fetchJsonCapped } from "@/lib/http";
 import { mergeEvents, parseForexFactory, type NewsEvent, type RegionId } from "./calendar";
 
 const MIN = 60_000;
@@ -33,14 +34,7 @@ const forexFactory: Provider = {
   id: "forexfactory",
   regions: ["US", "JP", "EU"],
   fetch: async () => {
-    let res: Response;
-    try {
-      res = await fetch(ffUrl(), { cache: "no-store", signal: AbortSignal.timeout(15_000), headers: { Accept: "application/json" } });
-    } catch {
-      throw new Error("Forex Factory indisponível");
-    }
-    if (!res.ok) throw new Error(`Forex Factory ${res.status}`);
-    const events = parseForexFactory(await res.json());
+    const events = parseForexFactory(await fetchJsonCapped(ffUrl(), 2_000_000, "Forex Factory", 15_000));
     if (!events.length) throw new Error("Forex Factory: semana sem eventos");
     // O feed é a semana (domingo a sábado, horário de Nova York): a janela vai do primeiro ao último evento ± 1 dia.
     const from = events[0].ts - 86_400_000;
@@ -71,7 +65,7 @@ function view(s: Stored): NewsData {
 export async function getNewsData(db: Db, now = new Date(), force = false): Promise<NewsData> {
   const s = read(db);
   const t = now.getTime();
-  const due = s.fetchedAt === null || t - s.fetchedAt >= (force ? 2 * MIN : REFRESH);
+  const due = s.fetchedAt === null || t - s.fetchedAt >= (force ? 5 * MIN : REFRESH);
   const cooling = s.lastError !== null && t - s.lastError < FAIL_COOLDOWN && (s.fetchedAt === null || s.lastError > s.fetchedAt);
   if (!due || cooling) return view(s);
   const running = inFlight.get(db);

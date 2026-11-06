@@ -73,20 +73,22 @@ export function deriveCoinMetrics(rows: CmRow[]): Record<"MVRV_Z" | "NUPL" | "RE
 }
 
 /** Série da BGeometrics (lista de { d, unixTs, <campo> }) → pontos [ms, valor], em ordem de data. */
-export function parseBgeometrics(json: unknown, field: string): Point[] {
+export function parseBgeometrics(json: unknown, field: string, aliases: string[] = []): Point[] {
   if (!Array.isArray(json)) throw new Error("BGeometrics: resposta inesperada");
   const out: Point[] = [];
+  let seen = 0;
   for (const r of json as Record<string, unknown>[]) {
+    if (!r || typeof r !== "object") continue;
+    seen++;
     const ts = num(r.unixTs);
     const t = ts !== null ? ts * 1000 : typeof r.d === "string" ? Date.parse(`${r.d}T00:00:00Z`) : NaN;
-    // Campo esperado; se vier com outro nome, o único valor numérico da linha.
+    // Só o campo esperado ou nomes alternativos conhecidos (nunca "adivinha" outro número da linha).
     let v = num(r[field]);
-    if (v === null) {
-      const others = Object.entries(r).filter(([k, x]) => k !== "unixTs" && k !== "d" && num(x) !== null);
-      if (others.length === 1) v = num(others[0][1]);
-    }
+    for (const a of aliases) if (v === null) v = num(r[a]);
     if (Number.isFinite(t) && v !== null) out.push([t, v]);
   }
+  // Linhas vieram, mas nenhuma com o campo: a fonte mudou o nome. Falha em vez de mostrar outra métrica.
+  if (seen > 0 && !out.length) throw new Error(`BGeometrics: campo "${field}" ausente`);
   return out.sort((a, b) => a[0] - b[0]);
 }
 
@@ -100,10 +102,10 @@ export const BGEOMETRICS: Partial<Record<OnchainId, { path: string; field: strin
 };
 
 /** Campo e caminho na BGeometrics dos indicadores que também calculamos (para conferir o cálculo). */
-export const BGEOMETRICS_CHECK: Partial<Record<OnchainId, { path: string; field: string }>> = {
+export const BGEOMETRICS_CHECK: Partial<Record<OnchainId, { path: string; field: string; aliases?: string[] }>> = {
   REALIZED_PRICE: { path: "realized-price", field: "realizedPrice" },
   NUPL: { path: "nupl", field: "nupl" },
-  MVRV_Z: { path: "mvrv-zscore", field: "mvrvZscore" },
+  MVRV_Z: { path: "mvrv-zscore", field: "mvrvZscore", aliases: ["mvrvZScore", "mvrv_zscore"] },
   PUELL: { path: "puell-multiple", field: "puellMultiple" },
 };
 

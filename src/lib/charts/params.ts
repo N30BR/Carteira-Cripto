@@ -49,7 +49,7 @@ type Bar = { timestamp: number; open: number; high: number; low: number; close: 
  * Junta velas: diárias em pares de dias (alinhados a 01/01/1970, UTC) para 2D; mensais em
  * semestres (jan–jun, jul–dez) para 6M ou anos para 1A, pelo calendário UTC.
  */
-export function aggregateCandles<T extends Bar>(source: T[], interval: "2d" | "6M" | "1y"): Bar[] {
+export function aggregateCandles<T extends Bar>(source: T[], interval: "2d" | "6M" | "1y", opts: { dropPartialFirst?: boolean } = {}): Bar[] {
   const { base, count } = AGGREGATED[interval] as { base: "1d" | "1M"; count: number };
   const bucket = (ts: number) => {
     if (base === "1d") return Math.floor(ts / (count * DAY_MS)) * count * DAY_MS;
@@ -57,9 +57,12 @@ export function aggregateCandles<T extends Bar>(source: T[], interval: "2d" | "6
     return Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / count) * count, 1);
   };
   const out: Bar[] = [];
+  const members: number[] = [];
   let missingBuy = false;
   for (const k of source) {
     const start = bucket(k.timestamp);
+    if (out.at(-1)?.timestamp === start) members[members.length - 1]++;
+    else members.push(1);
     const last = out.at(-1);
     if (!last || last.timestamp !== start) {
       missingBuy = k.buyVolume === undefined;
@@ -74,5 +77,7 @@ export function aggregateCandles<T extends Bar>(source: T[], interval: "2d" | "6
     if (missingBuy) delete last.buyVolume;
     else last.buyVolume = (last.buyVolume ?? 0) + (k.buyVolume as number);
   }
+  // Histórico cortado (não é o começo real da listagem): o 1º grupo pode ter só parte das velas.
+  if (opts.dropPartialFirst && out.length > 1 && members[0] < count) out.shift();
   return out;
 }

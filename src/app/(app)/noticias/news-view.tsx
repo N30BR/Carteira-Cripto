@@ -27,7 +27,8 @@ import { refreshNewsAction } from "./actions";
 
 const AUTO_REFRESH = 30 * 60_000;
 function savePrefs(next: NewsPrefs) {
-  document.cookie = `${NEWS_COOKIE}=${encodeURIComponent(JSON.stringify(next))}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+  const secure = location.protocol === "https:" ? "; secure" : "";
+  document.cookie = `${NEWS_COOKIE}=${encodeURIComponent(JSON.stringify(next))}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax${secure}`;
 }
 const REGION = Object.fromEntries(REGIONS.map((r) => [r.id, r]));
 

@@ -68,9 +68,10 @@ describe("BGeometrics: leitura", () => {
 });
 
 describe("cálculo próprio × BGeometrics", () => {
-  test("leitura: se o campo esperado não vier, usa o único valor numérico da linha", async () => {
+  test("leitura: aceita nomes alternativos conhecidos do campo; nunca adivinha outro número", async () => {
     const { parseBgeometrics } = await import("@/lib/charts/onchain-math");
-    expect(parseBgeometrics([{ d: "2024-01-01", unixTs: 1704067200, mvrvZscore: 1.5 }], "mvrvZScore")).toEqual([[1704067200000, 1.5]]);
+    expect(parseBgeometrics([{ d: "2024-01-01", unixTs: 1704067200, mvrvZscore: 1.5 }], "mvrvZScore", ["mvrvZscore"])).toEqual([[1704067200000, 1.5]]);
+    expect(() => parseBgeometrics([{ d: "2024-01-01", unixTs: 1704067200, outro: 1.5 }], "mvrvZScore")).toThrow(/ausente/);
   });
 
   test("perto: diferença mediana dentro da tolerância de cada indicador (últimos 90 dias em comum)", async () => {

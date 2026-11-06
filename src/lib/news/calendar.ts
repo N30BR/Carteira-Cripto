@@ -41,12 +41,16 @@ const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice
 export function parseForexFactory(json: unknown): NewsEvent[] {
   if (!Array.isArray(json)) throw new Error("Forex Factory: resposta inesperada");
   const out: NewsEvent[] = [];
+  // Resposta externa: ignora itens que não sejam objetos, eventos a mais de 1 ano e corta em 2000.
+  const maxTs = Date.now() + 365 * 86_400_000;
   for (const r of json as Record<string, unknown>[]) {
+    if (out.length >= 2000) break;
+    if (!r || typeof r !== "object") continue;
     const region = BY_CURRENCY[String(r.country)];
     const stars = IMPACT[String(r.impact)];
     const ts = typeof r.date === "string" ? Date.parse(r.date) : NaN;
     const title = text(r.title);
-    if (!region || !stars || !Number.isFinite(ts) || !title) continue;
+    if (!region || !stars || !Number.isFinite(ts) || ts > maxTs || !title) continue;
     out.push({
       id: `ff:${r.country}:${ts}:${title}`.slice(0, 120),
       title: title.length >= 40 ? String(r.title).trim().slice(0, 120) : title,

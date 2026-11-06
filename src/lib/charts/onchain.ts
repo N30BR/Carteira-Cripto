@@ -11,7 +11,8 @@
 import type { Db } from "@/db/client";
 import { readCache, writeCache } from "@/lib/prices/cache";
 import type { Point } from "./macro-math";
-import { bgSlot, budgetAllows, spendBudget, type Source } from "./onchain-budget";
+import { fetchJsonCapped } from "@/lib/http";
+import { bgSlot, budgetAllows, clearFailure, failureAllows, recordFailure, spendBudget, type Source } from "./onchain-budget";
 import { BGEOMETRICS, BGEOMETRICS_CHECK, agreement, deriveCoinMetrics, parseBgeometrics, parseCoinMetrics, type Agreement } from "./onchain-math";
 import type { OnchainId } from "./onchain-ids";
 
@@ -21,9 +22,6 @@ const HOUR = 3_600_000;
 const CM_TTL = 12 * HOUR;
 /** Um pouco menos de 1 dia: no dia seguinte, a série já está vencida quando a janela dela volta. */
 const BG_TTL = 20 * HOUR;
-/** Depois de uma falha, espera antes de tentar de novo (não gasta a cota com repetições). */
-const FAIL_COOLDOWN = HOUR;
-const failedAt = new Map<string, number>();
 const inFlight = new Map<string, Promise<unknown>>();
 
 export class OnchainUnavailable extends Error {}
@@ -40,28 +38,21 @@ export type OnchainResult = {
 const cmBase = () => process.env.COINMETRICS_BASE_URL ?? "https://community-api.coinmetrics.io";
 const bgBase = () => process.env.BGEOMETRICS_BASE_URL ?? "https://bitcoin-data.com";
 
-async function getJson(url: string, label: string): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(20_000), headers: { Accept: "application/json" } });
-  } catch {
-    throw new Error(`${label} indisponível`);
-  }
-  if (!res.ok) throw new Error(`${label} ${res.status}`);
-  return res.json();
-}
+/** Resposta externa com teto de tamanho (a série completa da Coin Metrics tem ~1 MB). */
+const getJson = (url: string, label: string) => fetchJsonCapped(url, 5_000_000, label);
 
 /**
  * Cache no banco com cota: dado válido → devolve; vencido → busca só se houver cota (e janela) e se não estiver
  * em pausa por falha recente; senão devolve o guardado (marcado como antigo) ou null.
  */
-async function gated<T>(db: Db, key: string, ttl: number, src: Source, slot: number | null, loader: () => Promise<T>, now: Date): Promise<{ data: T; stale: boolean } | null> {
+type Gated<T> = { data: T; stale: boolean; /** Veio da fonte agora (não do cache). */ fetched: boolean };
+async function gated<T>(db: Db, key: string, ttl: number, src: Source, slot: number | null, loader: () => Promise<T>, now: Date): Promise<Gated<T> | null> {
   const hit = readCache<T>(db, key, now);
-  if (hit && !hit.stale) return { data: hit.data, stale: false };
-  const old = hit ? { data: hit.data, stale: true } : null;
-  const last = failedAt.get(key);
-  if (last !== undefined && now.getTime() - last < FAIL_COOLDOWN) return old;
-  const running = inFlight.get(key) as Promise<{ data: T; stale: boolean } | null> | undefined;
+  if (hit && !hit.stale) return { data: hit.data, stale: false, fetched: false };
+  const old = hit ? { data: hit.data, stale: true, fetched: false } : null;
+  // Falhas recentes (guardadas no banco): espera crescente; depois, só na janela da série.
+  if (!failureAllows(db, key, slot, now)) return old;
+  const running = inFlight.get(key) as Promise<Gated<T> | null> | undefined;
   if (running) return running;
   if (!budgetAllows(db, slot, !!hit, now, src)) return old;
   const job = (async () => {
@@ -69,10 +60,10 @@ async function gated<T>(db: Db, key: string, ttl: number, src: Source, slot: num
     try {
       const data = await loader();
       writeCache(db, key, data, ttl, now);
-      failedAt.delete(key);
-      return { data, stale: false };
+      clearFailure(db, key, now);
+      return { data, stale: false, fetched: true };
     } catch {
-      failedAt.set(key, now.getTime());
+      recordFailure(db, key, now);
       return old;
     }
   })().finally(() => inFlight.delete(key));
@@ -104,7 +95,7 @@ function coinMetrics(db: Db, now: Date) {
   );
 }
 
-function bgeometrics(db: Db, id: OnchainId, src: { path: string; field: string }, now: Date) {
+function bgeometrics(db: Db, id: OnchainId, src: { path: string; field: string; aliases?: string[] }, now: Date) {
   return gated(
     db,
     `onchain:bgeometrics:${src.path}:v1`,
@@ -112,7 +103,7 @@ function bgeometrics(db: Db, id: OnchainId, src: { path: string; field: string }
     "bgeometrics",
     bgSlot(id),
     async () => {
-      const points = parseBgeometrics(await getJson(`${bgBase()}/v1/${src.path}`, "BGeometrics"), src.field);
+      const points = parseBgeometrics(await getJson(`${bgBase()}/v1/${src.path}`, "BGeometrics"), src.field, src.aliases);
       if (!points.length) throw new Error("BGeometrics: sem dados");
       return points;
     },
@@ -136,8 +127,8 @@ export async function getOnchainSeries(db: Db, id: OnchainId, now = new Date()):
     const [bg, cm] = await Promise.all([bgeometrics(db, id, check, now), coinMetrics(db, now)]);
     const calc = cm?.data[calcId] ?? null;
     const agreeKey = `onchain:agreement:${id}:v1`;
-    // Dado novo da BGeometrics: confere o cálculo próprio e guarda o resultado.
-    if (bg && !bg.stale && calc) writeCache(db, agreeKey, agreement(id, calc, bg.data), 30 * 24 * HOUR, now);
+    // Dado que acabou de chegar da BGeometrics: confere o cálculo próprio e guarda o resultado.
+    if (bg?.fetched && calc) writeCache(db, agreeKey, agreement(id, calc, bg.data), 30 * 24 * HOUR, now);
     if (bg && !bg.stale) return { points: bg.data, source: "bgeometrics", stale: false };
     const agree = readCache<Agreement>(db, agreeKey, now)?.data;
     if (calc && agree?.ok) {
@@ -162,7 +153,7 @@ export async function getOnchainSeries(db: Db, id: OnchainId, now = new Date()):
   return { points: bg.data, source: "bgeometrics", stale: bg.stale, ...(bg.stale ? { note: "BGeometrics: últimos dados guardados" } : {}) };
 }
 
+/** Só para testes (as falhas ficam no banco de cada teste). */
 export function resetOnchainFailures(): void {
-  failedAt.clear();
   inFlight.clear();
 }
