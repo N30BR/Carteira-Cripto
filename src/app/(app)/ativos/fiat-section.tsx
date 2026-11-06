@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatMoney } from "@/lib/currency";
+import { Priv } from "@/components/priv";
 import type { FiatAccount, Result } from "@/lib/fiat/accounts";
 import { safeAction } from "@/lib/safe-action";
 import { createAccountAction, deleteAccountAction, renameAccountAction, setBalanceAction } from "./fiat-actions";
@@ -166,7 +167,7 @@ export function FiatSection({ accounts, today }: { accounts: FiatAccount[]; toda
               {accounts.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell className="font-medium">{a.name}</TableCell>
-                  <TableCell className="text-center tabular-nums">{formatMoney(Number(a.amount), "BRL")}</TableCell>
+                  <TableCell className="text-center tabular-nums"><Priv>{formatMoney(Number(a.amount), "BRL")}</Priv></TableCell>
                   <TableCell className="text-center tabular-nums">{formatDate(a.date)}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">

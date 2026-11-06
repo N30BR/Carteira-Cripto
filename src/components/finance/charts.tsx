@@ -5,6 +5,7 @@ import { MINOR_UNITS as MINOR, formatMoney, type RefCurrency } from "@/lib/curre
 import { formatPct } from "@/lib/format";
 import { monthShort } from "@/lib/cards/months";
 import { DOWN, UP } from "@/components/dashboard/palette";
+import { HIDDEN, useDiscreet } from "@/components/discreet-store";
 
 const brl = (cents: number) => formatMoney(cents / 100, "BRL");
 const money = (minor: number, cur: RefCurrency) => formatMoney(minor / MINOR[cur], cur);
@@ -45,6 +46,7 @@ export function TransactionBars({
   /** Moeda dos valores (em unidades mínimas: centavos, satoshis). */
   currency?: RefCurrency;
 }) {
+  const discreet = useDiscreet();
   const rows = data.map((d) => ({ ...d, label: monthShort(d.month).slice(0, 3) }));
   return (
     <div className="flex flex-col gap-2">
@@ -57,12 +59,12 @@ export function TransactionBars({
           <BarChart data={rows} barGap={4} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
             <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={0.6} />
             <XAxis dataKey="label" tickLine={false} axisLine={false} tick={axisTick} />
-            <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => axis(v, currency)} />
+            <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => (discreet ? "" : axis(v, currency))} />
             <Tooltip
               cursor={{ fill: "var(--muted)", opacity: 0.4 }}
               contentStyle={tooltipStyle}
               labelFormatter={(_, p) => (p?.[0] ? monthShort((p[0].payload as { month: string }).month) : "")}
-              formatter={(v, name) => [money(Number(v), currency), String(name)]}
+              formatter={(v, name) => [discreet ? HIDDEN : money(Number(v), currency), String(name)]}
             />
             <Bar dataKey="inflow" name="Entradas" fill={UP} radius={[4, 4, 0, 0]} isAnimationActive={false} />
             <Bar dataKey="outflow" name="Saídas" fill={DOWN} radius={[4, 4, 0, 0]} isAnimationActive={false} />
@@ -87,6 +89,7 @@ function PieLegend({
   labelInside?: boolean;
   format?: (v: number) => string;
 }) {
+  const discreet = useDiscreet();
   const data = slices.filter((s) => s.cents > 0);
   if (!data.length) return <Empty text={empty} />;
   return (
@@ -110,7 +113,7 @@ function PieLegend({
             <Tooltip
               contentStyle={tooltipStyle}
               itemStyle={{ color: "var(--popover-foreground)" }}
-              formatter={(v, name, item) => [`${format(Number(v))} (${formatPct((item.payload as Slice).share)})`, String(name)]}
+              formatter={(v, name, item) => [`${discreet ? HIDDEN : format(Number(v))} (${formatPct((item.payload as Slice).share)})`, String(name)]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -188,6 +191,7 @@ const barColor = (c: ComponentDatum) => {
 
 /** Uma barra por componente com a magnitude; a cor diz se é saldo (azul), soma (verde) ou subtrai (vermelho). */
 export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDatum[]; currency?: RefCurrency }) {
+  const discreet = useDiscreet();
   const data = items.map((c) => ({ ...c, abs: Math.abs(c.signedCents ?? 0) }));
   if (!data.some((d) => d.abs > 0)) return <Empty text="Sem valores para comparar" />;
   return (
@@ -196,11 +200,12 @@ export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDat
         <BarChart data={data} margin={{ top: 24, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={0.6} />
           <XAxis dataKey="short" tickLine={false} axisLine={false} tick={axisTick} />
-          <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => axis(v, currency)} />
+          <YAxis tickLine={false} axisLine={false} width={56} tick={axisTick} tickFormatter={(v: number) => (discreet ? "" : axis(v, currency))} />
           <Tooltip
             cursor={{ fill: "var(--muted)", opacity: 0.4 }}
             contentStyle={tooltipStyle}
             formatter={(_, __, item) => {
+              if (discreet) return [HIDDEN, (item.payload as ComponentDatum).label];
               const d = item.payload as ComponentDatum;
               const v = d.signedCents ?? 0;
               const sign = v < 0 ? "- " : d.tone === "neutral" || v === 0 ? "" : "+ ";
@@ -222,7 +227,7 @@ export function ComponentBars({ items, currency = "BRL" }: { items: ComponentDat
                   textAnchor="middle"
                   style={{ fill: "var(--foreground)", fontSize: 11, fontWeight: 600 }}
                 >
-                  {money(Number(value), currency)}
+                  {discreet ? HIDDEN : money(Number(value), currency)}
                 </text>
               )}
             />

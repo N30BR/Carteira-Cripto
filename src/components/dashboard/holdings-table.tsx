@@ -8,6 +8,7 @@ import { formatPct, formatQty } from "@/lib/format";
 import type { PeriodChanges, PortfolioRow } from "@/lib/portfolio/calc";
 import { cn } from "@/lib/utils";
 import { CHANGE_COLUMNS, ChangeColumnsMenu, useShownChanges, type ChangeKey } from "./change-columns-menu";
+import { Priv } from "@/components/priv";
 import { DOWN, UP } from "./palette";
 
 export type HoldingsTableRow = PortfolioRow & PeriodChanges;
@@ -111,12 +112,12 @@ export function HoldingsTable({ rows, currency }: { rows: HoldingsTableRow[]; cu
                     </Badge>
                   )}
                 </TableCell>
-                <TableCell className={cn(align("quantity"), "tabular-nums")}>{formatQty(r.quantity)}</TableCell>
+                <TableCell className={cn(align("quantity"), "tabular-nums")}><Priv>{formatQty(r.quantity)}</Priv></TableCell>
                 <TableCell className={cn(align("price"), "tabular-nums")}>
                   {r.price === null ? "—" : formatMoneyPrice(r.price, currency)}
                 </TableCell>
                 <TableCell className={cn(align("value"), "tabular-nums")}>
-                  {r.value === null ? "—" : formatMoney(r.value, currency)}
+                  {r.value === null ? "—" : <Priv>{formatMoney(r.value, currency)}</Priv>}
                 </TableCell>
                 <TableCell className={cn(align("share"), "tabular-nums")}>
                   {r.share === null ? "—" : formatPct(r.share)}

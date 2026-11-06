@@ -1,6 +1,7 @@
 "use client";
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { HIDDEN, useDiscreet } from "@/components/discreet-store";
 import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { formatPct } from "@/lib/format";
 import { CATEGORICAL, OTHERS, coinColor } from "./palette";
@@ -28,6 +29,7 @@ function toSlices(rows: Slice[]): (Slice & { color: string })[] {
 }
 
 export function AllocationDonut({ rows, currency, emptyText = "Preços indisponíveis" }: { rows: Slice[]; currency: RefCurrency; emptyText?: string }) {
+  const discreet = useDiscreet();
   const slices = toSlices(rows);
   if (!slices.length) {
     return (
@@ -64,7 +66,7 @@ export function AllocationDonut({ rows, currency, emptyText = "Preços indispon�
                 color: "var(--popover-foreground)",
               }}
               itemStyle={{ color: "var(--popover-foreground)" }}
-              formatter={(v, name) => [formatMoney(Number(v), currency), String(name)]}
+              formatter={(v, name) => [discreet ? HIDDEN : formatMoney(Number(v), currency), String(name)]}
             />
           </PieChart>
         </ResponsiveContainer>

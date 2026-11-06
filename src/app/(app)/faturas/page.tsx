@@ -17,13 +17,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { NATURE_COLOR } from "@/components/cards/colors";
 import { accountColors, money } from "@/components/finance/ui";
 import { PeriodHeader } from "@/components/finance/period-header";
+import { Priv } from "@/components/priv";
 import { CategoryPie, InvoiceBars, NaturePie } from "@/components/cards/invoice-charts";
 
 export const metadata = { title: "Faturas · Carteira Cripto" };
 
 const COOKIE = "moeda-faturas";
 
-function Indicator({ title, value, hint, color, testId }: { title: string; value: string; hint?: string; color: string; testId?: string }) {
+function Indicator({ title, value, hint, color, testId }: { title: string; value: React.ReactNode; hint?: string; color: string; testId?: string }) {
   return (
     <div className="flex gap-3 rounded-xl border bg-card p-4">
       <span className="w-1 shrink-0 rounded-full" style={{ background: color }} />
@@ -51,7 +52,8 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
   const period = parsePeriod(params.periodo);
   const display = await brlDisplay(getDb(), params.moeda, (await cookies()).get(COOKIE)?.value);
   const { currency, convert } = display;
-  const brl = (v: number) => money(v, currency);
+  // Valores pessoais: no modo discreto viram "***".
+  const brl = (v: number) => <Priv>{money(v, currency)}</Priv>;
   // Valores convertidos para a moeda escolhida (unidades mínimas: centavos; satoshis em BTC).
   const rows = listInstallments(getDb(), user.id, addMonths(month, -11), "2099-12").map((r) => ({ ...r, amountCents: convert(r.amountCents) }));
   // Período: começa no mês de referência; as faturas são mensais (1D, 1S e 1M = o mês).

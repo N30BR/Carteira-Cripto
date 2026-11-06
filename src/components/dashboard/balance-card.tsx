@@ -1,5 +1,6 @@
 import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { formatPct } from "@/lib/format";
+import { Priv } from "@/components/priv";
 import { DOWN, UP } from "./palette";
 
 export type BalanceChange = { label: string; abs: number; pct: number | null };
@@ -9,8 +10,8 @@ function ChangeLine({ c, currency }: { c: BalanceChange; currency: RefCurrency }
   const up = c.abs >= 0;
   return (
     <span style={{ color: up ? UP : DOWN }}>
-      <span className="text-muted-foreground">{c.label}</span> {up ? "▲" : "▼"} {formatMoney(Math.abs(c.abs), currency)} (
-      {formatPct(Math.abs(c.pct) / 100)})
+      <span className="text-muted-foreground">{c.label}</span>{" "}
+      {up ? "▲" : "▼"} <Priv>{formatMoney(Math.abs(c.abs), currency)}</Priv> ({formatPct(Math.abs(c.pct) / 100)})
     </span>
   );
 }
@@ -29,7 +30,7 @@ export function BalanceCard({
     <div className="flex flex-col gap-1">
       <span className="text-sm text-muted-foreground">Saldo total</span>
       <span className="text-4xl font-semibold tracking-tight tabular-nums" data-testid="total">
-        {total === null ? "—" : formatMoney(total, currency)}
+        {total === null ? "—" : <Priv dots>{formatMoney(total, currency)}</Priv>}
       </span>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums" data-testid="total-changes">
         {changes.map((c) => (

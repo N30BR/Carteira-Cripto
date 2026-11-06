@@ -12,6 +12,7 @@ import { categoryColor, tagStyle } from "@/components/cards/colors";
 import { FilterTabs, SectionTitle, TotalChip, TotalsBar, accountColors, brl, dateBr } from "@/components/finance/ui";
 import { TransactionFormRow, TransactionsTable, emptyDraft } from "@/components/finance/transactions";
 import { MonthPicker } from "@/components/month-picker";
+import { Priv } from "@/components/priv";
 import type { CardAccount } from "@/lib/cards/accounts";
 import { MAX_CARD_ACCOUNTS, type Side } from "@/lib/cards/account-limits";
 import type { Category } from "@/lib/cards/categories";
@@ -175,7 +176,7 @@ export function LaunchesView({
           {overdue.count > 0 && (
             <p role="status" className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
               {overdue.count} parcela{overdue.count > 1 ? "s" : ""} de meses anteriores ainda não marcada{overdue.count > 1 ? "s" : ""} como
-              paga{overdue.count > 1 ? "s" : ""} ({brl(overdue.cents)}). Ela{overdue.count > 1 ? "s" : ""} continua
+              paga{overdue.count > 1 ? "s" : ""} (<Priv>{brl(overdue.cents)}</Priv>). Ela{overdue.count > 1 ? "s" : ""} continua
               {overdue.count > 1 ? "m" : ""} em aberto até ser{overdue.count > 1 ? "em" : ""} paga{overdue.count > 1 ? "s" : ""}: volte ao mês dela
               {overdue.count > 1 ? "s" : ""} para marcar.
             </p>
@@ -260,13 +261,15 @@ export function LaunchesView({
                           </span>
                         </span>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{brl(r.amountCents)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        <Priv>{brl(r.amountCents)}</Priv>
+                      </TableCell>
                       <TableCell className="text-center tabular-nums">
                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
                           {r.number} / {r.installments}
                         </span>
                         {r.installments > 1 && (
-                          <span className="block text-[11px] text-muted-foreground">
+                          <span className="priv block text-[11px] text-muted-foreground">
                             {open[r.expenseId] ? `faltam ${open[r.expenseId].remainingCount} • ${brl(open[r.expenseId].remainingCents)}` : "quitada"}
                           </span>
                         )}
@@ -322,11 +325,11 @@ export function LaunchesView({
 
           <TotalsBar
             label={`Totais do mês (${monthLabel(month)})`}
-            final={<span data-testid="month-total">Total: {brl(totals.total)}</span>}
+            final={<span data-testid="month-total">Total: <Priv>{brl(totals.total)}</Priv></span>}
           >
             {accounts.map((a) => (
               <TotalChip key={a.id} color={colors[a.id]}>
-                {a.name}: {brl(totals.byAccount[a.id] ?? 0)}
+                {a.name}: <Priv>{brl(totals.byAccount[a.id] ?? 0)}</Priv>
               </TotalChip>
             ))}
           </TotalsBar>

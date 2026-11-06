@@ -64,7 +64,7 @@ export function SignedMoney({
   if (cents === 0 || neutral) {
     return (
       <span
-        className={cn("whitespace-nowrap tabular-nums", neutral && "font-semibold", className)}
+        className={cn("priv whitespace-nowrap tabular-nums", neutral && "font-semibold", className)}
         style={neutral ? { color: NEUTRAL } : undefined}
         data-testid={testId}
       >
@@ -76,7 +76,7 @@ export function SignedMoney({
   const up = cents > 0;
   return (
     <span
-      className={cn("font-semibold whitespace-nowrap tabular-nums", className)}
+      className={cn("priv font-semibold whitespace-nowrap tabular-nums", className)}
       style={{ color: soft ? (up ? SOFT_UP : SOFT_DOWN) : up ? UP : DOWN }}
       data-testid={testId}
     >
@@ -182,7 +182,7 @@ export function StatCard({
 /** Caixa colorida da faixa de totais (fundo translúcido da cor). */
 export function TotalChip({ color, children, testId }: { color: string; children: React.ReactNode; testId?: string }) {
   return (
-    <span className="rounded-lg px-3 py-1.5 text-sm font-semibold" style={{ color, backgroundColor: `${color}26` }} data-testid={testId}>
+    <span className="priv rounded-lg px-3 py-1.5 text-sm font-semibold" style={{ color, backgroundColor: `${color}26` }} data-testid={testId}>
       {children}
     </span>
   );

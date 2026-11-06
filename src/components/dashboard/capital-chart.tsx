@@ -1,6 +1,7 @@
 "use client";
 
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { HIDDEN, useDiscreet } from "@/components/discreet-store";
 import { formatMoney, type RefCurrency } from "@/lib/currency";
 import { ACCENT } from "./palette";
 
@@ -23,6 +24,7 @@ export function CapitalChart({
   missingHistory?: string[];
   emptyText?: string;
 }) {
+  const discreet = useDiscreet();
   if (points.length < 2) {
     return (
       <div className="grid h-64 place-items-center rounded-xl border border-dashed text-sm text-muted-foreground">
@@ -61,7 +63,7 @@ export function CapitalChart({
               dataKey="value"
               orientation="right"
               domain={["auto", "auto"]}
-              tickFormatter={axisValue}
+              tickFormatter={(v: number) => (discreet ? "" : axisValue(v))}
               tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
               axisLine={false}
               tickLine={false}
@@ -76,7 +78,7 @@ export function CapitalChart({
                 color: "var(--popover-foreground)",
               }}
               labelFormatter={(t) => tipFmt.format(Number(t))}
-              formatter={(v) => [formatMoney(Number(v), currency), "Saldo"]}
+              formatter={(v) => [discreet ? HIDDEN : formatMoney(Number(v), currency), "Saldo"]}
             />
             <Area
               type="monotone"

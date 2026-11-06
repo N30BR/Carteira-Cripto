@@ -8,6 +8,7 @@ import { monthShort } from "@/lib/cards/months";
 import type { Side } from "@/lib/cards/store";
 import { NO_CATEGORY } from "@/lib/cards/summary";
 import { cn } from "@/lib/utils";
+import { HIDDEN, useDiscreet } from "@/components/discreet-store";
 import { NATURE_COLOR, categoryColor } from "./colors";
 
 // Valores em unidades mínimas da moeda (centavos; satoshis em BTC).
@@ -48,6 +49,7 @@ export function InvoiceBars({
   accounts: { id: number; name: string; color: string }[];
   currency?: RefCurrency;
 }) {
+  const discreet = useDiscreet();
   const [show, setShow] = useState<string>("ALL");
   const rows = data.map((d) => ({
     label: monthShort(d.month).slice(0, 3),
@@ -76,14 +78,16 @@ export function InvoiceBars({
               width={64}
               tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
               tickFormatter={(v: number) =>
-                `${SYMBOL[currency]} ${currency === "BTC" ? (v / MINOR[currency]).toLocaleString("pt-BR", { maximumSignificantDigits: 3 }) : compact.format(v / MINOR[currency])}`
+                discreet
+                  ? ""
+                  : `${SYMBOL[currency]} ${currency === "BTC" ? (v / MINOR[currency]).toLocaleString("pt-BR", { maximumSignificantDigits: 3 }) : compact.format(v / MINOR[currency])}`
               }
             />
             <Tooltip
               cursor={{ fill: "var(--muted)", opacity: 0.4 }}
               contentStyle={tooltipStyle}
               labelFormatter={(_, p) => (p?.[0] ? monthShort((p[0].payload as { month: string }).month) : "")}
-              formatter={(v, name) => [fmt(Number(v), currency), String(name)]}
+              formatter={(v, name) => [discreet ? HIDDEN : fmt(Number(v), currency), String(name)]}
             />
             <Legend />
             {shown.map((a) => (
@@ -99,6 +103,7 @@ export function InvoiceBars({
 type Slice = { name: string; cents: number; color: string };
 
 function PieWithLegend({ slices, total, empty, currency }: { slices: Slice[]; total: number; empty: string; currency: RefCurrency }) {
+  const discreet = useDiscreet();
   if (!slices.length || total <= 0) {
     return <div className="grid h-48 place-items-center rounded-xl border border-dashed text-sm text-muted-foreground">{empty}</div>;
   }
@@ -115,7 +120,7 @@ function PieWithLegend({ slices, total, empty, currency }: { slices: Slice[]; to
             <Tooltip
               contentStyle={tooltipStyle}
               itemStyle={{ color: "var(--popover-foreground)" }}
-              formatter={(v, name) => [`${fmt(Number(v), currency)} (${formatPct(Number(v) / total)})`, String(name)]}
+              formatter={(v, name) => [`${discreet ? HIDDEN : fmt(Number(v), currency)} (${formatPct(Number(v) / total)})`, String(name)]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -127,7 +132,7 @@ function PieWithLegend({ slices, total, empty, currency }: { slices: Slice[]; to
             <span className="min-w-0 truncate" title={s.name}>
               {s.name}
             </span>
-            <span className="tabular-nums whitespace-nowrap text-muted-foreground">{fmt(s.cents, currency)}</span>
+            <span className="priv tabular-nums whitespace-nowrap text-muted-foreground">{fmt(s.cents, currency)}</span>
             <span className="w-16 text-right font-semibold tabular-nums">{formatPct(s.cents / total)}</span>
           </li>
         ))}

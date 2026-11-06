@@ -3,6 +3,7 @@ import type { SessionUser } from "@/lib/auth/sessions";
 import { Logo } from "@/components/logo";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { UserMenu } from "@/components/user-menu";
+import { DiscreetToggle } from "@/components/discreet-toggle";
 
 export function AppHeader({ user }: { user: SessionUser }) {
   const links: NavItem[] = [
@@ -25,7 +26,8 @@ export function AppHeader({ user }: { user: SessionUser }) {
         <div className="order-last w-full md:order-none md:w-auto md:min-w-0">
           <NavLinks items={links} />
         </div>
-        <div className="ml-auto shrink-0">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <DiscreetToggle />
           <UserMenu username={user.username} />
         </div>
       </div>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { formatQty, quantityToInput } from "@/lib/format";
+import { Priv } from "@/components/priv";
 import type { Holding } from "@/lib/holdings/holdings";
 import { safeAction } from "@/lib/safe-action";
 import { deleteHoldingAction, updateHoldingAction } from "./actions";
@@ -64,7 +65,7 @@ export function HoldingRow({ h }: { h: Holding }) {
             </Button>
           </form>
         ) : (
-          formatQty(h.quantity)
+          <Priv>{formatQty(h.quantity)}</Priv>
         )}
       </TableCell>
       <TableCell>

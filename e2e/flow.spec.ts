@@ -41,6 +41,25 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(btc).toContainText("US$ 60.000,00");
   await expect(page.getByTestId("capital-chart")).toBeVisible();
 
+  // Modo discreto (olho no topo): valores pessoais escondidos em todas as abas; preço de mercado visível
+  const afterContent = (sel: string) =>
+    page.locator(sel).first().evaluate((el) => getComputedStyle(el, "::after").content);
+  await page.getByRole("button", { name: "Modo discreto" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-discreet", "");
+  expect(await afterContent("[data-testid=total] .priv-dots")).toBe('"●●●●"');
+  expect(await afterContent("tbody .priv")).toBe('"***"');
+  await expect(page.getByRole("row", { name: /BTC/ })).toContainText("US$ 60.000,00"); // preço continua visível
+  // percentuais continuam visíveis (participação e variações)
+  expect(await page.getByRole("row", { name: /BTC/ }).locator("td").nth(4).evaluate((el) => getComputedStyle(el.querySelector("*") ?? el, "::after").content)).toBe("none");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-discreet", "");
+  await page.getByRole("link", { name: "Dashboard fiduciário" }).click();
+  expect(await afterContent("tbody .priv")).toBe('"***"');
+  await page.goto("/");
+  await page.getByRole("button", { name: "Mostrar valores" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-discreet", "");
+  expect(await afterContent("[data-testid=total] .priv-dots")).toBe("none");
+
   // Período
   await page.getByRole("link", { name: "1S", exact: true }).click();
   await expect(page).toHaveURL(/periodo=1S/);

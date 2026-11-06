@@ -5,6 +5,7 @@ import { formatMoney, type RefCurrency } from "@/lib/currency";
 import type { FiatRow } from "@/lib/fiat/calc";
 import { formatPct } from "@/lib/format";
 import { ColumnsMenu, FIAT_CHANGE_COLUMNS, useShownFiatChanges } from "./change-columns-menu";
+import { Priv } from "@/components/priv";
 import { DOWN, UP } from "./palette";
 
 function formatDate(d: string): string {
@@ -56,7 +57,7 @@ export function FiatTable({ rows, currency }: { rows: FiatRow[]; currency: RefCu
             {rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">{r.name}</TableCell>
-                <TableCell className="text-center tabular-nums">{formatMoney(r.amount, currency)}</TableCell>
+                <TableCell className="text-center tabular-nums"><Priv>{formatMoney(r.amount, currency)}</Priv></TableCell>
                 <TableCell className="text-center tabular-nums">{r.share === null ? "—" : formatPct(r.share)}</TableCell>
                 <TableCell className="text-center tabular-nums">{formatDate(r.date)}</TableCell>
                 {changes.map((c) => (

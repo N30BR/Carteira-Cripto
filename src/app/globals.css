@@ -140,3 +140,37 @@
     color: #ffffff;
   }
 }
+
+/* Modo discreto (botão de olho no topo): valores em dinheiro, totais e quantidades marcados com .priv
+   viram "***", na mesma cor (vermelho/verde); o saldo total (.priv-dots) vira "●●●●".
+   Percentuais e preços de mercado continuam visíveis. Nos gráficos, ver useDiscreet().
+   O texto original fica transparente (o layout não muda) e não pode ser selecionado/copiado. */
+@layer base {
+  html[data-discreet] .priv {
+    position: relative;
+    -webkit-text-fill-color: transparent;
+    user-select: none;
+  }
+  html[data-discreet] .priv * {
+    -webkit-text-fill-color: transparent;
+  }
+  html[data-discreet] .priv::after {
+    content: "***";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    -webkit-text-fill-color: currentColor;
+  }
+  html[data-discreet] .priv-dots::after {
+    content: "●●●●";
+    justify-content: flex-start;
+    letter-spacing: 0.08em;
+  }
+  /* Campos com valores pessoais (ex.: quantidade em Ativos): mostrados como pontos. */
+  html[data-discreet] input.priv-input {
+    -webkit-text-security: disc;
+  }
+}

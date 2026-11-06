@@ -240,7 +240,7 @@ export function ExpenseFormFields({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <span className="text-muted-foreground">{preview ?? "Informe o valor e as parcelas para ver o resumo."}</span>
+        <span className="text-muted-foreground">{preview ? <span className="priv">{preview}</span> : "Informe o valor e as parcelas para ver o resumo."}</span>
         {error && (
           <span role="alert" className="text-destructive">
             {error}
