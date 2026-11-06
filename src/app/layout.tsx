@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Carteira Cripto",
+  title: "BlackHole Dashboard",
   description: "Dashboard da sua carteira de criptoativos",
 };
 

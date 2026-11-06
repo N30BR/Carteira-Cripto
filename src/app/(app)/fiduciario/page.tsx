@@ -17,7 +17,7 @@ import { FiatTable } from "@/components/dashboard/fiat-table";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
 import { StaleBanner } from "@/components/dashboard/stale-banner";
 
-export const metadata = { title: "R$ · Carteira Cripto" };
+export const metadata = { title: "R$ · BlackHole Dashboard" };
 
 const COOKIE = "moeda-fiat";
 const DAY = 86_400_000;

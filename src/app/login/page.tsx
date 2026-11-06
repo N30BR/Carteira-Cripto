@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Logo } from "@/components/logo";
 import { LoginForm } from "./login-form";
 
-export const metadata = { title: "Entrar · Carteira Cripto" };
+export const metadata = { title: "Entrar · BlackHole Dashboard" };
 
 export default async function LoginPage() {
   if (await getCurrentUser()) redirect("/");

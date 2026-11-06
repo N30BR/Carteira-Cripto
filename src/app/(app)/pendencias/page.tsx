@@ -4,7 +4,7 @@ import { ensureDefaultGroups, listEvents, listGroups, listQuickNotes, listTasks 
 import { appTimeZone, todayIn } from "@/lib/validation";
 import { TodosView } from "./view";
 
-export const metadata = { title: "Pendências · Carteira Cripto" };
+export const metadata = { title: "Pendências · BlackHole Dashboard" };
 
 export default async function TodosPage() {
   const user = await requireUser();

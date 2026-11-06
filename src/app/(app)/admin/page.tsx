@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeleteUserButton, NewUserDialog, ResetPasswordDialog, UnlockButton } from "./user-dialogs";
 
-export const metadata = { title: "Admin · Carteira Cripto" };
+export const metadata = { title: "Admin · BlackHole Dashboard" };
 
 const TZ = appTimeZone();
 const date = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: TZ });

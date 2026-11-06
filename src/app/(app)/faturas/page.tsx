@@ -20,7 +20,7 @@ import { PeriodHeader } from "@/components/finance/period-header";
 import { Priv } from "@/components/priv";
 import { CategoryPie, InvoiceBars, NaturePie } from "@/components/cards/invoice-charts";
 
-export const metadata = { title: "Faturas · Carteira Cripto" };
+export const metadata = { title: "Faturas · BlackHole Dashboard" };
 
 const COOKIE = "moeda-faturas";
 

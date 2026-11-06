@@ -17,7 +17,7 @@ import { HoldingsTable } from "@/components/dashboard/holdings-table";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
 import { StaleBanner } from "@/components/dashboard/stale-banner";
 
-export const metadata = { title: "Cripto · Carteira Cripto" };
+export const metadata = { title: "Cripto · BlackHole Dashboard" };
 
 const COOKIE = "moeda-cripto";
 const DAY = 86_400_000;

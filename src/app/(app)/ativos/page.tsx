@@ -8,7 +8,7 @@ import { AddAssetDialog } from "./add-asset-dialog";
 import { FiatSection } from "./fiat-section";
 import { HoldingRow } from "./holding-row";
 
-export const metadata = { title: "Ativos · Carteira Cripto" };
+export const metadata = { title: "Ativos · BlackHole Dashboard" };
 
 export default async function AssetsPage() {
   const user = await requireUser();

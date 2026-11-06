@@ -2,7 +2,7 @@ import { requireUser } from "@/lib/auth/current";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PasswordForm } from "./password-form";
 
-export const metadata = { title: "Trocar senha · Carteira Cripto" };
+export const metadata = { title: "Trocar senha · BlackHole Dashboard" };
 
 export default async function ChangePasswordPage() {
   await requireUser();

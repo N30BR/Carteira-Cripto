@@ -11,7 +11,7 @@ import { appTimeZone, todayIn } from "@/lib/validation";
 import { PageTitle } from "@/components/finance/ui";
 import { LaunchesView } from "./view";
 
-export const metadata = { title: "Lançamentos · Carteira Cripto" };
+export const metadata = { title: "Lançamentos · BlackHole Dashboard" };
 
 export default async function LaunchesPage({ searchParams }: PageProps<"/lancamentos">) {
   const user = await requireUser();

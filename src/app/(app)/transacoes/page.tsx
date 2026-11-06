@@ -16,7 +16,7 @@ import { PeriodHeader } from "@/components/finance/period-header";
 import { TransactionsTable } from "@/components/finance/transactions";
 import { BLUE, DOWN, SectionTitle, SignedMoney, StatCard, TotalChip, TotalsBar, UP } from "@/components/finance/ui";
 
-export const metadata = { title: "Transações · Carteira Cripto" };
+export const metadata = { title: "Transações · BlackHole Dashboard" };
 
 const COOKIE = "moeda-transacoes";
 

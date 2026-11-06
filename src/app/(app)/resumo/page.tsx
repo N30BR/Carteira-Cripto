@@ -25,7 +25,7 @@ import { ComponentBars, ComponentPie } from "@/components/finance/charts";
 import { BLUE, DOWN, KindBadge, MINOR, NEUTRAL, SOFT_DOWN, SOFT_UP, SectionTitle, SignedMoney, StatCard, TotalChip, TotalsBar, UP, dateBr } from "@/components/finance/ui";
 import { PeriodHeader } from "@/components/finance/period-header";
 
-export const metadata = { title: "Resumo · Carteira Cripto" };
+export const metadata = { title: "Resumo · BlackHole Dashboard" };
 
 const COOKIE = "moeda-resumo";
 const DAY = 86_400_000;
