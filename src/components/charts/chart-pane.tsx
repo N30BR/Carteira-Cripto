@@ -139,6 +139,10 @@ function drawLevels({ ctx, indicator, bounding, yAxis }: { ctx: CanvasRenderingC
   return false;
 }
 
+type AxisLike = { getAutoCalcTickFlag: () => boolean; setAutoCalcTickFlag: (f: boolean) => void; getRange: () => unknown; setRange: (r: unknown) => void };
+/** Eixo de preço do gráfico principal (API interna da biblioteca: getYAxes devolve os eixos com estes métodos). */
+const priceAxis = (c: Chart) => (c.getYAxes({ paneId: "candle_pane" })[0] as unknown as AxisLike | undefined) ?? null;
+
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 /** Estilo salvo do desenho → estilo do KLineCharts. */
@@ -232,6 +236,10 @@ export function ChartPane({
   const drawingId = useRef<string | null>(null);
   const mouse = useRef({ x: 0, y: 0 });
   const pressAt = useRef<{ x: number; y: number } | null>(null);
+  // Navegação: arraste na escala de tempo (desloca o gráfico) e arraste no preço (livre já no 1º gesto).
+  const hoverOverlay = useRef(false);
+  const timeDrag = useRef<{ x: number } | null>(null);
+  const priceDrag = useRef<{ y: number; wasAuto: boolean } | null>(null);
   const indicatorState = useRef(new Map<string, IndicatorState>());
 
   // Cria o gráfico uma vez.
@@ -247,6 +255,8 @@ export function ChartPane({
       layout: { barSpaceLimit: { min: 0.3, max: 60 } },
     });
     chart.current = c;
+    // Arrastar a escala de tempo desloca o gráfico inteiro (abaixo); a biblioteca dava zoom ancorado no ponto do arraste.
+    c?.overrideXAxis({ scrollZoomEnabled: false });
     const ro = new ResizeObserver(() => {
       if (!c) return;
       fitPanes(c, node.clientHeight);
@@ -307,6 +317,14 @@ export function ChartPane({
       finishDrawing();
       emitOverlays();
       cb.current.onSelect(overlay.id);
+      return false;
+    },
+    onMouseEnter: () => {
+      hoverOverlay.current = true;
+      return false;
+    },
+    onMouseLeave: () => {
+      hoverOverlay.current = false;
       return false;
     },
     onClick: ({ overlay }: { overlay: { id: string } }) => {
@@ -499,6 +517,8 @@ export function ChartPane({
       }
       if (!current()) return;
       const precision = first?.length ? precisionFor(first[first.length - 1].close) : fallback;
+      // Par/tempo novo: a escala de preço volta ao ajuste automático.
+      priceAxis(c)?.setAutoCalcTickFlag(true);
       c.setSymbol({ ticker: symbol, pricePrecision: precision, volumePrecision: 2 });
       c.setPeriod(PERIOD[interval]);
       c.setDataLoader({
@@ -553,6 +573,7 @@ export function ChartPane({
       },
     });
     c.overrideYAxis({ paneId: "candle_pane", name: pane.scale === "logarithm" ? LOG_AXIS : pane.scale });
+    priceAxis(c)?.setAutoCalcTickFlag(true);
   }, [pane.chartType, pane.scale]);
 
   // Indicadores: recria quando a lista muda (sem mexer nas comparações).
@@ -766,8 +787,45 @@ export function ChartPane({
       onPointerLeave={() => (mouse.current = { x: -1, y: -1 })}
       // Com uma ferramenta ativa, um clique "tremido" (5 px ou mais entre apertar e soltar) a biblioteca
       // descartaria; aqui vira um clique no ponto em que o botão foi solto.
-      onPointerDownCapture={(e) => (pressAt.current = drawingId.current && e.button === 0 ? { x: e.clientX, y: e.clientY } : null)}
+      onPointerDownCapture={(e) => {
+        pressAt.current = drawingId.current && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+        const c = chart.current;
+        const box = el.current?.getBoundingClientRect();
+        if (!c || !box || e.button !== 0 || drawingId.current) return;
+        const x = e.clientX - box.left;
+        const y = e.clientY - box.top;
+        const inside = (b: { left: number; top: number; width: number; height: number } | null | undefined) =>
+          !!b && x >= b.left && x <= b.left + b.width && y >= b.top && y <= b.top + b.height;
+        // Escala de tempo: começa o deslocamento horizontal.
+        if (inside(c.getSize("x_axis_pane", "main"))) {
+          timeDrag.current = { x: e.clientX };
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          return;
+        }
+        // Área livre do preço: a escala sai do automático já agora (a biblioteca só move na vertical fora dele);
+        // se o arraste for só horizontal, o automático volta ao soltar.
+        const axis = priceAxis(c);
+        if (!hoverOverlay.current && axis && inside(c.getSize("candle_pane", "main"))) {
+          const wasAuto = axis.getAutoCalcTickFlag();
+          if (wasAuto) axis.setRange(axis.getRange());
+          priceDrag.current = { y: e.clientY, wasAuto };
+        }
+      }}
+      onPointerMoveCapture={(e) => {
+        const d = timeDrag.current;
+        if (!d) return;
+        chart.current?.scrollByDistance(e.clientX - d.x);
+        d.x = e.clientX;
+      }}
       onPointerUpCapture={(e) => {
+        timeDrag.current = null;
+        const pd = priceDrag.current;
+        priceDrag.current = null;
+        const c = chart.current;
+        if (pd?.wasAuto && c && Math.abs(e.clientY - pd.y) < 4) {
+          priceAxis(c)?.setAutoCalcTickFlag(true);
+          c.resize();
+        }
         const start = pressAt.current;
         pressAt.current = null;
         if (!start || !drawingId.current || e.button !== 0 || !e.isTrusted) return;
