@@ -249,7 +249,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Delta e heatmap de liquidações (estimado, com o open interest da Binance Futures)
   await page.getByRole("button", { name: /^Indicadores/ }).click();
   await page.getByRole("button", { name: /^Heatmap de liquidações/ }).click();
-  await page.getByRole("button", { name: /^Delta/ }).click();
+  await page.getByRole("button", { name: /^Volume Delta/ }).click();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(800);
   await expect(page.getByText(/Liquidações:/)).toHaveCount(0);
@@ -293,6 +293,11 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.mouse.move(z.x, z.y, { steps: 5 });
   await page.mouse.click(z.x, z.y);
   await expect(page.getByTestId("object-toolbar")).toBeVisible(); // recém-desenhado fica selecionado
+  // Trocar a cor e clicar fora UMA vez fecha o seletor (antes eram 2 ou 3 cliques)
+  await page.getByTestId("object-toolbar").getByRole("button", { name: "Cor da linha" }).click();
+  await page.getByRole("button", { name: "Cor #f23645" }).click();
+  await page.getByText(/\d+\/10 abas/).click();
+  await expect(page.locator('[role="menu"][data-state="open"]')).toHaveCount(0);
   await page.keyboard.press("Control+d");
   await page.getByRole("button", { name: "Lista de desenhos" }).click();
   await expect(page.getByRole("list", { name: "Lista de desenhos" }).getByRole("listitem")).toHaveCount(2);
@@ -312,6 +317,22 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByRole("heading", { name: "Atalhos de Teclado" })).toBeVisible();
   await page.getByLabel("Buscar atalho").fill("duplicar");
   await expect(page.getByText("Duplicar objeto")).toBeVisible();
+
+  // Referências: logo abaixo de Atalhos no menu de perfil; página interna com as 3 imagens, ampliáveis
+  await page.getByRole("button", { name: /admin/ }).click();
+  const menuItems = (await page.getByRole("menuitem").allInnerTexts()).map((t) => t.trim());
+  expect(menuItems.indexOf("Referências")).toBe(menuItems.indexOf("Atalhos") + 1);
+  await page.getByRole("menuitem", { name: "Referências" }).click();
+  await expect(page.getByRole("heading", { name: "Referências", exact: true })).toBeVisible();
+  for (const src of ["ondas-de-elliott", "wyckoff-1", "wyckoff-2"]) {
+    const img = page.locator(`img[src="/referencias/${src}.webp"]`).first();
+    await img.scrollIntoViewIfNeeded();
+    await expect.poll(() => img.evaluate((e: HTMLImageElement) => e.naturalWidth)).toBeGreaterThan(1000);
+  }
+  await page.getByRole("button", { name: /^Ampliar: Ondas de Elliott/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // Pendências: tarefa com checklist, progresso, concluir e nota rápida que vira tarefa
   await page.getByRole("link", { name: "Pendências" }).click();

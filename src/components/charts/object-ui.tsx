@@ -19,13 +19,28 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { DEFAULT_FIB_LEVELS } from "@/lib/charts/drawing";
-import { CHART_TOOLS, EXTENDS, type ExtendName, type FibLevel, type LineStyleName, type OverlayState, type OverlayStyleState } from "@/lib/charts/workspace";
+import {
+  CHART_TOOLS,
+  ELLIOTT_LABELS,
+  EXTENDS,
+  LABEL_POSITIONS,
+  type ExtendName,
+  type FibLevel,
+  type LabelPosition,
+  type LineStyleName,
+  type OverlayState,
+  type OverlayStyleState,
+} from "@/lib/charts/workspace";
 import { cn } from "@/lib/utils";
 
 const TOOL_LABEL = Object.fromEntries(CHART_TOOLS.map((t) => [t.name, t.label]));
 export const toolLabel = (name: string) => TOOL_LABEL[name] ?? name;
 const DEFAULT_COLOR = "#8b7cf6";
 const TEXT_TOOLS = new Set(["simpleAnnotation", "simpleTag"]);
+const ELLIOTT_UP = "#22c55e";
+const ELLIOTT_DOWN = "#ef4444";
+const isElliott = (name: string) => name in ELLIOTT_LABELS;
+const POSITION_LABEL: Record<LabelPosition, string> = { auto: "Automática (topos em cima, fundos embaixo)", above: "Sempre acima do ponto", below: "Sempre abaixo do ponto" };
 
 // ---------- Cor (paleta + opacidade) ----------
 const PALETTE = [
@@ -44,7 +59,7 @@ export function ColorPicker({ value, onChange, label }: { value: string; onChang
   const [custom, setCustom] = useState("");
   const opacity = opacityOf(value);
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button type="button" aria-label={label} title={label} className="grid size-8 place-items-center rounded border hover:bg-muted">
           <span className="size-4 rounded-sm border" style={{ background: value }} />
@@ -100,7 +115,7 @@ const dashCss = (s: LineStyleName) => (s === "solid" ? "solid" : s === "dashed" 
 
 export function WidthMenu({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button type="button" aria-label="Espessura" title="Espessura" className="flex h-8 items-center gap-1.5 rounded px-2 text-xs hover:bg-muted">
           <span className="w-4 bg-current" style={{ height: Math.min(4, value) }} /> {value}px
@@ -119,7 +134,7 @@ export function WidthMenu({ value, onChange }: { value: number; onChange: (n: nu
 
 export function StyleMenu({ value, onChange }: { value: LineStyleName; onChange: (s: LineStyleName) => void }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button type="button" aria-label="Estilo do traço" title="Estilo do traço" className="grid h-8 w-9 place-items-center rounded hover:bg-muted">
           <span className="w-5 border-t-2 border-current" style={{ borderTopStyle: dashCss(value) }} />
@@ -155,22 +170,31 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
       role="toolbar"
       aria-label={`Editar ${toolLabel(object.name)}`}
       data-testid="object-toolbar"
-      // Não deixa o clique na barra chegar ao gráfico (senão tiraria a seleção).
-      onPointerDown={(e) => e.stopPropagation()}
+      // A barra fica fora da área do gráfico (o canvas não recebe o clique). Não interromper o evento aqui:
+      // os seletores abertos a partir dela precisam vê-lo para saber que o clique foi dentro deles.
       className="absolute top-14 left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border bg-popover/95 px-1 py-0.5 shadow-lg backdrop-blur"
     >
       <GripVertical className="size-4 text-muted-foreground/60" aria-hidden />
-      <span className="flex items-center gap-1 px-1">
-        <Pencil className="size-3.5 text-muted-foreground" aria-hidden />
-        <ColorPicker label="Cor da linha" value={st.color ?? DEFAULT_COLOR} onChange={(color) => setStyle({ color })} />
-      </span>
+      {isElliott(object.name) ? (
+        // Ondas de Elliott: cor dos segmentos de alta e de baixa.
+        <span className="flex items-center gap-1 px-1">
+          <Pencil className="size-3.5 text-muted-foreground" aria-hidden />
+          <ColorPicker label="Cor das ondas de alta" value={st.buyColor ?? ELLIOTT_UP} onChange={(buyColor) => setStyle({ buyColor })} />
+          <ColorPicker label="Cor das ondas de baixa" value={st.sellColor ?? ELLIOTT_DOWN} onChange={(sellColor) => setStyle({ sellColor })} />
+        </span>
+      ) : (
+        <span className="flex items-center gap-1 px-1">
+          <Pencil className="size-3.5 text-muted-foreground" aria-hidden />
+          <ColorPicker label="Cor da linha" value={st.color ?? DEFAULT_COLOR} onChange={(color) => setStyle({ color })} />
+        </span>
+      )}
       {isText && (
         <span className="flex items-center gap-1 px-1">
           <Type className="size-3.5 text-muted-foreground" aria-hidden />
           <ColorPicker label="Cor do texto" value={st.textColor ?? "#ffffff"} onChange={(textColor) => setStyle({ textColor })} />
         </span>
       )}
-      <WidthMenu value={st.size ?? 1} onChange={(size) => setStyle({ size })} />
+      <WidthMenu value={st.size ?? (isElliott(object.name) ? 2 : 1)} onChange={(size) => setStyle({ size })} />
       <StyleMenu value={st.style ?? "solid"} onChange={(style) => setStyle({ style })} />
       <ToolbarButton label="Configurações" onClick={actions.settings}>
         <Settings2 />
@@ -181,7 +205,7 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
       <ToolbarButton label="Excluir (Delete)" onClick={actions.remove}>
         <Trash2 />
       </ToolbarButton>
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <button type="button" aria-label="Mais opções" title="Mais opções" className="grid size-8 place-items-center rounded hover:bg-muted [&_svg]:size-4">
             <MoreHorizontal />
@@ -299,10 +323,65 @@ function ObjectSettingsForm({ object, onClose, onApply }: { object: OverlayState
         {tab === "style" && (
           <>
             <Row label="Linha">
-              <ColorPicker label="Cor da linha" value={st.color ?? DEFAULT_COLOR} onChange={(color) => set({ color })} />
-              <WidthMenu value={st.size ?? 1} onChange={(size) => set({ size })} />
+              {isElliott(object.name) ? (
+                <>
+                  <ColorPicker label="Cor das ondas de alta" value={st.buyColor ?? ELLIOTT_UP} onChange={(buyColor) => set({ buyColor })} />
+                  <ColorPicker label="Cor das ondas de baixa" value={st.sellColor ?? ELLIOTT_DOWN} onChange={(sellColor) => set({ sellColor })} />
+                </>
+              ) : (
+                <ColorPicker label="Cor da linha" value={st.color ?? DEFAULT_COLOR} onChange={(color) => set({ color })} />
+              )}
+              <WidthMenu value={st.size ?? (isElliott(object.name) ? 2 : 1)} onChange={(size) => set({ size })} />
               <StyleMenu value={st.style ?? "solid"} onChange={(style) => set({ style })} />
             </Row>
+            {isElliott(object.name) && (
+              <>
+                <p className="text-xs text-muted-foreground">Verde/vermelho indicam a direção de cada segmento (sobe/desce), não validam a contagem.</p>
+                <Row label="Rótulos">
+                  <label className="flex items-center gap-1.5">
+                    <input type="checkbox" checked={st.showLabels !== false} onChange={(e) => set({ showLabels: e.target.checked })} /> Mostrar
+                  </label>
+                  <NumberInput label="Tamanho dos rótulos" value={st.labelSize ?? 13} min={8} max={28} step={1} onChange={(n) => set({ labelSize: Math.round(n) })} />
+                </Row>
+                <Row label="Posição">
+                  <select
+                    aria-label="Posição dos rótulos"
+                    value={st.labelPosition ?? "auto"}
+                    onChange={(e) => set({ labelPosition: e.target.value as LabelPosition })}
+                    className="h-8 rounded-md border bg-background px-2 text-sm"
+                  >
+                    {LABEL_POSITIONS.map((p) => (
+                      <option key={p} value={p}>
+                        {POSITION_LABEL[p]}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
+                <Row label="Textos">
+                  {ELLIOTT_LABELS[object.name].map((def, i) => (
+                    <Input
+                      key={i}
+                      aria-label={`Rótulo ${i + 1}`}
+                      className="h-8 w-12 text-center text-sm"
+                      maxLength={6}
+                      placeholder={def}
+                      value={st.labels?.[i] ?? ""}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\p{L}\p{N}().\- ]/gu, "").slice(0, 6);
+                        const labels = ELLIOTT_LABELS[object.name].map((_, j) => (j === i ? v : (st.labels?.[j] ?? "")));
+                        set({ labels: labels.some(Boolean) ? labels : undefined });
+                      }}
+                    />
+                  ))}
+                </Row>
+                <Row label="Pontos">
+                  <label className="flex items-center gap-1.5">
+                    <input type="checkbox" checked={st.showPoints !== false} onChange={(e) => set({ showPoints: e.target.checked })} /> Mostrar marcadores
+                  </label>
+                </Row>
+              </>
+            )}
             {object.name === "segment" && (
               <Row label="Estender">
                 <select
@@ -327,8 +406,13 @@ function ObjectSettingsForm({ object, onClose, onApply }: { object: OverlayState
                 <Row label="Área de valor (%)">
                   <NumberInput label="Área de valor (%)" value={st.valueArea ?? 70} min={10} max={100} step={1} onChange={(valueArea) => set({ valueArea })} />
                 </Row>
+                <Row label="Compras / vendas">
+                  <ColorPicker label="Cor das compras" value={st.buyColor ?? "#22c55e"} onChange={(buyColor) => set({ buyColor })} />
+                  <ColorPicker label="Cor das vendas" value={st.sellColor ?? "#ef4444"} onChange={(sellColor) => set({ sellColor })} />
+                </Row>
                 <p className="text-xs text-muted-foreground">
-                  Estimado: com velas OHLCV, o volume de cada vela é repartido por igual entre a mínima e a máxima (não é o volume exato negociado em cada preço).
+                  Estimado: com velas OHLCV, o volume de cada vela é repartido por igual entre a mínima e a máxima (não é o volume exato negociado em cada
+                  preço). A divisão compra/venda usa o volume comprador agressor de cada vela informado pela Binance; não é o fluxo real por nível de preço.
                 </p>
               </>
             )}

@@ -31,6 +31,7 @@ export const CHART_INDICATORS: { name: string; label: string; pane: "main" | "su
   { name: "EMA", label: "Média exponencial (EMA)", pane: "main", params: [6, 12, 20] },
   { name: "SMA", label: "Média suavizada (SMA)", pane: "main", params: [12, 2] },
   { name: "MA_RIBBON", label: "MA ribbon (EMA 10/30/50/100)", pane: "main", params: [10, 30, 50, 100] },
+  { name: "MA_RIBBON_NEO", label: "MA Ribbon NEO (8 médias: 25 a 200)", pane: "main", params: [25, 30, 35, 40, 45, 50, 100, 200] },
   { name: "BOLL", label: "Bandas de Bollinger", pane: "main", params: [20, 2] },
   { name: "VWAP", label: "VWAP", pane: "main", params: [] },
   { name: "SAR", label: "Parabolic SAR", pane: "main", params: [2, 2, 20] },
@@ -41,7 +42,7 @@ export const CHART_INDICATORS: { name: string; label: string; pane: "main" | "su
   { name: "LIQ_HEATMAP", label: "Heatmap de liquidações (estimado)", pane: "main", params: [] },
   // Em painel próprio
   { name: "VOL", label: "Volume", pane: "sub", params: [5, 10, 20] },
-  { name: "DELTA", label: "Delta (compras − vendas agressoras)", pane: "sub", params: [] },
+  { name: "DELTA", label: "Volume Delta (compras − vendas agressoras)", pane: "sub", params: [] },
   { name: "CVD", label: "CVD (delta acumulado)", pane: "sub", params: [] },
   { name: "MACD", label: "MACD", pane: "sub", params: [12, 26, 9] },
   { name: "RSI", label: "RSI", pane: "sub", params: [6, 12, 24] },
@@ -84,6 +85,12 @@ export const CHART_TOOLS: { name: string; label: string }[] = [
   { name: "parallelChannel", label: "Canal paralelo" },
   { name: "parallelStraightLine", label: "Linhas paralelas" },
   { name: "priceChannelLine", label: "Canal de preço" },
+  { name: "parallelRays", label: "Raios paralelos" },
+  { name: "elliottImpulse", label: "Elliott impulse wave (1·2·3·4·5)" },
+  { name: "elliottCorrection", label: "Elliott correction wave (A·B·C)" },
+  { name: "elliottTriangle", label: "Elliott triangle wave (A·B·C·D·E)" },
+  { name: "elliottDoubleCombo", label: "Elliott double combo wave (W·X·Y)" },
+  { name: "elliottTripleCombo", label: "Elliott triple combo wave (W·X·Y·X·Z)" },
   { name: "fibonacciLine", label: "Retração de Fibonacci" },
   { name: "rectangle", label: "Retângulo" },
   { name: "measure", label: "Medir (preço e %)" },
@@ -93,14 +100,35 @@ export const CHART_TOOLS: { name: string; label: string }[] = [
   { name: "simpleTag", label: "Etiqueta" },
 ];
 const TOOL_NAMES = new Set(CHART_TOOLS.map((t) => t.name));
+/** Rótulos de cada ferramenta de Elliott (um por onda; o ponto de origem não tem rótulo). Os dois X do triplo são pontos diferentes. */
+export const ELLIOTT_LABELS: Record<string, string[]> = {
+  elliottImpulse: ["1", "2", "3", "4", "5"],
+  elliottCorrection: ["A", "B", "C"],
+  elliottTriangle: ["A", "B", "C", "D", "E"],
+  elliottDoubleCombo: ["W", "X", "Y"],
+  elliottTripleCombo: ["W", "X", "Y", "X", "Z"],
+};
+export const LABEL_POSITIONS = ["auto", "above", "below"] as const;
+export type LabelPosition = (typeof LABEL_POSITIONS)[number];
+/** Texto de um rótulo editado (curto: números, letras, parênteses, pontos e traços). */
+const LABEL_TEXT = /^[\p{L}\p{N}().\- ]{0,6}$/u;
 export const DEFAULT_FAVORITE_TOOLS = ["segment", "horizontalStraightLine", "fibonacciLine", "rectangle"];
 
 export const LINE_STYLES = ["solid", "dashed", "dotted"] as const;
 export type LineStyleName = (typeof LINE_STYLES)[number];
 export const EXTENDS = ["none", "left", "right", "both"] as const;
 export type ExtendName = (typeof EXTENDS)[number];
-export const MA_TYPES = ["EMA", "SMA"] as const;
+export const MA_TYPES = ["EMA", "SMA", "WMA", "RMA"] as const;
 export type MaType = (typeof MA_TYPES)[number];
+/** Preço usado no cálculo das médias. */
+export const PRICE_SOURCES = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"] as const;
+export type PriceSource = (typeof PRICE_SOURCES)[number];
+/** Representação do Volume Delta: colunas por vela ou linha. */
+export const DELTA_MODES = ["columns", "line"] as const;
+export type DeltaMode = (typeof DELTA_MODES)[number];
+/** Escala de uma comparação sobre o preço: % (começa no mesmo ponto), faixa própria ajustada ao preço, ou o valor em US$. */
+export const COMPARE_SCALES = ["percent", "fit", "price"] as const;
+export type CompareScale = (typeof COMPARE_SCALES)[number];
 
 /** Aparência de uma série de indicador (por chave da série, ex.: "e0", "macd"). */
 export type SeriesStyle = { color?: string; size?: number; style?: LineStyleName; visible?: boolean };
@@ -117,7 +145,7 @@ export type IndicatorState = {
   /** O que mostrar na legenda (falso = escondido). O cálculo continua. */
   legend?: { name?: boolean; params?: boolean; values?: boolean };
   /** Opções além dos períodos (ex.: tipo de cada média do MA ribbon). */
-  options?: { types?: MaType[]; levels?: number[] };
+  options?: { types?: MaType[]; levels?: number[]; source?: PriceSource; upColor?: string; downColor?: string; mode?: DeltaMode };
 };
 export type FibLevel = { value: number; color: string; visible: boolean };
 export type OverlayStyleState = {
@@ -131,6 +159,15 @@ export type OverlayStyleState = {
   /** Perfil de volume: linhas de preço e % da área de valor. */
   rows?: number;
   valueArea?: number;
+  /** Perfil de volume: cores das compras e das vendas (com transparência). */
+  buyColor?: string;
+  sellColor?: string;
+  /** Ondas de Elliott: tamanho e textos dos rótulos, posição, e se mostram rótulos e marcadores. */
+  labelSize?: number;
+  showLabels?: boolean;
+  showPoints?: boolean;
+  labels?: string[];
+  labelPosition?: LabelPosition;
 };
 export type OverlayState = {
   id?: string;
@@ -146,6 +183,9 @@ export type CompareState = ({ kind: "pair"; id: string } | { kind: "macro"; id: 
   display?: "main" | "sub";
   color?: string;
   size?: number;
+  style?: LineStyleName;
+  /** Sobre o preço: como a série entra na escala (padrão conforme o tipo). */
+  scale?: CompareScale;
   visible?: boolean;
 };
 export type PaneState = {
@@ -156,6 +196,10 @@ export type PaneState = {
   indicators: IndicatorState[];
   overlays: OverlayState[];
   compares: CompareState[];
+  /** Legendas dos indicadores recolhidas (seta "^"). */
+  legendCollapsed?: boolean;
+  /** Linha Time/Open/High/Low/Close/Volume (falso = escondida). */
+  showOhlc?: boolean;
 };
 export type TabState = { layout: ChartLayout; panes: PaneState[] };
 export type ToolPrefs = {
@@ -279,7 +323,18 @@ function sanitizeIndicatorExtras(v: Record<string, unknown>, out: IndicatorState
     // Níveis de referência (ex.: RSI 30/50/70): de 0 a 100, no máximo 5.
     const lv = v.options.levels;
     if (lv !== undefined && (!Array.isArray(lv) || lv.length > 5 || !lv.every((x) => isNum(x) && x >= 0 && x <= 100))) return "Opções do indicador inválidas";
-    out.options = { ...(t === undefined ? {} : { types: t as MaType[] }), ...(lv === undefined ? {} : { levels: lv as number[] }) };
+    const { source, upColor, downColor, mode } = v.options;
+    if (source !== undefined && !oneOf(PRICE_SOURCES, source)) return "Opções do indicador inválidas";
+    if (mode !== undefined && !oneOf(DELTA_MODES, mode)) return "Opções do indicador inválidas";
+    for (const c of [upColor, downColor]) if (c !== undefined && (typeof c !== "string" || !COLOR.test(c))) return "Opções do indicador inválidas";
+    out.options = {
+      ...(t === undefined ? {} : { types: t as MaType[] }),
+      ...(lv === undefined ? {} : { levels: lv as number[] }),
+      ...(source === undefined ? {} : { source: source as PriceSource }),
+      ...(upColor === undefined ? {} : { upColor: upColor as string }),
+      ...(downColor === undefined ? {} : { downColor: downColor as string }),
+      ...(mode === undefined ? {} : { mode: mode as DeltaMode }),
+    };
   }
   return null;
 }
@@ -313,6 +368,28 @@ function sanitizeOverlayStyles(v: unknown): OverlayStyleState | null {
   if (v.valueArea !== undefined) {
     if (!isNum(v.valueArea) || v.valueArea < 10 || v.valueArea > 100) return null;
     out.valueArea = v.valueArea;
+  }
+  for (const k of ["buyColor", "sellColor"] as const) {
+    if (v[k] === undefined) continue;
+    if (typeof v[k] !== "string" || !COLOR.test(v[k] as string)) return null;
+    out[k] = v[k] as string;
+  }
+  if (v.labelSize !== undefined) {
+    if (!Number.isInteger(v.labelSize) || (v.labelSize as number) < 8 || (v.labelSize as number) > 28) return null;
+    out.labelSize = v.labelSize as number;
+  }
+  for (const k of ["showLabels", "showPoints"] as const) {
+    if (v[k] === undefined) continue;
+    if (!isBool(v[k])) return null;
+    out[k] = v[k] as boolean;
+  }
+  if (v.labels !== undefined) {
+    if (!Array.isArray(v.labels) || v.labels.length > 5 || !v.labels.every((t) => typeof t === "string" && LABEL_TEXT.test(t))) return null;
+    out.labels = v.labels as string[];
+  }
+  if (v.labelPosition !== undefined) {
+    if (!oneOf(LABEL_POSITIONS, v.labelPosition)) return null;
+    out.labelPosition = v.labelPosition;
   }
   return out;
 }
@@ -361,10 +438,12 @@ function sanitizeOverlay(v: unknown): R<OverlayState> {
 function sanitizeCompare(v: unknown): R<CompareState> {
   if (!isObj(v)) return fail("Comparação inválida");
   if (v.display !== undefined && v.display !== "main" && v.display !== "sub") return fail("Comparação inválida");
-  const line = sanitizeLine({ color: v.color, size: v.size });
+  const line = sanitizeLine({ color: v.color, size: v.size, style: v.style });
   if (!line || (v.visible !== undefined && !isBool(v.visible))) return fail("Comparação inválida");
+  if (v.scale !== undefined && !oneOf(COMPARE_SCALES, v.scale)) return fail("Comparação inválida");
   const extra = {
     ...(v.display === undefined ? {} : { display: v.display as "main" | "sub" }),
+    ...(v.scale === undefined ? {} : { scale: v.scale as CompareScale }),
     ...line,
     ...(v.visible === undefined ? {} : { visible: v.visible as boolean }),
   };
@@ -405,9 +484,20 @@ function sanitizePane(v: unknown): R<PaneState> {
     if (!r.ok) return r;
     compares.push(r.value);
   }
+  for (const k of ["legendCollapsed", "showOhlc"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
   return {
     ok: true,
-    value: { symbol, interval: v.interval as ChartInterval, chartType: v.chartType as ChartType, scale: v.scale as ChartScale, indicators, overlays, compares },
+    value: {
+      symbol,
+      interval: v.interval as ChartInterval,
+      chartType: v.chartType as ChartType,
+      scale: v.scale as ChartScale,
+      indicators,
+      overlays,
+      compares,
+      ...(v.legendCollapsed === undefined ? {} : { legendCollapsed: v.legendCollapsed as boolean }),
+      ...(v.showOhlc === undefined ? {} : { showOhlc: v.showOhlc as boolean }),
+    },
   };
 }
 

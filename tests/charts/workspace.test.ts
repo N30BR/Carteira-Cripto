@@ -170,7 +170,7 @@ describe("indicadores: estilo por série, legenda, visibilidade e painel", () =>
   test("recusa chave de série, cor, tipo de média e painel inválidos", () => {
     expect(one({ styles: { "__proto__x": { color: "#fff" } } }).ok).toBe(false);
     expect(one({ styles: { e0: { color: "url(x)" } } }).ok).toBe(false);
-    expect(one({ options: { types: ["WMA"] } }).ok).toBe(false);
+    expect(one({ options: { types: ["HMA"] } }).ok).toBe(false);
     expect(one({ paneKey: "a b" }).ok).toBe(false);
     expect(one({ legend: { name: "no" } }).ok).toBe(false);
   });

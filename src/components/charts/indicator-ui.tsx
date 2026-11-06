@@ -15,7 +15,18 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CHART_INDICATORS, LIMITS, MA_TYPES, type IndicatorState, type MaType, type SeriesStyle } from "@/lib/charts/workspace";
+import {
+  CHART_INDICATORS,
+  DELTA_MODES,
+  LIMITS,
+  MA_TYPES,
+  PRICE_SOURCES,
+  type DeltaMode,
+  type IndicatorState,
+  type MaType,
+  type PriceSource,
+  type SeriesStyle,
+} from "@/lib/charts/workspace";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ColorPicker, NumberInput, StyleMenu, WidthMenu } from "./object-ui";
@@ -28,6 +39,7 @@ const PARAM_LABELS: Record<string, string[]> = {
   EMA: ["EMA 1 — período", "EMA 2 — período", "EMA 3 — período"],
   SMA: ["Período", "Peso"],
   MA_RIBBON: ["MA #1", "MA #2", "MA #3", "MA #4", "MA #5", "MA #6"],
+  MA_RIBBON_NEO: ["MA #1", "MA #2", "MA #3", "MA #4", "MA #5", "MA #6", "MA #7", "MA #8"],
   BOLL: ["Período", "Desvios padrão"],
   SAR: ["Aceleração inicial (×0,01)", "Passo (×0,01)", "Máximo (×0,01)"],
   BBI: ["Média 1", "Média 2", "Média 3", "Média 4"],
@@ -54,7 +66,24 @@ const PARAM_LABELS: Record<string, string[]> = {
 /** Indicadores com níveis de referência editáveis (de 0 a 100, até 5). */
 const LEVELS = new Set(["RSI", "RSI_DIV"]);
 
-export type Figure = { key: string; title: string; line: boolean; color: string };
+export type Figure = { key: string; title: string; line: boolean; color: string; size?: number; style?: "solid" | "dashed" | "dotted" };
+
+/** Médias com tipo por linha e fonte do preço (Entradas: "MA #1 [tipo] [período]"); valor = tipo padrão. */
+const RIBBONS: Record<string, MaType> = { MA_RIBBON: "EMA", MA_RIBBON_NEO: "SMA" };
+const SOURCE_LABEL: Record<PriceSource, string> = {
+  close: "Fechamento",
+  open: "Abertura",
+  high: "Máxima",
+  low: "Mínima",
+  hl2: "(Máx+Mín)/2",
+  hlc3: "(Máx+Mín+Fech)/3",
+  ohlc4: "(Abe+Máx+Mín+Fech)/4",
+};
+/** Indicadores com cores próprias de alta/baixa (ou compra/venda). */
+const SIDE_COLORS: Record<string, { up: string; down: string; upLabel: string; downLabel: string }> = {
+  DELTA: { up: "#22c55e", down: "#ef4444", upLabel: "Delta positivo", downLabel: "Delta negativo" },
+  VOLUME_PROFILE: { up: "#22c55e", down: "#ef4444", upLabel: "Compras", downLabel: "Vendas" },
+};
 export type MenuTarget = { index: number; x: number; y: number };
 
 export function IndicatorMenu({
@@ -142,7 +171,7 @@ export function IndicatorMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           variant="destructive"
-          onSelect={() => window.confirm(`Apagar ${label} deste gráfico?`) && onChange(indicators.filter((_, j) => j !== i))}
+          onSelect={() => onChange(indicators.filter((_, j) => j !== i))}
         >
           <Trash2 /> Apagar
         </DropdownMenuItem>
@@ -207,7 +236,10 @@ function IndicatorSettingsForm({
   const [tab, setTab] = useState<Tab>("inputs");
   const [draft, setDraft] = useState<IndicatorState>(structuredClone(indicator));
   const labels = PARAM_LABELS[draft.name] ?? [];
-  const isRibbon = draft.name === "MA_RIBBON";
+  const ribbonDefault = RIBBONS[draft.name];
+  const isRibbon = !!ribbonDefault;
+  const sides = SIDE_COLORS[draft.name];
+  const setOption = (patch: Partial<NonNullable<IndicatorState["options"]>>) => setDraft((d) => ({ ...d, options: { ...d.options, ...patch } }));
   const setParam = (i: number, v: number) => setDraft((d) => ({ ...d, params: d.params.map((p, j) => (j === i ? v : p)) }));
   const setSeries = (key: string, patch: Partial<SeriesStyle>) =>
     setDraft((d) => ({ ...d, styles: { ...d.styles, [key]: { ...d.styles?.[key], ...patch } } }));
@@ -258,17 +290,42 @@ function IndicatorSettingsForm({
             />
           </div>
         )}
+        {current === "inputs" && isRibbon && (
+          <div className="flex items-center gap-2">
+            <span className="w-44 shrink-0 text-muted-foreground">Fonte do preço</span>
+            <select
+              aria-label="Fonte do preço"
+              value={draft.options?.source ?? "close"}
+              onChange={(e) => setOption({ source: e.target.value as PriceSource })}
+              className="h-8 rounded-md border bg-background px-2 text-sm"
+            >
+              {PRICE_SOURCES.map((src) => (
+                <option key={src} value={src}>
+                  {SOURCE_LABEL[src]}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {current === "inputs" &&
           draft.params.map((p, i) => (
             <div key={i} className="flex items-center gap-2">
-              <span className="w-44 shrink-0 text-muted-foreground">{labels[i] ?? `Parâmetro ${i + 1}`}</span>
+              {isRibbon && lines[i] && (
+                <input
+                  type="checkbox"
+                  aria-label={`Mostrar ${labels[i] ?? `média ${i + 1}`}`}
+                  checked={draft.styles?.[lines[i].key]?.visible !== false}
+                  onChange={(e) => setSeries(lines[i].key, { visible: e.target.checked })}
+                />
+              )}
+              <span className={cn("shrink-0 text-muted-foreground", isRibbon ? "w-16" : "w-44")}>{labels[i] ?? `Parâmetro ${i + 1}`}</span>
               {isRibbon && (
                 <select
                   aria-label={`Tipo da média ${i + 1}`}
-                  value={draft.options?.types?.[i] ?? "EMA"}
+                  value={draft.options?.types?.[i] ?? ribbonDefault}
                   onChange={(e) =>
                     setDraft((d) => {
-                      const types = d.params.map((_, j) => d.options?.types?.[j] ?? "EMA");
+                      const types = d.params.map((_, j) => d.options?.types?.[j] ?? ribbonDefault);
                       types[i] = e.target.value as MaType;
                       return { ...d, options: { ...d.options, types } };
                     })
@@ -285,6 +342,46 @@ function IndicatorSettingsForm({
           ))}
         {current === "style" && (
           <>
+            {sides && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-28 shrink-0">{sides.upLabel}</span>
+                  <ColorPicker label={`Cor: ${sides.upLabel}`} value={draft.options?.upColor ?? sides.up} onChange={(upColor) => setOption({ upColor })} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-28 shrink-0">{sides.downLabel}</span>
+                  <ColorPicker label={`Cor: ${sides.downLabel}`} value={draft.options?.downColor ?? sides.down} onChange={(downColor) => setOption({ downColor })} />
+                </div>
+                {draft.name === "DELTA" && (
+                  <div className="flex items-center gap-2">
+                    <span className="w-28 shrink-0">Representação</span>
+                    <select
+                      aria-label="Representação"
+                      value={draft.options?.mode ?? "columns"}
+                      onChange={(e) => setOption({ mode: e.target.value as DeltaMode })}
+                      className="h-8 rounded-md border bg-background px-2 text-sm"
+                    >
+                      {DELTA_MODES.map((m) => (
+                        <option key={m} value={m}>
+                          {m === "columns" ? "Colunas" : "Linha"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {draft.name === "DELTA" && (
+                  <p className="text-xs text-muted-foreground">
+                    Delta por vela = compras agressoras − vendas agressoras, com o volume comprador (taker buy) que a Binance informa em cada vela. Não é
+                    o fluxo por nível de preço (footprint), que exigiria cada negócio. Para o acumulado, use o indicador CVD.
+                  </p>
+                )}
+                {draft.name === "VOLUME_PROFILE" && (
+                  <p className="text-xs text-muted-foreground">
+                    Distribuição por preço estimada (OHLCV); a divisão compra/venda usa o volume comprador agressor de cada vela (Binance).
+                  </p>
+                )}
+              </div>
+            )}
             {lines.map((f) => {
               const st = draft.styles?.[f.key] ?? {};
               return (
@@ -292,12 +389,12 @@ function IndicatorSettingsForm({
                   <input type="checkbox" aria-label={`Mostrar ${f.title || f.key}`} checked={st.visible !== false} onChange={(e) => setSeries(f.key, { visible: e.target.checked })} />
                   <span className="w-28 shrink-0 truncate">{f.title || f.key}</span>
                   <ColorPicker label={`Cor de ${f.title || f.key}`} value={st.color ?? f.color} onChange={(color) => setSeries(f.key, { color })} />
-                  <WidthMenu value={st.size ?? 1} onChange={(size) => setSeries(f.key, { size })} />
-                  <StyleMenu value={st.style ?? "solid"} onChange={(style) => setSeries(f.key, { style })} />
+                  <WidthMenu value={st.size ?? f.size ?? 1} onChange={(size) => setSeries(f.key, { size })} />
+                  <StyleMenu value={st.style ?? f.style ?? "solid"} onChange={(style) => setSeries(f.key, { style })} />
                 </div>
               );
             })}
-            {!lines.length && <p className="text-muted-foreground">Este indicador não tem linhas configuráveis (barras e desenhos próprios usam as cores padrão).</p>}
+            {!lines.length && !sides && <p className="text-muted-foreground">Este indicador não tem linhas configuráveis (barras e desenhos próprios usam as cores padrão).</p>}
           </>
         )}
         {current === "visibility" && (

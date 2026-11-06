@@ -38,7 +38,9 @@ import { ONCHAIN_SERIES } from "@/lib/charts/onchain-ids";
 import { safeAction } from "@/lib/safe-action";
 import { matches } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
-import type { IndicatorAction, PaneHandle } from "./chart-pane";
+import type { CompareAction, IndicatorAction, PaneHandle } from "./chart-pane";
+import { CompareSettingsDialog, compareLabel } from "./compare-ui";
+import { compareDisplay } from "@/lib/charts/compare";
 import { IndicatorMenu, IndicatorSettingsDialog, indicatorLabel, newIndicatorId, type Figure, type MenuTarget } from "./indicator-ui";
 import { ColorPicker, ObjectSettingsDialog, ObjectToolbar, ObjectsDialog, WidthMenu } from "./object-ui";
 import { COMPARE_COLORS } from "@/lib/charts/colors";
@@ -133,6 +135,8 @@ export function ChartWorkspace({
   // Menu e configurações de indicador (ícones ao lado do nome).
   const [indMenu, setIndMenu] = useState<(MenuTarget & { pane: number }) | null>(null);
   const [indSettings, setIndSettings] = useState<{ pane: number; index: number; figures: Figure[] } | null>(null);
+  // Configurações de uma comparação (ícone na legenda).
+  const [cmpSettings, setCmpSettings] = useState<{ pane: number; index: number } | null>(null);
   // Avisos por janela (o aviso de uma janela não apaga o de outra).
   const [errors, setErrors] = useState<Record<number, string | null>>({});
   const error = Object.values(errors).filter(Boolean).join(" · ") || null;
@@ -233,9 +237,9 @@ export function ChartWorkspace({
   };
 
   // Atalhos (Delete, Ctrl+D, Ctrl+O, Esc): só no contexto do gráfico e fora de campos de texto.
-  const keyState = useRef({ selected, drawing, dialog, settingsFor, indSettings });
+  const keyState = useRef({ selected, drawing, dialog, settingsFor, indSettings, cmpSettings });
   useEffect(() => {
-    keyState.current = { selected, drawing, dialog, settingsFor, indSettings };
+    keyState.current = { selected, drawing, dialog, settingsFor, indSettings, cmpSettings };
   });
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
@@ -245,7 +249,7 @@ export function ChartWorkspace({
       const k = keyState.current;
       // Janela ou menu aberto: as teclas são deles (o Esc que fecha uma janela não tira a seleção).
       const overlayOpen = !!document.querySelector('[role="dialog"][data-state="open"], [role="menu"][data-state="open"]');
-      if (typing(e.target) || overlayOpen || k.dialog || k.settingsFor || k.indSettings || !focusInside.current) return;
+      if (typing(e.target) || overlayOpen || k.dialog || k.settingsFor || k.indSettings || k.cmpSettings || !focusInside.current) return;
       if (matches(e, "charts.cancel")) {
         if (k.drawing && handles.current[k.drawing.pane]?.cancelDraw()) return;
         if (k.selected) setSelected(null);
@@ -340,10 +344,24 @@ export function ChartWorkspace({
     } else if (a.action === "settings") {
       setIndSettings({ pane: paneI, index, figures: handles.current[paneI]?.getFigures(a.id) ?? [] });
     } else if (a.action === "remove") {
-      if (window.confirm(`Apagar ${indicatorLabel(ind.name)} deste gráfico?`)) updatePane({ indicators: p.indicators.filter((_, j) => j !== index) }, paneI);
+      // Remove na hora (sem confirmação): só esta instância; os outros indicadores ficam como estão.
+      void ind;
+      updatePane({ indicators: p.indicators.filter((_, j) => j !== index) }, paneI);
     } else if (a.action === "more") {
       setIndMenu({ pane: paneI, index, x: a.x, y: a.y });
     }
+  }
+  // Ícones da legenda de uma comparação: ocultar/mostrar, configurar, remover (sem confirmação), mover de painel.
+  function compareAction(paneI: number, a: CompareAction) {
+    const p = tab.state.panes[paneI];
+    const cmp = p.compares[a.index];
+    if (!cmp) return;
+    const patch = (x: Partial<CompareState>) => updatePane({ compares: p.compares.map((c, j) => (j === a.index ? ({ ...c, ...x } as CompareState) : c)) }, paneI);
+    if (a.action === "hide" || a.action === "show") patch({ visible: cmp.visible === false });
+    else if (a.action === "settings") setCmpSettings({ pane: paneI, index: a.index });
+    else if (a.action === "remove") updatePane({ compares: p.compares.filter((_, j) => j !== a.index) }, paneI);
+    else if (a.action === "down") patch({ display: "sub" });
+    else if (a.action === "up") patch({ display: "main" });
   }
   const toggleFavoriteIndicator = (name: string) =>
     changePrefs({
@@ -456,6 +474,16 @@ export function ChartWorkspace({
           >
             IND
           </button>
+          <button
+            type="button"
+            title={pane.showOhlc === false ? "Mostrar a linha de valores da vela (Time, Open, High, Low, Close, Volume)" : "Ocultar a linha de valores da vela (Time, Open, High, Low, Close, Volume)"}
+            aria-label={pane.showOhlc === false ? "Mostrar valores OHLCV" : "Ocultar valores OHLCV"}
+            aria-pressed={pane.showOhlc !== false}
+            onClick={() => updatePane({ showOhlc: pane.showOhlc === false })}
+            className={cn(iconBtn, "text-[9px] font-semibold", pane.showOhlc === false && "line-through")}
+          >
+            OHLC
+          </button>
           <button type="button" title="Lista de desenhos (mostrar ocultos)" aria-label="Lista de desenhos" onClick={() => setDialog("objects")} className={iconBtn}>
             <ListTree className="size-4" />
           </button>
@@ -490,6 +518,8 @@ export function ChartWorkspace({
               onSelect={(id) => setSelected(id ? { pane: i, id } : null)}
               onObjectSettings={(id) => setSettingsFor({ pane: i, id })}
               onIndicatorAction={(a) => indicatorAction(i, a)}
+              onCompareAction={(a) => compareAction(i, a)}
+              onLegendCollapse={(legendCollapsed) => updatePaneOf(tab.id, i, { legendCollapsed })}
               onDrawingChange={(on) => setDrawing((d) => (on ? d : d?.pane === i ? null : d))}
               handleRef={(h) => (handles.current[i] = h)}
             >
@@ -523,7 +553,17 @@ export function ChartWorkspace({
         onFavorite={toggleFavoriteIndicator}
         onChange={(indicators) => updatePane({ indicators })}
       />
-      <CompareDialog open={dialog === "compare"} onClose={() => setDialog(null)} pane={pane} symbols={symbols} onChange={(compares) => updatePane({ compares })} />
+      <CompareDialog
+        open={dialog === "compare"}
+        onClose={() => setDialog(null)}
+        pane={pane}
+        symbols={symbols}
+        onChange={(compares) => updatePane({ compares })}
+        onSettings={(index) => {
+          setDialog(null);
+          setCmpSettings({ pane: paneIndex, index });
+        }}
+      />
       <ToolsDialog open={dialog === "tools"} onClose={() => setDialog(null)} prefs={tools} onChange={changePrefs} />
       <ObjectsDialog
         open={dialog === "objects"}
@@ -556,6 +596,16 @@ export function ChartWorkspace({
           setIndMenu(null);
         }}
         onChange={(indicators) => indMenu && updatePane({ indicators }, indMenu.pane)}
+      />
+      <CompareSettingsDialog
+        compare={cmpSettings ? (tab.state.panes[cmpSettings.pane]?.compares[cmpSettings.index] ?? null) : null}
+        index={cmpSettings?.index ?? 0}
+        symbol={cmpSettings ? (tab.state.panes[cmpSettings.pane]?.symbol ?? "") : ""}
+        onClose={() => setCmpSettings(null)}
+        onApply={(next) =>
+          cmpSettings &&
+          updatePane({ compares: tab.state.panes[cmpSettings.pane].compares.map((c, j) => (j === cmpSettings.index ? next : c)) }, cmpSettings.pane)
+        }
       />
       <IndicatorSettingsDialog
         open={!!indSettings}
@@ -767,12 +817,14 @@ function CompareDialog({
   pane,
   symbols,
   onChange,
+  onSettings,
 }: {
   open: boolean;
   onClose: () => void;
   pane: PaneState;
   symbols: SymbolOption[];
   onChange: (c: CompareState[]) => void;
+  onSettings?: (index: number) => void;
 }) {
   const [q, setQ] = useState("");
   const [oq, setOq] = useState("");
@@ -788,29 +840,9 @@ function CompareDialog({
     const t = q.trim().toUpperCase();
     return t ? symbols.filter((s) => s.symbol.includes(t)).slice(0, 30) : [];
   }, [q, symbols]);
-  const labelOf = (c: CompareState) =>
-    c.kind === "macro"
-      ? (MACRO_SERIES.find((m) => m.id === c.id)?.label ?? c.id)
-      : c.kind === "onchain"
-        ? (ONCHAIN_SERIES.find((o) => o.id === c.id)?.short ?? c.id)
-        : c.id === "PAXGUSDT"
-          ? "Ouro (PAXG/USDT)"
-          : c.id === "XAUTUSDT"
-            ? "Ouro (XAUT/USDT)"
-            : c.id;
-  // Onde aparece: escolha da pessoa, ou o padrão (pares e liquidez sobre o preço; juros e on-chain sem US$ em painel;
-  // on-chain em US$ sobre o preço só no BTCUSDT).
-  const displayOf = (c: CompareState) =>
-    c.display ??
-    (c.kind === "macro"
-      ? MACRO_SERIES.find((m) => m.id === c.id)?.pane === "sub"
-        ? "sub"
-        : "main"
-      : c.kind === "onchain"
-        ? ONCHAIN_SERIES.find((o) => o.id === c.id)?.unit === "usd" && pane.symbol === "BTCUSDT"
-          ? "main"
-          : "sub"
-        : "main");
+  const labelOf = compareLabel;
+  // Onde aparece: escolha da pessoa, ou o padrão (juros do FRED em painel; o resto, inclusive on-chain, sobre o preço).
+  const displayOf = compareDisplay;
   const patch = (i: number, p: Partial<CompareState>) => onChange(pane.compares.map((x, j) => (j === i ? ({ ...x, ...p } as CompareState) : x)));
   const item = (c: CompareState, label: string, hint?: string) => (
     <button
@@ -838,7 +870,7 @@ function CompareDialog({
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Ouro</p>
             {gold.map((g) => item({ kind: "pair", id: g.symbol }, labelOf({ kind: "pair", id: g.symbol }), "Binance"))}
             <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Macro (FRED)</p>
-            {MACRO_SERIES.map((m) => item({ kind: "macro", id: m.id }, m.label, m.pane === "sub" ? "painel" : "rebase"))}
+            {MACRO_SERIES.map((m) => item({ kind: "macro", id: m.id }, m.label, m.pane === "sub" ? "painel" : "%"))}
             <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">On-chain (rede Bitcoin)</p>
             <Input aria-label="Buscar indicador on-chain" placeholder="Buscar (ex.: SOPR, ciclo)" value={oq} onChange={(e) => setOq(e.target.value)} />
             <ul className="max-h-56 overflow-auto" aria-label="Indicadores on-chain">
@@ -891,6 +923,11 @@ function CompareDialog({
                     <option value="main">Sobre o preço</option>
                     <option value="sub">Painel separado</option>
                   </select>
+                  {onSettings && (
+                    <Button size="icon-sm" variant="ghost" aria-label={`Configurações de ${labelOf(c)}`} onClick={() => onSettings(i)}>
+                      <Settings2 />
+                    </Button>
+                  )}
                   <Button size="icon-sm" variant="ghost" aria-label={`Remover comparação ${labelOf(c)}`} onClick={() => onChange(pane.compares.filter((_, j) => j !== i))}>
                     <X />
                   </Button>

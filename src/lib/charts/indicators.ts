@@ -110,6 +110,57 @@ export const sma = (values: N[], period: number): N[] =>
     return win.some((v) => v === null) ? null : (win as number[]).reduce((s, v) => s + v, 0) / period;
   });
 
+/** Média ponderada linear (pesos 1..period, o mais recente pesa mais). */
+export function wma(values: number[], period: number): N[] {
+  const out: N[] = values.map(() => null);
+  if (period < 1) return out;
+  const p = Math.round(period);
+  const den = (p * (p + 1)) / 2;
+  for (let i = p - 1; i < values.length; i++) {
+    let s = 0;
+    for (let j = 0; j < p; j++) s += values[i - j] * (p - j);
+    out[i] = s / den;
+  }
+  return out;
+}
+
+/** Média de Wilder (RMA): começa na média simples e usa fator 1/period. */
+export function rma(values: number[], period: number): N[] {
+  const out: N[] = values.map(() => null);
+  const p = Math.round(period);
+  if (p < 1 || values.length < p) return out;
+  let prev = values.slice(0, p).reduce((s, v) => s + v, 0) / p;
+  out[p - 1] = prev;
+  for (let i = p; i < values.length; i++) {
+    prev = (prev * (p - 1) + values[i]) / p;
+    out[i] = prev;
+  }
+  return out;
+}
+
+export type MaMethod = "SMA" | "EMA" | "WMA" | "RMA";
+/** Média móvel pelo método escolhido. */
+export function movingAverage(values: number[], period: number, method: MaMethod): N[] {
+  if (method === "EMA") return ema(values, period);
+  if (method === "WMA") return wma(values, period);
+  if (method === "RMA") return rma(values, period);
+  return sma(values, Math.round(period));
+}
+
+export type Source = "close" | "open" | "high" | "low" | "hl2" | "hlc3" | "ohlc4";
+/** Preço de cada vela conforme a fonte escolhida. */
+export function priceSource(bars: Bar[], src: Source = "close"): number[] {
+  return bars.map((b) =>
+    src === "open" ? b.open
+    : src === "high" ? b.high
+    : src === "low" ? b.low
+    : src === "hl2" ? (b.high + b.low) / 2
+    : src === "hlc3" ? (b.high + b.low + b.close) / 3
+    : src === "ohlc4" ? (b.open + b.high + b.low + b.close) / 4
+    : b.close,
+  );
+}
+
 /** Estocástico RSI: %K (suavizado) e %D, de 0 a 100. */
 export function stochRsi(closes: number[], rsiPeriod: number, stochPeriod: number, kSmooth: number, dSmooth: number): { k: N[]; d: N[] } {
   const r = rsi(closes, rsiPeriod);
@@ -150,27 +201,47 @@ export function ichimoku(bars: Bar[], tenkanP: number, kijunP: number, senkouBP:
   });
 }
 
-export type ProfileBin = { from: number; to: number; volume: number };
-export type VolumeProfile = { bins: ProfileBin[]; pocIndex: number; valueArea: { low: number; high: number } };
+export type ProfileBin = { from: number; to: number; volume: number; buy: number; sell: number };
+export type VolumeProfile = {
+  bins: ProfileBin[];
+  pocIndex: number;
+  valueArea: { low: number; high: number };
+  /** Alguma vela sem o volume comprador real da Binance: a divisão compra/venda dela foi estimada pela posição do fechamento. */
+  sideEstimated: boolean;
+};
 
 /**
  * Volume Profile das velas `fromIndex..toIndex` (faixa visível): divide a faixa de preço em `rows`
  * faixas e reparte o volume de cada vela igualmente entre as faixas que ela toca.
+ * Compra/venda: o volume comprador agressor da vela (taker buy, real da Binance) é repartido do mesmo jeito;
+ * sem ele, a divisão é estimada pela posição do fechamento entre a mínima e a máxima.
  * POC = faixa com mais volume; área de valor = faixas em volta do POC até somar 70% do volume.
  */
-export function volumeProfile(bars: Bar[], fromIndex: number, toIndex: number, rows: number, valueAreaShare = 0.7): VolumeProfile {
+export function volumeProfile(bars: (Bar & { buyVolume?: number })[], fromIndex: number, toIndex: number, rows: number, valueAreaShare = 0.7): VolumeProfile {
   const slice = bars.slice(Math.max(0, fromIndex), Math.min(bars.length - 1, toIndex) + 1);
-  if (!slice.length || rows < 1) return { bins: [], pocIndex: -1, valueArea: { low: 0, high: 0 } };
+  if (!slice.length || rows < 1) return { bins: [], pocIndex: -1, valueArea: { low: 0, high: 0 }, sideEstimated: false };
   const lo = Math.min(...slice.map((b) => b.low));
   const hi = Math.max(...slice.map((b) => b.high));
   const step = hi > lo ? (hi - lo) / rows : 1;
-  const bins: ProfileBin[] = Array.from({ length: rows }, (_, i) => ({ from: lo + i * step, to: lo + (i + 1) * step, volume: 0 }));
+  const bins: ProfileBin[] = Array.from({ length: rows }, (_, i) => ({ from: lo + i * step, to: lo + (i + 1) * step, volume: 0, buy: 0, sell: 0 }));
   const idx = (p: number) => Math.min(rows - 1, Math.max(0, Math.floor((p - lo) / step)));
+  let sideEstimated = false;
   for (const b of slice) {
     const a = idx(b.low);
     const z = idx(b.high);
-    const share = (b.volume ?? 0) / (z - a + 1);
-    for (let i = a; i <= z; i++) bins[i].volume += share;
+    const vol = b.volume ?? 0;
+    let buy: number;
+    if (typeof b.buyVolume === "number" && b.buyVolume >= 0 && b.buyVolume <= vol) buy = b.buyVolume;
+    else {
+      sideEstimated = true;
+      buy = vol * (b.high > b.low ? (b.close - b.low) / (b.high - b.low) : 0.5);
+    }
+    const n = z - a + 1;
+    for (let i = a; i <= z; i++) {
+      bins[i].volume += vol / n;
+      bins[i].buy += buy / n;
+      bins[i].sell += (vol - buy) / n;
+    }
   }
   let pocIndex = 0;
   bins.forEach((b, i) => {
@@ -186,7 +257,7 @@ export function volumeProfile(bars: Bar[], fromIndex: number, toIndex: number, r
     if (above >= below) acc += bins[++high].volume;
     else acc += bins[--low].volume;
   }
-  return { bins, pocIndex, valueArea: { low: bins[low].from, high: bins[high].to } };
+  return { bins, pocIndex, valueArea: { low: bins[low].from, high: bins[high].to }, sideEstimated };
 }
 
 export type Divergence = { kind: "bull" | "bear"; from: number; to: number };

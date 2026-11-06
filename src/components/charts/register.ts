@@ -3,7 +3,23 @@
 // Indicadores e ferramentas próprios registrados no KLineCharts (uma vez por página).
 // Os cálculos ficam em lib/charts/indicators.ts (testados); aqui só a ligação com o gráfico.
 import { registerIndicator, registerOverlay, type KLineData } from "klinecharts";
-import { atr, deltaSeries, ema, ichimoku, liquidationLevels, mfi, rsi, rsiDivergences, sma, stochRsi, volumeProfile, vwap } from "@/lib/charts/indicators";
+import {
+  atr,
+  deltaSeries,
+  ichimoku,
+  liquidationLevels,
+  mfi,
+  movingAverage,
+  priceSource,
+  rsi,
+  rsiDivergences,
+  stochRsi,
+  volumeProfile,
+  vwap,
+  type MaMethod,
+  type Source,
+} from "@/lib/charts/indicators";
+import { drawProfile, PROFILE_BUY, PROFILE_SELL } from "./profile";
 import { registerOverlaysAndAxes } from "./overlays";
 import { alignStep, rebase, type Point } from "@/lib/charts/macro-math";
 
@@ -23,6 +39,24 @@ export type CompareData = { label: string; points: Point[]; color: string };
 
 /** Chave que muda quando as velas mudam (para não recalcular a cada movimento do mouse). */
 const dataKey = (d: KLineData[]) => (d.length ? `${d.length}:${d[0].timestamp}:${d[d.length - 1].timestamp}:${d[d.length - 1].close}` : "0");
+
+/** Série encaixada na faixa do preço (mín./máx. no período em que as duas existem); nulos continuam nulos. */
+function fitToPrice(values: (number | null)[], data: KLineData[]): (number | null)[] {
+  let vMin = Infinity;
+  let vMax = -Infinity;
+  let pMin = Infinity;
+  let pMax = -Infinity;
+  values.forEach((v, i) => {
+    if (v === null || !Number.isFinite(v)) return;
+    vMin = Math.min(vMin, v);
+    vMax = Math.max(vMax, v);
+    pMin = Math.min(pMin, data[i].low);
+    pMax = Math.max(pMax, data[i].high);
+  });
+  if (!Number.isFinite(vMin) || !Number.isFinite(pMin)) return values.map(() => null);
+  const span = vMax - vMin || 1;
+  return values.map((v) => (v === null ? null : pMin + ((v - vMin) / span) * (pMax - pMin)));
+}
 
 export function registerChartExtensions(): void {
   registerOverlaysAndAxes();
@@ -53,6 +87,16 @@ export function registerChartExtensions(): void {
       figures: [{ key: "v", title: "", type: "line" }],
       calc: (data, ind) => alignStep(ind.extendData?.points ?? [], data.map((b) => b.timestamp)).map((v) => ({ v })),
     });
+    // Na janela do preço com escala própria: a série é encaixada na faixa do preço (mínimo/máximo do período
+    // em comum), sem rebase — serve para unidades diferentes do preço e para valores negativos ou zero.
+    registerIndicator<Row, number, CompareData>({
+      name: `FIT_${slot}`,
+      shortName: "Comparar",
+      series: "price",
+      precision: 2,
+      figures: [{ key: "v", title: "", type: "line" }],
+      calc: (data, ind) => fitToPrice(alignStep(ind.extendData?.points ?? [], data.map((b) => b.timestamp)), data).map((v) => ({ v })),
+    });
     // Em painel próprio: o valor real (ex.: juros em %).
     registerIndicator<Row, number, CompareData>({
       name: `MACRO_${slot}`,
@@ -63,8 +107,8 @@ export function registerChartExtensions(): void {
     });
   }
 
-  // MA ribbon: cada linha pode ser EMA ou SMA (extendData.types).
-  registerIndicator<Row, number, { types?: string[] }>({
+  // MA ribbon: cada linha pode ser EMA, SMA, WMA ou RMA (extendData.types).
+  registerIndicator<Row, number, { types?: string[]; source?: Source }>({
     name: "MA_RIBBON",
     shortName: "MA ribbon",
     series: "price",
@@ -73,10 +117,28 @@ export function registerChartExtensions(): void {
     shouldOhlc: true,
     regenerateFigures: (params) => params.map((p, i) => ({ key: `e${i}`, title: `MA ${p}: `, type: "line" })),
     calc: (data, ind) => {
-      const closes = data.map((b) => b.close);
+      const values = priceSource(data, ind.extendData?.source);
       const types = ind.extendData?.types ?? [];
-      const cols = ind.calcParams.map((p, j) => (types[j] === "SMA" ? sma(closes, p) : ema(closes, p)));
+      const cols = ind.calcParams.map((p, j) => movingAverage(values, p, (types[j] as MaMethod | undefined) ?? "EMA"));
       return data.map((_, i) => Object.fromEntries(cols.map((c, j) => [`e${j}`, c[i]])));
+    },
+  });
+
+  // MA Ribbon NEO: oito médias numa única instância (padrão: SMA 25, 30, 35, 40, 45, 50, 100 e 200 no fechamento,
+  // como "MA 25 close 0" das referências). Cores e traços padrão ficam em NEO_SERIES (chart-pane).
+  registerIndicator<Row, number, { types?: string[]; source?: Source }>({
+    name: "MA_RIBBON_NEO",
+    shortName: "MA Ribbon NEO",
+    series: "price",
+    calcParams: [25, 30, 35, 40, 45, 50, 100, 200],
+    precision: 2,
+    shouldOhlc: true,
+    regenerateFigures: (params) => params.map((p, i) => ({ key: `m${i}`, title: `MA ${p}: `, type: "line" })),
+    calc: (data, ind) => {
+      const values = priceSource(data, ind.extendData?.source);
+      const types = ind.extendData?.types ?? [];
+      const cols = ind.calcParams.map((p, j) => movingAverage(values, p, (types[j] as MaMethod | undefined) ?? "SMA"));
+      return data.map((_, i) => Object.fromEntries(cols.map((c, j) => [`m${j}`, c[i]])));
     },
   });
 
@@ -212,8 +274,9 @@ export function registerChartExtensions(): void {
   });
 
   const vpMemo = new Map<string, { key: string; vp: ReturnType<typeof volumeProfile> }>();
-  // Volume Profile da faixa visível (estimado: volume repartido entre mínima e máxima de cada vela): POC e área de valor (70%).
-  registerIndicator<Row, number>({
+  // Volume Profile da faixa visível (estimado: volume repartido entre mínima e máxima de cada vela): POC e área de valor (70%),
+  // cada faixa dividida em compras (verde) e vendas (vermelho), no modelo "Volume Profile and Volume Indicator by DGT".
+  registerIndicator<Row, number, { upColor?: string; downColor?: string }>({
     name: "VOLUME_PROFILE",
     shortName: "Volume Profile",
     series: "price",
@@ -232,37 +295,27 @@ export function registerChartExtensions(): void {
         memo = { key, vp: volumeProfile(bars(data), range.from, range.to - 1, rows, Math.max(10, Math.min(100, indicator.calcParams[1] ?? 70)) / 100) };
         vpMemo.set(indicator.id, memo);
       }
-      const vp = memo.vp;
-      if (!vp.bins.length) return false;
-      const max = Math.max(...vp.bins.map((b) => b.volume)) || 1;
-      const width = bounding.width * 0.25;
-      ctx.save();
-      vp.bins.forEach((b, i) => {
-        const yTop = yAxis.convertToPixel(b.to);
-        const yBottom = yAxis.convertToPixel(b.from);
-        const h = Math.max(1, Math.abs(yBottom - yTop) - 1);
-        const w = (b.volume / max) * width;
-        const inValue = b.from >= vp.valueArea.low && b.to <= vp.valueArea.high;
-        ctx.fillStyle = i === vp.pocIndex ? `${ACCENT}cc` : inValue ? `${ACCENT}55` : "#71717a40";
-        ctx.fillRect(bounding.width - w, Math.min(yTop, yBottom), w, h);
+      // Âncora à direita (as barras crescem para a esquerda); à direita dela, o perfil de sentimento.
+      const sentiment = Math.max(16, bounding.width * 0.05);
+      drawProfile(ctx, memo.vp, {
+        anchorX: bounding.width - sentiment - 6,
+        width: bounding.width * 0.22,
+        sentiment,
+        lineFrom: 0,
+        lineTo: bounding.width,
+        y: (p) => yAxis.convertToPixel(p),
+        buyColor: indicator.extendData?.upColor ?? PROFILE_BUY,
+        sellColor: indicator.extendData?.downColor ?? PROFILE_SELL,
       });
-      const poc = vp.bins[vp.pocIndex];
-      const yPoc = yAxis.convertToPixel((poc.from + poc.to) / 2);
-      ctx.strokeStyle = ACCENT;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(0, yPoc);
-      ctx.lineTo(bounding.width, yPoc);
-      ctx.stroke();
-      ctx.restore();
       return false;
     },
   });
 
-  // Delta por vela (compras − vendas agressoras): barras verdes/vermelhas.
-  registerIndicator<Row>({
+  // Volume Delta por vela (compras − vendas agressoras; volume comprador real da Binance por vela):
+  // colunas verdes/vermelhas ou linha (extendData.mode), cores configuráveis.
+  registerIndicator<Row, number, { upColor?: string; downColor?: string; mode?: "columns" | "line" }>({
     name: "DELTA",
-    shortName: "Delta",
+    shortName: "Volume Delta",
     precision: 2,
     shouldFormatBigNumber: true,
     figures: [
@@ -271,13 +324,18 @@ export function registerChartExtensions(): void {
         title: "Delta: ",
         type: "bar",
         baseValue: 0,
-        styles: ({ data }) => {
+        styles: ({ data, indicator }) => {
           const v = data.current?.delta ?? 0;
-          return { color: (v ?? 0) >= 0 ? UP : DOWN };
+          const x = indicator.extendData as { upColor?: string; downColor?: string } | undefined;
+          return { color: (v ?? 0) >= 0 ? (x?.upColor ?? UP) : (x?.downColor ?? DOWN) };
         },
       },
+      { key: "deltaLine", title: "Delta (linha): ", type: "line" },
     ],
-    calc: (data) => deltaSeries(data as never).delta.map((delta) => ({ delta })),
+    calc: (data, ind) => {
+      const line = ind.extendData?.mode === "line";
+      return deltaSeries(data as never).delta.map((d) => (line ? { delta: null, deltaLine: d } : { delta: d, deltaLine: null }));
+    },
   });
 
   // CVD: delta acumulado.

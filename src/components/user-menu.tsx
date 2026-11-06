@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { KeyRound, Keyboard, LogOut } from "lucide-react";
+import { BookImage, KeyRound, Keyboard, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,6 +29,11 @@ export function UserMenu({ username }: { username: string }) {
         <DropdownMenuItem asChild>
           <Link href="/atalhos">
             <Keyboard /> Atalhos
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/referencias">
+            <BookImage /> Referências
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

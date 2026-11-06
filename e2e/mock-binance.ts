@@ -23,7 +23,10 @@ function klines(pair: string, count: number, stepMs: number): unknown[][] {
     const open = price - wave;
     const high = Math.max(open, price) + Math.abs(wave) * 0.6;
     const low = Math.min(open, price) - Math.abs(wave) * 0.6;
-    return [close - stepMs, String(open), String(high), String(low), String(price), String(100 + (i % 7) * 20), close];
+    const volume = 100 + (i % 7) * 20;
+    // Como a Binance: [abertura, o, h, l, c, volume, fechamento, volume em cotação, negócios, volume comprador agressor].
+    const takerBuy = volume * (0.5 + Math.sin(i / 2) * 0.2);
+    return [close - stepMs, String(open), String(high), String(low), String(price), String(volume), close, "0", 0, String(takerBuy)];
   });
 }
 

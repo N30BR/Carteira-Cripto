@@ -82,7 +82,8 @@ export function HoldingsTable({ rows, currency }: { rows: HoldingsTableRow[]; cu
         <h2 className="font-medium">Ativos</h2>
         <ChangeColumnsMenu shown={shown} onChange={setShown} />
       </div>
-      <div className="rounded-xl border">
+      {/* Fundo opaco: o brilho roxo do fundo da página (camada fixa) não atravessa a tabela; overflow corta nos cantos. */}
+      <div className="overflow-hidden rounded-xl border bg-background">
         <Table>
           <TableHeader>
             <TableRow>

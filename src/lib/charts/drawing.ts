@@ -1,15 +1,18 @@
 // Regras das ferramentas de desenho (sem dependências do navegador).
 import type { FibLevel } from "./workspace";
 
-/** Níveis padrão da retração de Fibonacci (cores como na referência). */
+/** Cores do MA Ribbon NEO (MA 25, 30, 35, 40, 45, 50, 100, 200), tiradas das referências. */
+export const NEO_COLORS = ["#2196F3", "#2157F3", "#2A21F3", "#6921F3", "#A821F3", "#E721F3", "#FFFFFF", "#FFFFFF"];
+
+/** Níveis padrão da retração de Fibonacci (mesmos níveis de antes; cores na identidade das médias). */
 export const DEFAULT_FIB_LEVELS: FibLevel[] = [
-  { value: 0, color: "#787b86", visible: true },
-  { value: 0.236, color: "#f23645", visible: true },
-  { value: 0.382, color: "#ff9800", visible: true },
-  { value: 0.5, color: "#4caf50", visible: true },
-  { value: 0.618, color: "#089981", visible: true },
-  { value: 0.786, color: "#00bcd4", visible: true },
-  { value: 1, color: "#787b86", visible: true },
+  { value: 0, color: NEO_COLORS[0], visible: true },
+  { value: 0.236, color: NEO_COLORS[1], visible: true },
+  { value: 0.382, color: NEO_COLORS[2], visible: true },
+  { value: 0.5, color: NEO_COLORS[3], visible: true },
+  { value: 0.618, color: NEO_COLORS[4], visible: true },
+  { value: 0.786, color: NEO_COLORS[5], visible: true },
+  { value: 1, color: NEO_COLORS[6], visible: true },
 ];
 
 /**

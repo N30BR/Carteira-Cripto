@@ -6,13 +6,32 @@ import { registerOverlay, registerYAxis, type KLineData, type OverlayFigure } fr
 import { DEFAULT_FIB_LEVELS, fibPrice, findBarIndex } from "@/lib/charts/drawing";
 import { anchoredVwap, volumeProfile } from "@/lib/charts/indicators";
 import { fromLog, logRange, logTickValues, toLog, type AxisRange } from "@/lib/charts/log-axis";
-import type { ExtendName, FibLevel } from "@/lib/charts/workspace";
+import { ELLIOTT_LABELS, type ExtendName, type FibLevel, type LabelPosition } from "@/lib/charts/workspace";
+
+/** Cores padrão das ondas de Elliott (como a referência): alta verde, baixa vermelha. */
+export const ELLIOTT_UP = "#22c55e";
+export const ELLIOTT_DOWN = "#ef4444";
+import { PROFILE_BUY, PROFILE_SELL, withAlpha } from "./profile";
 
 const ACCENT = "#8b7cf6";
 export const LOG_AXIS = "log10";
 
 /** Dados extras de um desenho (o texto das anotações continua sendo uma string). */
-export type OverlayExtra = { extend?: ExtendName; levels?: FibLevel[]; rows?: number; valueArea?: number };
+export type OverlayExtra = {
+  extend?: ExtendName;
+  levels?: FibLevel[];
+  rows?: number;
+  valueArea?: number;
+  /** Perfil de volume: compras/vendas. Ondas de Elliott: segmentos de alta/baixa. */
+  buyColor?: string;
+  sellColor?: string;
+  /** Ondas de Elliott: rótulos (tamanho, mostrar, textos próprios, posição) e marcadores dos pontos. */
+  labelSize?: number;
+  showLabels?: boolean;
+  showPoints?: boolean;
+  labels?: string[];
+  labelPosition?: LabelPosition;
+};
 const extra = (v: unknown): OverlayExtra => (typeof v === "object" && v !== null ? (v as OverlayExtra) : {});
 
 const fmt = (v: number) => {
@@ -22,6 +41,17 @@ const fmt = (v: number) => {
 };
 
 type AxisSelf = { _range: AxisRange; _autoCalcTickFlag: boolean };
+
+/**
+ * Fim de um raio que sai de `p` na direção (dx, dy): longe o bastante para passar de qualquer borda da área
+ * (o canvas corta o que sobra), inclusive com a origem fora da tela.
+ */
+export function rayEnd(p: { x: number; y: number }, dx: number, dy: number, b: { width: number; height: number }): { x: number; y: number } {
+  const len = Math.hypot(dx, dy);
+  if (!len) return p;
+  const reach = (Math.abs(p.x) + Math.abs(p.y) + b.width + b.height) * 2;
+  return { x: p.x + (dx / len) * reach, y: p.y + (dy / len) * reach };
+}
 
 let done = false;
 export function registerOverlaysAndAxes(): void {
@@ -150,6 +180,87 @@ export function registerOverlaysAndAxes(): void {
     },
   });
 
+  // ---------- Raios paralelos: 1º clique = origem do 1º raio, 2º = direção, 3º = distância do 2º raio ----------
+  // Diferente do canal paralelo (dois segmentos entre os cliques, com preenchimento) e das linhas paralelas
+  // (infinitas nos dois sentidos): aqui os dois raios partem das origens e seguem num só sentido até a borda.
+  registerOverlay({
+    name: "parallelRays",
+    totalStep: 4,
+    needDefaultPointFigure: true,
+    needDefaultXAxisFigure: true,
+    needDefaultYAxisFigure: true,
+    createPointFigures: ({ coordinates, bounding }) => {
+      if (coordinates.length < 2) return [];
+      const [a, b] = coordinates;
+      const ray = (p: { x: number; y: number }) => [p, rayEnd(p, b.x - a.x, b.y - a.y, bounding)];
+      if (coordinates.length < 3) return [{ type: "line", attrs: { coordinates: ray(a) } }];
+      const c = coordinates[2];
+      // Mesma inclinação; o 2º raio passa pelo 3º clique (deslocado na vertical, como o canal paralelo).
+      const slope = a.x === b.x ? 0 : (b.y - a.y) / (b.x - a.x);
+      const dy = c.y - (a.y + slope * (c.x - a.x));
+      const a2 = { x: a.x, y: a.y + dy };
+      return [
+        { type: "line", attrs: { coordinates: ray(a) } },
+        { type: "line", attrs: { coordinates: ray(a2) } },
+      ];
+    },
+  });
+
+  // ---------- Ondas de Elliott: origem + um clique por onda; segmentos ligados e rótulos automáticos ----------
+  // Verde quando o segmento sobe, vermelho quando desce (é a direção, não uma validação da contagem).
+  for (const [name, labels] of Object.entries(ELLIOTT_LABELS)) {
+    registerOverlay({
+      name,
+      totalStep: labels.length + 2,
+      needDefaultPointFigure: true,
+      needDefaultXAxisFigure: true,
+      needDefaultYAxisFigure: true,
+      createPointFigures: ({ coordinates, overlay }) => {
+        if (coordinates.length < 2) return [];
+        const ex = extra(overlay.extendData);
+        const up = ex.buyColor ?? ELLIOTT_UP;
+        const down = ex.sellColor ?? ELLIOTT_DOWN;
+        const figures: OverlayFigure[] = [];
+        // Espessura escolhida pela pessoa; sem escolha, 2 px (como a referência).
+        const lineSize = (overlay.styles?.line as { size?: number } | undefined)?.size ?? 2;
+        for (let i = 1; i < coordinates.length; i++) {
+          const a = coordinates[i - 1];
+          const b = coordinates[i];
+          figures.push({ type: "line", attrs: { coordinates: [a, b] }, styles: { color: b.y <= a.y ? up : down, size: lineSize } });
+        }
+        // Triângulo completo: linhas auxiliares (roxas, tracejadas) por A–C–E e B–D.
+        if (name === "elliottTriangle" && coordinates.length === 6) {
+          const [, A, B, , D, E] = coordinates;
+          const aux = { style: "dashed" as const, dashedValue: [4, 4], color: "#a78bfa", size: 1 };
+          figures.push({ type: "line", attrs: { coordinates: [A, E] }, styles: aux, ignoreEvent: true });
+          figures.push({ type: "line", attrs: { coordinates: [B, D] }, styles: aux, ignoreEvent: true });
+        }
+        const size = ex.labelSize ?? 13;
+        const custom = ex.labels ?? [];
+        for (let i = 1; i < coordinates.length; i++) {
+          const p = coordinates[i];
+          const prev = coordinates[i - 1];
+          const next = coordinates[i + 1];
+          // Topo (acima dos vizinhos) → rótulo em cima; fundo → embaixo; a pessoa pode fixar a posição.
+          const peak = p.y <= prev.y && (!next || p.y <= next.y) ? true : p.y >= prev.y && (!next || p.y >= next.y) ? false : p.y < prev.y;
+          const above = ex.labelPosition === "above" ? true : ex.labelPosition === "below" ? false : peak;
+          if (ex.showPoints !== false) {
+            figures.push({ type: "circle", attrs: { x: p.x, y: p.y, r: 4 }, styles: { style: "stroke_fill", color: "#0a0a0b", borderColor: "#ffffff", borderSize: 1.5 }, ignoreEvent: true });
+          }
+          if (ex.showLabels !== false) {
+            figures.push({
+              type: "text",
+              attrs: { x: p.x, y: above ? p.y - 8 : p.y + 8, text: custom[i - 1] || labels[i - 1], align: "center", baseline: above ? "bottom" : "top" },
+              styles: { color: "#ffffff", backgroundColor: "transparent", size, weight: "bold", paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0 },
+              ignoreEvent: true,
+            });
+          }
+        }
+        return figures;
+      },
+    });
+  }
+
   // ---------- VWAP ancorado: 1 clique escolhe a vela da âncora ----------
   const avwapMemo = new Map<string, { key: string; values: (number | null)[] }>();
   registerOverlay({
@@ -204,8 +315,9 @@ export function registerOverlaysAndAxes(): void {
       const i2 = findBarIndex(ts, Math.max(p1.timestamp, p2.timestamp));
       const ex = extra(overlay.extendData);
       const rows = ex.rows ?? 24;
+      // As velas trazem o volume comprador agressor (buyVolume) da Binance: segue junto.
       const vp = volumeProfile(
-        data.map((d) => ({ ...d, volume: d.volume ?? 0 })),
+        data.map((d) => ({ ...d, volume: d.volume ?? 0 })) as never,
         i1,
         i2,
         rows,
@@ -213,36 +325,57 @@ export function registerOverlaysAndAxes(): void {
       );
       if (!vp.bins.length) return [];
       const color = (overlay.styles?.line as { color?: string } | undefined)?.color ?? ACCENT;
+      const buyColor = ex.buyColor ?? PROFILE_BUY;
+      const sellColor = ex.sellColor ?? PROFILE_SELL;
       const x1 = Math.min(coordinates[0].x, coordinates[1].x);
       const x2 = Math.max(coordinates[0].x, coordinates[1].x);
       const span = Math.max(20, x2 - x1);
+      // Como na referência (DGT): âncora no fim da faixa, barras crescendo para a esquerda (compras junto
+      // à âncora, vendas em seguida) e o perfil de sentimento (compras − vendas) logo à direita.
+      const anchor = x1 + span;
+      const width = span * 0.7;
+      const sentiment = Math.max(12, span * 0.12);
       const max = Math.max(...vp.bins.map((b) => b.volume)) || 1;
+      const maxDelta = Math.max(...vp.bins.map((b) => Math.abs(b.buy - b.sell))) || 1;
       const figures: OverlayFigure[] = [
-        { type: "rect", attrs: { x: x1, y: 0, width: span, height: bounding.height }, styles: { style: "fill", color: `${color}0d` } },
+        { type: "rect", attrs: { x: x1, y: 0, width: span, height: bounding.height }, styles: { style: "fill", color: `${color.slice(0, 7)}0d` } },
       ];
+      const rect = (x: number, y: number, w: number, h: number, c: string) =>
+        figures.push({ type: "rect", attrs: { x, y, width: w, height: h }, styles: { style: "fill", color: c }, ignoreEvent: true });
       vp.bins.forEach((b, i) => {
         const yTop = yAxis.convertToPixel(b.to);
         const yBottom = yAxis.convertToPixel(b.from);
+        const top = Math.min(yTop, yBottom);
+        const h = Math.max(1, Math.abs(yBottom - yTop) - 1);
         const inValue = b.from >= vp.valueArea.low - 1e-12 && b.to <= vp.valueArea.high + 1e-12;
-        figures.push({
-          type: "rect",
-          attrs: { x: x1, y: Math.min(yTop, yBottom), width: (b.volume / max) * span * 0.7, height: Math.max(1, Math.abs(yBottom - yTop) - 1) },
-          styles: { style: "fill", color: i === vp.pocIndex ? "#f23645cc" : inValue ? `${color}88` : "#71717a55" },
-          ignoreEvent: true,
-        });
+        const a = i === vp.pocIndex ? 1 : inValue ? 0.8 : 0.35;
+        const wBuy = (b.buy / max) * width;
+        const wSell = (b.sell / max) * width;
+        rect(anchor - wBuy, top, wBuy, h, withAlpha(buyColor, a));
+        rect(anchor - wBuy - wSell, top, wSell, h, withAlpha(sellColor, a));
+        const d = b.buy - b.sell;
+        rect(anchor + 2, top, (Math.abs(d) / maxDelta) * sentiment, h, withAlpha(d >= 0 ? buyColor : sellColor, 0.85));
       });
+      const yHi = yAxis.convertToPixel(vp.bins[vp.bins.length - 1].to);
+      const yLo = yAxis.convertToPixel(vp.bins[0].from);
+      rect(anchor, Math.min(yHi, yLo), 1, Math.abs(yLo - yHi), "#a1a1aa66");
       const poc = vp.bins[vp.pocIndex];
       const line = (price: number, label: string, c: string) => {
         const y = yAxis.convertToPixel(price);
-        figures.push({ type: "line", attrs: { coordinates: [{ x: x1, y }, { x: x1 + span, y }] }, styles: { color: c, style: "dashed", dashedValue: [4, 3] }, ignoreEvent: true });
-        figures.push({ type: "text", attrs: { x: x1 + span + 4, y, text: `${label} ${fmt(price)}`, baseline: "middle" }, styles: { color: c, backgroundColor: "transparent", size: 11 }, ignoreEvent: true });
+        figures.push({ type: "line", attrs: { coordinates: [{ x: x1, y }, { x: anchor + sentiment + 2, y }] }, styles: { color: c, style: "dashed", dashedValue: [4, 3] }, ignoreEvent: true });
+        figures.push({ type: "text", attrs: { x: anchor + sentiment + 6, y, text: `${label} ${fmt(price)}`, baseline: "middle" }, styles: { color: c, backgroundColor: "transparent", size: 11 }, ignoreEvent: true });
       };
-      line((poc.from + poc.to) / 2, "POC", "#f23645");
-      line(vp.valueArea.high, "VAH", "#facc15");
-      line(vp.valueArea.low, "VAL", "#facc15");
+      line((poc.from + poc.to) / 2, "POC", "#facc15");
+      line(vp.valueArea.high, "VAH", "#60a5fa");
+      line(vp.valueArea.low, "VAL", "#60a5fa");
       figures.push({
         type: "text",
-        attrs: { x: x1 + 2, y: bounding.height - 6, text: "Perfil estimado (OHLCV)", baseline: "bottom" },
+        attrs: {
+          x: x1 + 2,
+          y: bounding.height - 6,
+          text: vp.sideEstimated ? "Perfil estimado (OHLCV): compra/venda estimada" : "Perfil estimado por preço (OHLCV) · compra/venda real por vela (Binance)",
+          baseline: "bottom",
+        },
         styles: { color: "#a1a1aa", backgroundColor: "transparent", size: 10 },
         ignoreEvent: true,
       });

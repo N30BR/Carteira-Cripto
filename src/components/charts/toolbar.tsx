@@ -19,6 +19,7 @@ import {
   MoveDiagonal,
   MoveUpRight,
   Rows3,
+  ChevronsRight,
   Ruler,
   SeparatorVertical,
   Slash,
@@ -41,7 +42,32 @@ import { MAX_BAR_INTERVALS, type ToolPrefs } from "@/lib/charts/workspace";
 import { cn } from "@/lib/utils";
 import { toolLabel } from "./object-ui";
 
+/** Ícone das ondas de Elliott (como a referência): zigue-zague com marcadores e as letras da 1ª e da última onda. */
+function elliottIcon(first: string, last: string): LucideIcon {
+  const Icon = ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M3 18 L8 12 L12 16 L16 10 L21 13" />
+      <circle cx="8" cy="12" r="1.6" />
+      <circle cx="12" cy="16" r="1.6" />
+      <circle cx="16" cy="10" r="1.6" />
+      <circle cx="21" cy="13" r="1.6" />
+      <text x="6.5" y="7" fontSize="6.5" fill="currentColor" stroke="none" fontWeight="600">
+        {first}
+      </text>
+      <text x="15.5" y="6" fontSize="6.5" fill="currentColor" stroke="none" fontWeight="600">
+        {last}
+      </text>
+    </svg>
+  );
+  return Icon as unknown as LucideIcon;
+}
+
 export const TOOL_ICON: Record<string, LucideIcon> = {
+  elliottImpulse: elliottIcon("1", "5"),
+  elliottCorrection: elliottIcon("A", "C"),
+  elliottTriangle: elliottIcon("A", "E"),
+  elliottDoubleCombo: elliottIcon("W", "Y"),
+  elliottTripleCombo: elliottIcon("W", "Z"),
   segment: Slash,
   rayLine: MoveUpRight,
   straightLine: MoveDiagonal,
@@ -55,6 +81,7 @@ export const TOOL_ICON: Record<string, LucideIcon> = {
   parallelChannel: Rows3,
   parallelStraightLine: Equal,
   priceChannelLine: Rows3,
+  parallelRays: ChevronsRight,
   fibonacciLine: AlignJustify,
   rectangle: Square,
   measure: Ruler,
@@ -85,8 +112,13 @@ export const TOOL_GROUPS: { id: string; label: string; sections: { title: string
           "priceLine",
         ],
       },
-      { title: "Canais", tools: ["parallelChannel", "parallelStraightLine", "priceChannelLine"] },
+      { title: "Canais", tools: ["parallelChannel", "parallelStraightLine", "priceChannelLine", "parallelRays"] },
     ],
+  },
+  {
+    id: "elliott",
+    label: "Ondas de Elliott",
+    sections: [{ title: "Ondas de Elliott", tools: ["elliottImpulse", "elliottCorrection", "elliottTriangle", "elliottDoubleCombo", "elliottTripleCombo"] }],
   },
   { id: "fib", label: "Fibonacci", sections: [{ title: "Fibonacci", tools: ["fibonacciLine"] }] },
   { id: "shapes", label: "Formas", sections: [{ title: "Formas", tools: ["rectangle"] }] },
