@@ -144,23 +144,32 @@ export function ChartWorkspace({
   const [hideDrawings, setHideDrawings] = useState(false);
   const [hideIndicators, setHideIndicators] = useState(false);
   const [dialog, setDialog] = useState<null | "symbol" | "indicators" | "tools" | "compare">(null);
-  const [error, setError] = useState<string | null>(null);
+  // Avisos por janela (o aviso de uma janela não apaga o de outra).
+  const [errors, setErrors] = useState<Record<number, string | null>>({});
+  const error = Object.values(errors).filter(Boolean).join(" · ") || null;
   const handles = useRef<(PaneHandle | null)[]>([]);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Um salvamento pendente por aba: editar outra aba não cancela o da primeira.
+  const pending = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; state: TabState }>());
 
   const tab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const paneIndex = Math.min(activePane, tab.state.panes.length - 1);
   const pane = tab.state.panes[paneIndex];
 
+  function flushSave(id: number) {
+    const job = pending.current.get(id);
+    if (!job) return;
+    clearTimeout(job.timer);
+    pending.current.delete(id);
+    void safeAction(() => saveChartTabAction(id, job.state)).then((r) => {
+      if (!r.ok) toast.error(r.error);
+    });
+  }
   // Salva a aba na conta ~1 s depois da última mudança.
   function updateTab(next: TabState) {
     setTabs((list) => list.map((t) => (t.id === tab.id ? { ...t, state: next } : t)));
-    clearTimeout(saveTimer.current);
     const id = tab.id;
-    saveTimer.current = setTimeout(async () => {
-      const r = await safeAction(() => saveChartTabAction(id, next));
-      if (!r.ok) toast.error(r.error);
-    }, 1000);
+    clearTimeout(pending.current.get(id)?.timer);
+    pending.current.set(id, { state: next, timer: setTimeout(() => flushSave(id), 1000) });
   }
   const updatePane = (patch: Partial<PaneState>, index = paneIndex) =>
     updateTab({ ...tab.state, panes: tab.state.panes.map((p, i) => (i === index ? { ...p, ...patch } : p)) });
@@ -168,7 +177,24 @@ export function ChartWorkspace({
   function savePrefs(nextTools: ToolPrefs, nextActive: number) {
     void safeAction(() => saveChartPrefsAction(nextTools, nextActive));
   }
-  useEffect(() => () => clearTimeout(saveTimer.current), []);
+  // Ao sair da página (ou esconder a aba do navegador), salva o que estiver pendente em vez de descartar.
+  const flushAll = useRef(() => {});
+  useEffect(() => {
+    flushAll.current = () => {
+      for (const id of [...pending.current.keys()]) flushSave(id);
+    };
+  });
+  useEffect(() => {
+    const onHide = () => document.visibilityState === "hidden" && flushAll.current();
+    const onLeave = () => flushAll.current();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onLeave);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onLeave);
+      flushAll.current();
+    };
+  }, []);
 
   function selectTab(id: number) {
     setActiveId(id);
@@ -359,7 +385,7 @@ export function ChartWorkspace({
               active={i === paneIndex}
               onActivate={() => setActivePane(i)}
               onOverlays={(overlays: OverlayState[]) => updatePane({ overlays }, i)}
-              onError={setError}
+              onError={(message) => setErrors((all) => (all[i] === message ? all : { ...all, [i]: message }))}
               handleRef={(h) => (handles.current[i] = h)}
             />
           ))}
@@ -459,7 +485,7 @@ function IndicatorsDialog({ open, onClose, pane, onChange }: { open: boolean; on
             </p>
             <ul className="flex max-h-80 flex-col gap-1.5 overflow-auto" aria-label="Indicadores no gráfico">
               {pane.indicators.map((ind, idx) => (
-                <li key={idx} className="flex items-center gap-2 text-sm">
+                <li key={`${idx}-${ind.name}-${ind.params.join(",")}`} className="flex items-center gap-2 text-sm">
                   <span className="min-w-0 flex-1 truncate">{CHART_INDICATORS.find((c) => c.name === ind.name)?.label ?? ind.name}</span>
                   <Input
                     aria-label={`Parâmetros de ${ind.name}`}
@@ -469,8 +495,9 @@ function IndicatorsDialog({ open, onClose, pane, onChange }: { open: boolean; on
                       const params = e.target.value
                         .split(",")
                         .map((s) => Number(s.trim()))
-                        .filter((n) => Number.isFinite(n) && Math.abs(n) <= 10_000)
+                        .filter((n) => Number.isFinite(n) && n > 0 && n <= 10_000)
                         .slice(0, LIMITS.paramsPerIndicator);
+                      if (params.join(",") === ind.params.join(",")) return;
                       onChange(pane.indicators.map((x, j) => (j === idx ? { ...x, params } : x)));
                     }}
                   />

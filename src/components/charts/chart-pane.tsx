@@ -142,7 +142,8 @@ export function ChartPane({
     });
     cb.current.onOverlays(list);
   };
-  const overlayEvents = { onDrawEnd: emitOverlays, onPressedMoveEnd: emitOverlays, onRemoved: emitOverlays };
+  // onRemoved chega antes de a biblioteca tirar o desenho da lista: espera ela terminar.
+  const overlayEvents = { onDrawEnd: emitOverlays, onPressedMoveEnd: emitOverlays, onRemoved: () => void setTimeout(emitOverlays, 0) };
 
   // Ações da barra lateral.
   useEffect(() => {
@@ -177,45 +178,69 @@ export function ChartPane({
   }, []);
 
   // Par e tempo: carrega as velas (e mais ao rolar para trás) e atualiza a última a cada 15 s.
+  // Cada troca de par/tempo é uma "geração": respostas de gerações antigas são descartadas,
+  // para uma carga lenta do par anterior nunca sobrescrever o gráfico atual.
+  const generation = useRef(0);
   useEffect(() => {
     const c = chart.current;
     if (!c) return;
+    const gen = ++generation.current;
+    const current = () => generation.current === gen && chart.current === c;
+    const { symbol, interval } = pane;
     let poll: ReturnType<typeof setInterval> | undefined;
-    const quote = splitSymbol(pane.symbol)?.quote;
-    c.setSymbol({ ticker: pane.symbol, pricePrecision: quote === "USDT" ? 2 : 8, volumePrecision: 2 });
-    c.setPeriod(PERIOD[pane.interval]);
-    c.setDataLoader({
-      getBars: async ({ type, timestamp, callback }) => {
-        try {
+    const fallback = splitSymbol(symbol)?.quote === "USDT" ? 2 : 8;
+
+    void (async () => {
+      // Busca primeiro (para já saber as casas decimais) e só então troca o par no gráfico.
+      let first: KLineData[] | null = null;
+      try {
+        first = await loadCandles(symbol, interval, null);
+        if (current()) cb.current.onError(null);
+      } catch (e) {
+        if (current()) cb.current.onError(e instanceof Error ? e.message : "Preços indisponíveis");
+      }
+      if (!current()) return;
+      const precision = first?.length ? precisionFor(first[first.length - 1].close) : fallback;
+      c.setSymbol({ ticker: symbol, pricePrecision: precision, volumePrecision: 2 });
+      c.setPeriod(PERIOD[interval]);
+      c.setDataLoader({
+        getBars: async ({ type, timestamp, callback }) => {
+          if (!current()) return; // carga de uma configuração antiga: ignora
           if (type === "backward") return callback([], false);
-          const end = type === "forward" && timestamp ? timestamp - 1 : null;
-          const data = await loadCandles(pane.symbol, pane.interval, end);
-          if (type === "init" && data.length) {
-            const precision = precisionFor(data[data.length - 1].close);
-            if (precision !== (quote === "USDT" ? 2 : 8)) c.setSymbol({ ticker: pane.symbol, pricePrecision: precision, volumePrecision: 2 });
+          if (type === "init" && first) {
+            const data = first;
+            first = null;
+            return callback(data, { forward: data.length === LIMIT, backward: false });
           }
-          cb.current.onError(null);
-          callback(data, { forward: data.length === LIMIT, backward: false });
-        } catch (e) {
-          cb.current.onError(e instanceof Error ? e.message : "Preços indisponíveis");
-          callback([], false);
-        }
-      },
-      subscribeBar: ({ callback }) => {
-        clearInterval(poll);
-        poll = setInterval(async () => {
           try {
-            const res = await fetch(`/api/candles?${new URLSearchParams({ symbol: pane.symbol, interval: pane.interval, limit: "2" })}`);
-            if (!res.ok) return;
-            const data = (await res.json()) as KLineData[];
-            const last = data[data.length - 1];
-            if (last) callback(last);
-          } catch {}
-        }, POLL_MS);
-      },
-      unsubscribeBar: () => clearInterval(poll),
-    });
+            const end = type === "forward" && timestamp ? timestamp - 1 : null;
+            const data = await loadCandles(symbol, interval, end);
+            if (!current()) return;
+            callback(data, { forward: data.length === LIMIT, backward: false });
+          } catch (e) {
+            if (!current()) return;
+            cb.current.onError(e instanceof Error ? e.message : "Preços indisponíveis");
+            callback([], false);
+          }
+        },
+        subscribeBar: ({ callback }) => {
+          clearInterval(poll);
+          poll = setInterval(async () => {
+            try {
+              const res = await fetch(`/api/candles?${new URLSearchParams({ symbol, interval, limit: "2" })}`);
+              if (!res.ok || !current()) return;
+              const data = (await res.json()) as KLineData[];
+              // As duas últimas: fecha a vela anterior com os valores finais e atualiza a atual.
+              const last = c.getDataList().at(-1)?.timestamp ?? 0;
+              for (const bar of data) if (bar.timestamp >= last) callback(bar);
+            } catch {}
+          }, POLL_MS);
+        },
+        unsubscribeBar: () => clearInterval(poll),
+      });
+    })();
     return () => clearInterval(poll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.symbol, pane.interval]);
 
   // Tipo de gráfico e escala.

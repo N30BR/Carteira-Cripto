@@ -241,6 +241,7 @@ export function registerChartExtensions(): void {
     calc: (data) => deltaSeries(data as never).cvd.map((cvd) => ({ cvd })),
   });
 
+  const liqMemo = new Map<string, { key: string; oi: unknown; levels: ReturnType<typeof liquidationLevels>; max: number }>();
   // Heatmap de liquidações ESTIMADO (open interest da Binance Futures + faixas de alavancagem).
   registerIndicator<Row, number, { oi: [number, number][]; note?: string }>({
     name: "LIQ_HEATMAP",
@@ -252,8 +253,15 @@ export function registerChartExtensions(): void {
       const data = chart.getDataList();
       const oi = indicator.extendData?.oi ?? [];
       if (!oi.length || !data.length) return false;
-      const levels = liquidationLevels(bars(data), oi);
-      const max = Math.max(...levels.map((l) => l.notional)) || 1;
+      // Recalcula só quando as velas ou o open interest mudam (não a cada movimento do mouse).
+      const memoKey = `${data.length}:${data[0].timestamp}:${data[data.length - 1].timestamp}:${data[data.length - 1].close}`;
+      let memo = liqMemo.get(indicator.id);
+      if (!memo || memo.key !== memoKey || memo.oi !== oi) {
+        const levels = liquidationLevels(bars(data), oi);
+        memo = { key: memoKey, oi, levels, max: levels.reduce((m, l) => Math.max(m, l.notional), 0) || 1 };
+        liqMemo.set(indicator.id, memo);
+      }
+      const { levels, max } = memo;
       const range = chart.getVisibleRange();
       ctx.save();
       for (const l of levels) {

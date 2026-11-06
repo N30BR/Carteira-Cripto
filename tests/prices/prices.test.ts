@@ -190,3 +190,31 @@ describe("getHistory", () => {
     expect(r.history.USDT[0][0]).toBeLessThanOrEqual(now.getTime() - 30 * 86_400_000);
   });
 });
+
+describe("revisão: gráficos não atrapalham o dashboard", () => {
+  test("velas dos gráficos lentas não seguram os preços do dashboard", async () => {
+    const { fetchCandles } = await import("@/lib/prices/binance");
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    stubFetch(async (url) => {
+      if (url.pathname === "/api/v3/klines") {
+        await gate;
+        return json([]);
+      }
+      return json([ticker("BTCUSDT", "100", "1")]);
+    });
+    const charts = Array.from({ length: 6 }, () => fetchCandles("BTCUSDT", "1h", 10, null));
+    const prices = await Promise.race([getCurrentPrices(testDb(), ["BTC"]), new Promise((r) => setTimeout(() => r("travado"), 500))]);
+    expect(prices).not.toBe("travado");
+    release();
+    await Promise.all(charts);
+  });
+
+  test("falha nas velas dos gráficos não pausa os preços do dashboard", async () => {
+    const { fetchCandles } = await import("@/lib/prices/binance");
+    const fn = stubFetch((url) => (url.pathname === "/api/v3/klines" ? json({}, 500) : json([ticker("BTCUSDT", "100", "1")])));
+    await expect(fetchCandles("BTCUSDT", "1h", 10, null)).rejects.toThrow();
+    await getCurrentPrices(testDb(), ["BTC"]);
+    expect(calls(fn, "/api/v3/ticker/24hr")).toHaveLength(1);
+  });
+});

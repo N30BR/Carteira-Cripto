@@ -9,40 +9,57 @@ const PAUSE_AFTER_FAILURE_MS = 60_000;
 
 export const QUOTE = "USDT";
 
-let active = 0;
-const waiting: (() => void)[] = [];
-// Depois de uma falha, não chama a API por um tempo: evita travar o dashboard
-// repetindo requisições que vão falhar de novo.
-let pausedUntil = 0;
-
-export function resetBinanceState(): void {
+/**
+ * Fila com vagas limitadas. Depois de uma falha, a fila não chama a API por um tempo:
+ * evita travar quem espera repetindo requisições que vão falhar de novo.
+ */
+class Lane {
+  active = 0;
+  waiting: (() => void)[] = [];
   pausedUntil = 0;
+  constructor(readonly max: number) {}
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    // Quem sai passa a vaga direto para o próximo da fila, sem abrir brecha para um terceiro.
+    if (this.active >= this.max) await new Promise<void>((resolve) => this.waiting.push(resolve));
+    else this.active++;
+    try {
+      return await fn();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active--;
+    }
+  }
 }
 
-async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
-  // Quem sai passa a vaga direto para o próximo da fila, sem abrir brecha para um terceiro.
-  if (active >= MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
-  else active++;
-  try {
-    return await fn();
-  } finally {
-    const next = waiting.shift();
-    if (next) next();
-    else active--;
-  }
+// Dashboard (preços e históricos) e Gráficos têm filas próprias: o tráfego dos gráficos
+// (muitas janelas, rolagem, comparações) nunca segura nem pausa os preços do dashboard.
+const dashboard = new Lane(MAX_CONCURRENT);
+const charts = new Lane(3);
+const futuresLane = new Lane(1);
+
+export function resetBinanceState(): void {
+  dashboard.pausedUntil = 0;
+  charts.pausedUntil = 0;
+  futuresLane.pausedUntil = 0;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function get<T>(path: string, params: Record<string, string>, timeoutMs = TIMEOUT_MS, futures = false): Promise<T> {
+type Target = "dashboard" | "charts" | "futures";
+
+async function get<T>(path: string, params: Record<string, string>, timeoutMs = TIMEOUT_MS, target: Target = "dashboard"): Promise<T> {
+  const futures = target === "futures";
+  const lane = target === "charts" ? charts : futures ? futuresLane : dashboard;
   const base = futures
     ? process.env.BINANCE_FUTURES_BASE_URL || "https://fapi.binance.com"
     : process.env.BINANCE_BASE_URL || "https://data-api.binance.vision";
   const url = `${base}${path}?${new URLSearchParams(params)}`;
   const request = () => fetch(url, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
 
-  return withSlot(async () => {
-    if (Date.now() < pausedUntil) throw new Error("Binance em pausa depois de uma falha");
+  return lane.run(async () => {
+    if (Date.now() < lane.pausedUntil) throw new Error("Binance em pausa depois de uma falha");
     try {
       let res = await request();
       if (res.status === 429) {
@@ -53,8 +70,8 @@ async function get<T>(path: string, params: Record<string, string>, timeoutMs = 
       return (await res.json()) as T;
     } catch (e) {
       // Erro do pedido (ex.: símbolo inválido) não significa que a Binance está fora: não pausa.
-      // Falha da Futures (ex.: bloqueio regional) não pausa os preços do dashboard.
-      if (!futures && !(e instanceof BinanceError && e.isRequestError)) pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS;
+      // Bloqueio regional da Futures (451) também pausa a fila dela, que é só dela.
+      if (!(e instanceof BinanceError && e.isRequestError) || (futures && e.status === 451)) lane.pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS;
       throw e;
     }
   });
@@ -144,6 +161,7 @@ export async function fetchChartSymbols(): Promise<ChartSymbol[]> {
     "/api/v3/exchangeInfo",
     { permissions: "SPOT", symbolStatus: "TRADING" },
     LISTING_TIMEOUT_MS,
+    "charts",
   );
   if (!Array.isArray(body.symbols)) throw new Error("Binance: exchangeInfo sem símbolos");
   return body.symbols
@@ -159,7 +177,7 @@ export type Candle = { timestamp: number; open: number; high: number; low: numbe
 export async function fetchCandles(symbol: string, interval: string, limit: number, end: number | null): Promise<Candle[]> {
   const params: Record<string, string> = { symbol, interval, limit: String(limit) };
   if (end !== null) params.endTime = String(end);
-  const body = await get<unknown[][]>("/api/v3/klines", params);
+  const body = await get<unknown[][]>("/api/v3/klines", params, TIMEOUT_MS, "charts");
   if (!Array.isArray(body)) throw new Error(`Binance: sem velas para ${symbol}`);
   return body
     .map((k) => ({
@@ -183,7 +201,7 @@ export async function fetchOpenInterest(symbol: string, period: string): Promise
     "/futures/data/openInterestHist",
     { symbol, period, limit: "500" },
     TIMEOUT_MS,
-    true,
+    "futures",
   );
   if (!Array.isArray(body)) throw new Error(`Binance Futures: sem open interest para ${symbol}`);
   return body

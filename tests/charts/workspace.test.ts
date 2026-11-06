@@ -106,3 +106,13 @@ describe("comparações por gráfico", () => {
     expect(withCompares(Array.from({ length: 11 }, () => ({ kind: "pair", id: "ETHUSDT" }))).ok).toBe(false);
   });
 });
+
+describe("revisão: parâmetros de indicador", () => {
+  test("parâmetros precisam ser positivos (zero ou negativo quebrariam os cálculos)", () => {
+    const pane = (params: number[]) => sanitizeTabState({ layout: 1, panes: [{ ...defaultPane(), indicators: [{ name: "MA", params, pane: "main" }] }] }).ok;
+    expect(pane([5, 10])).toBe(true);
+    expect(pane([2.5])).toBe(true);
+    expect(pane([0])).toBe(false);
+    expect(pane([-5])).toBe(false);
+  });
+});

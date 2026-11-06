@@ -128,7 +128,7 @@ const SAFE_TEXT = /^[^\p{Cc}\p{Cf}]*$/u;
 
 function sanitizeIndicator(v: unknown): R<IndicatorState> {
   if (!isObj(v) || typeof v.name !== "string" || !INDICATOR_NAMES.has(v.name)) return fail("Indicador inválido");
-  if (!Array.isArray(v.params) || v.params.length > LIMITS.paramsPerIndicator || !v.params.every((p) => isNum(p) && Math.abs(p) <= 10_000)) {
+  if (!Array.isArray(v.params) || v.params.length > LIMITS.paramsPerIndicator || !v.params.every((p) => isNum(p) && p > 0 && p <= 10_000)) {
     return fail("Parâmetros do indicador inválidos");
   }
   if (v.pane !== "main" && v.pane !== "sub") return fail("Painel do indicador inválido");
