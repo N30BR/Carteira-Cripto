@@ -4,7 +4,7 @@
 // As regras (níveis do Fibonacci, faixa em log) ficam em lib/charts e são testadas sem navegador.
 import { registerOverlay, registerYAxis, type KLineData, type OverlayFigure } from "klinecharts";
 import { DEFAULT_FIB_LEVELS, fibPrice, findBarIndex } from "@/lib/charts/drawing";
-import { anchoredVwap, volumeProfile } from "@/lib/charts/indicators";
+import { anchoredVwap, volumeProfile, volumeProfileBand } from "@/lib/charts/indicators";
 import { fromLog, logRange, logTickValues, toLog, type AxisRange } from "@/lib/charts/log-axis";
 import { ELLIOTT_LABELS, type ExtendName, type FibLevel, type LabelPosition } from "@/lib/charts/workspace";
 
@@ -31,6 +31,11 @@ export type OverlayExtra = {
   showPoints?: boolean;
   labels?: string[];
   labelPosition?: LabelPosition;
+  /** Perfil de volume (faixa fixa): deslocamento da exibição, em velas (não muda a faixa analisada). */
+  shift?: number;
+  /** Perfil de volume por faixa de preço: janela de tempo do cálculo (ms), guardada na inserção. */
+  windowFrom?: number;
+  windowTo?: number;
 };
 const extra = (v: unknown): OverlayExtra => (typeof v === "object" && v !== null ? (v as OverlayExtra) : {});
 
@@ -180,6 +185,26 @@ export function registerOverlaysAndAxes(): void {
     },
   });
 
+  // ---------- Raio horizontal: 1 clique, sempre para a direita, na altura do preço clicado ----------
+  // (A versão da biblioteca pedia um 2º clique só para escolher o lado.) Desenhos antigos com 2 pontos
+  // continuam válidos: só o 1º ponto conta.
+  registerOverlay({
+    name: "horizontalRayLine",
+    totalStep: 2,
+    needDefaultPointFigure: true,
+    needDefaultXAxisFigure: true,
+    needDefaultYAxisFigure: true,
+    createPointFigures: ({ coordinates, bounding }) => {
+      const a = coordinates[0];
+      if (!a) return [];
+      return [{ type: "line", attrs: { coordinates: [a, { x: Math.max(bounding.width, a.x), y: a.y }] } }];
+    },
+    // Arrastar o ponto ou o raio mantém tudo na mesma altura (os pontos extras de desenhos antigos acompanham).
+    performEventPressedMove: ({ points, performPoint }) => {
+      for (const p of points) p.value = performPoint.value;
+    },
+  });
+
   // ---------- Raios paralelos: 1º clique = origem do 1º raio, 2º = direção, 3º = distância do 2º raio ----------
   // Diferente do canal paralelo (dois segmentos entre os cliques, com preenchimento) e das linhas paralelas
   // (infinitas nos dois sentidos): aqui os dois raios partem das origens e seguem num só sentido até a borda.
@@ -305,41 +330,57 @@ export function registerOverlaysAndAxes(): void {
     totalStep: 3,
     needDefaultPointFigure: true,
     needDefaultXAxisFigure: true,
-    createPointFigures: ({ chart, coordinates, overlay, yAxis, bounding }) => {
+    createPointFigures: ({ chart, coordinates, overlay, xAxis, yAxis, bounding }) => {
       if (coordinates.length < 2 || !yAxis) return [];
       const [p1, p2] = overlay.points;
       const data: KLineData[] = chart.getDataList();
       if (!data.length || typeof p1?.timestamp !== "number" || typeof p2?.timestamp !== "number") return [];
       const ts = data.map((d) => d.timestamp);
-      const i1 = findBarIndex(ts, Math.min(p1.timestamp, p2.timestamp));
-      const i2 = findBarIndex(ts, Math.max(p1.timestamp, p2.timestamp));
       const ex = extra(overlay.extendData);
       const rows = ex.rows ?? 24;
+      const bars = data.map((d) => ({ ...d, volume: d.volume ?? 0 })) as never;
+      // Modo faixa de preço (desenho novo): os dois pontos delimitam só os PREÇOS (o arraste horizontal não
+      // conta); o tempo é a janela guardada na inserção (velas visíveis naquele momento).
+      // Desenhos antigos (sem janela): o intervalo de tempo entre os dois pontos, como antes.
+      const band = typeof ex.windowFrom === "number" && typeof ex.windowTo === "number" && typeof p1.value === "number" && typeof p2.value === "number";
+      const i1 = findBarIndex(ts, band ? ex.windowFrom! : Math.min(p1.timestamp, p2.timestamp));
+      const i2 = findBarIndex(ts, band ? ex.windowTo! : Math.max(p1.timestamp, p2.timestamp));
       // As velas trazem o volume comprador agressor (buyVolume) da Binance: segue junto.
-      const vp = volumeProfile(
-        data.map((d) => ({ ...d, volume: d.volume ?? 0 })) as never,
-        i1,
-        i2,
-        rows,
-        (ex.valueArea ?? 70) / 100,
-      );
+      const vp = band
+        ? volumeProfileBand(bars, i1, i2, p1.value as number, p2.value as number, rows, (ex.valueArea ?? 70) / 100)
+        : volumeProfile(bars, i1, i2, rows, (ex.valueArea ?? 70) / 100);
       if (!vp.bins.length) return [];
       const color = (overlay.styles?.line as { color?: string } | undefined)?.color ?? ACCENT;
       const buyColor = ex.buyColor ?? PROFILE_BUY;
       const sellColor = ex.sellColor ?? PROFILE_SELL;
       const x1 = Math.min(coordinates[0].x, coordinates[1].x);
       const x2 = Math.max(coordinates[0].x, coordinates[1].x);
-      const span = Math.max(20, x2 - x1);
+      // Faixa de preço: largura própria (o arraste pode ter sido só vertical), com a âncora no ponto mais à direita.
+      const span = band ? Math.max(60, x2 - x1, bounding.width * 0.18) : Math.max(20, x2 - x1);
+      // Posição de exibição separada da faixa analisada: o histograma pode ser arrastado na horizontal
+      // (deslocamento em velas, ex.shift); os pontos e o cálculo continuam na faixa escolhida.
+      const dx = (ex.shift ?? 0) * chart.getBarSpace().bar;
+      // Faixa de preço: o histograma termina no ponto mais à direita; tempo: começa no 1º ponto (como antes).
+      const vx1 = (band ? x2 - span : x1) + dx;
       // Como na referência (DGT): âncora no fim da faixa, barras crescendo para a esquerda (compras junto
       // à âncora, vendas em seguida) e o perfil de sentimento (compras − vendas) logo à direita.
-      const anchor = x1 + span;
+      const anchor = vx1 + span;
       const width = span * 0.7;
       const sentiment = Math.max(12, span * 0.12);
       const max = Math.max(...vp.bins.map((b) => b.volume)) || 1;
       const maxDelta = Math.max(...vp.bins.map((b) => Math.abs(b.buy - b.sell))) || 1;
-      const figures: OverlayFigure[] = [
-        { type: "rect", attrs: { x: x1, y: 0, width: span, height: bounding.height }, styles: { style: "fill", color: `${color.slice(0, 7)}0d` } },
-      ];
+      const figures: OverlayFigure[] = [];
+      if (band && xAxis) {
+        // Faixa analisada: os preços entre os pontos, durante a janela de tempo usada no cálculo (fundo discreto).
+        const wx1 = xAxis.convertToPixel(i1);
+        const wx2 = xAxis.convertToPixel(i2);
+        const ya = yAxis.convertToPixel(p1.value as number);
+        const yb = yAxis.convertToPixel(p2.value as number);
+        figures.push({ type: "rect", attrs: { x: wx1, y: Math.min(ya, yb), width: Math.max(1, wx2 - wx1), height: Math.abs(yb - ya) }, styles: { style: "fill", color: `${color.slice(0, 7)}10` }, ignoreEvent: true });
+      } else {
+        // Faixa analisada (fundo discreto); não se arrasta por aqui.
+        figures.push({ type: "rect", attrs: { x: x1, y: 0, width: span, height: bounding.height }, styles: { style: "fill", color: `${color.slice(0, 7)}0d` }, ignoreEvent: true });
+      }
       const rect = (x: number, y: number, w: number, h: number, c: string) =>
         figures.push({ type: "rect", attrs: { x, y, width: w, height: h }, styles: { style: "fill", color: c }, ignoreEvent: true });
       vp.bins.forEach((b, i) => {
@@ -359,10 +400,17 @@ export function registerOverlaysAndAxes(): void {
       const yHi = yAxis.convertToPixel(vp.bins[vp.bins.length - 1].to);
       const yLo = yAxis.convertToPixel(vp.bins[0].from);
       rect(anchor, Math.min(yHi, yLo), 1, Math.abs(yLo - yHi), "#a1a1aa66");
+      // Área do histograma: clicar seleciona; arrastar desloca só na horizontal (ver onPressedMoving no gráfico).
+      figures.push({
+        key: "vp_body",
+        type: "rect",
+        attrs: { x: anchor - width, y: Math.min(yHi, yLo), width: width + sentiment + 2, height: Math.abs(yLo - yHi) },
+        styles: { style: "fill", color: "#00000001" },
+      });
       const poc = vp.bins[vp.pocIndex];
       const line = (price: number, label: string, c: string) => {
         const y = yAxis.convertToPixel(price);
-        figures.push({ type: "line", attrs: { coordinates: [{ x: x1, y }, { x: anchor + sentiment + 2, y }] }, styles: { color: c, style: "dashed", dashedValue: [4, 3] }, ignoreEvent: true });
+        figures.push({ type: "line", attrs: { coordinates: [{ x: Math.min(x1, vx1), y }, { x: anchor + sentiment + 2, y }] }, styles: { color: c, style: "dashed", dashedValue: [4, 3] }, ignoreEvent: true });
         figures.push({ type: "text", attrs: { x: anchor + sentiment + 6, y, text: `${label} ${fmt(price)}`, baseline: "middle" }, styles: { color: c, backgroundColor: "transparent", size: 11 }, ignoreEvent: true });
       };
       line((poc.from + poc.to) / 2, "POC", "#facc15");
@@ -371,7 +419,7 @@ export function registerOverlaysAndAxes(): void {
       figures.push({
         type: "text",
         attrs: {
-          x: x1 + 2,
+          x: vx1 + 2,
           y: bounding.height - 6,
           text: vp.sideEstimated ? "Perfil estimado (OHLCV): compra/venda estimada" : "Perfil estimado por preço (OHLCV) · compra/venda real por vela (Binance)",
           baseline: "bottom",

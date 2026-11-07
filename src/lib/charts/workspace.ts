@@ -38,6 +38,8 @@ export const CHART_INDICATORS: { name: string; label: string; pane: "main" | "su
   { name: "BBI", label: "BBI", pane: "main", params: [3, 6, 12, 24] },
   { name: "ICHIMOKU", label: "Ichimoku", pane: "main", params: [9, 26, 52] },
   { name: "VOLUME_PROFILE", label: "Volume Profile (faixa visível)", pane: "main", params: [24, 70] },
+  { name: "BMSB", label: "Bull Market Support Band (20W SMA / 21W EMA)", pane: "main", params: [20, 21] },
+  { name: "PI_CYCLE", label: "Pi Cycle Top (111 DMA / 2×350 DMA)", pane: "main", params: [111, 350] },
   { name: "AVP", label: "Preço médio (AVP)", pane: "main", params: [] },
   { name: "LIQ_HEATMAP", label: "Heatmap de liquidações (estimado)", pane: "main", params: [] },
   // Em painel próprio
@@ -168,6 +170,11 @@ export type OverlayStyleState = {
   showPoints?: boolean;
   labels?: string[];
   labelPosition?: LabelPosition;
+  /** Perfil de volume: deslocamento horizontal da exibição, em velas (não muda a faixa analisada). */
+  shiftBars?: number;
+  /** Perfil de volume por faixa de preço: janela de tempo do cálculo (ms), guardada na inserção. */
+  windowFrom?: number;
+  windowTo?: number;
 };
 export type OverlayState = {
   id?: string;
@@ -444,6 +451,17 @@ function sanitizeOverlayStyles(v: unknown): OverlayStyleState | null {
   if (v.labels !== undefined) {
     if (!Array.isArray(v.labels) || v.labels.length > 5 || !v.labels.every((t) => typeof t === "string" && LABEL_TEXT.test(t))) return null;
     out.labels = v.labels as string[];
+  }
+  if (v.shiftBars !== undefined) {
+    if (!Number.isInteger(v.shiftBars) || Math.abs(v.shiftBars as number) > 5000) return null;
+    out.shiftBars = v.shiftBars as number;
+  }
+  if (v.windowFrom !== undefined || v.windowTo !== undefined) {
+    const a = v.windowFrom;
+    const b = v.windowTo;
+    if (!isNum(a) || !isNum(b) || a > b || a < 0 || b > 4_102_444_800_000) return null;
+    out.windowFrom = a;
+    out.windowTo = b;
   }
   if (v.labelPosition !== undefined) {
     if (!oneOf(LABEL_POSITIONS, v.labelPosition)) return null;

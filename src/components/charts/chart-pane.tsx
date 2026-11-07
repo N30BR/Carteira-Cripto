@@ -13,6 +13,8 @@ import { compareDisplay, compareScale } from "@/lib/charts/compare";
 import type { Point } from "@/lib/charts/macro-math";
 import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
+import { findBarIndex } from "@/lib/charts/drawing";
+import { ema, sma } from "@/lib/charts/indicators";
 
 const PERIOD: Record<ChartInterval, Period> = {
   "1m": { type: "minute", span: 1 },
@@ -88,6 +90,7 @@ const ICON_PATHS: Record<string, string> = {
   settings: "M6 2.5 Q9.5 2.5 9.5 6 Q9.5 9.5 6 9.5 Q2.5 9.5 2.5 6 Q2.5 2.5 6 2.5 Z M6 0.5 L6 2.5 M6 9.5 L6 11.5 M0.5 6 L2.5 6 M9.5 6 L11.5 6 M2 2 L3.5 3.5 M8.5 8.5 L10 10 M2 10 L3.5 8.5 M8.5 3.5 L10 2",
   remove: "M1 3 L11 3 M4 3 L4 1 L8 1 L8 3 M2.5 3 L3.5 11 L8.5 11 L9.5 3",
   more: "M1.5 6 L2.5 6 M5.5 6 L6.5 6 M9.5 6 L10.5 6",
+  star: "M6 0.8 L7.5 4.2 L11.2 4.5 L8.4 6.9 L9.3 10.6 L6 8.6 L2.7 10.6 L3.6 6.9 L0.8 4.5 L4.5 4.2 Z",
 };
 const feature = (id: string, path: string) => ({
   id,
@@ -210,6 +213,9 @@ const overlayExtend = (o: OverlayState): unknown =>
         showPoints: o.styles?.showPoints,
         labels: o.styles?.labels,
         labelPosition: o.styles?.labelPosition,
+        shift: o.styles?.shiftBars,
+        windowFrom: o.styles?.windowFrom,
+        windowTo: o.styles?.windowTo,
       } satisfies OverlayExtra);
 
 /** Dados extras do indicador (tipos e fonte das médias, níveis, cores e modo do delta). */
@@ -277,6 +283,7 @@ export function ChartPane({
   onCompareAction,
   onLegendCollapse,
   onAutoScaleChange,
+  favoriteIndicators,
   onDrawingChange,
   handleRef,
   children,
@@ -287,6 +294,8 @@ export function ChartPane({
   onLegendCollapse: (collapsed: boolean) => void;
   /** Ajuste manual da escala de preço com o modo A ligado: o botão passa para N (como no TradingView). */
   onAutoScaleChange: (auto: boolean) => void;
+  /** Indicadores favoritos da conta (estrela na legenda de cada indicador). */
+  favoriteIndicators: string[];
   pane: PaneState;
   active: boolean;
   onActivate: () => void;
@@ -344,6 +353,14 @@ export function ChartPane({
   const pressAt = useRef<{ x: number; y: number } | null>(null);
   // Navegação: arraste na escala de tempo (desloca o gráfico) e arraste no preço (livre já no 1º gesto).
   const hoverOverlay = useRef(false);
+  const favorites = useRef(favoriteIndicators);
+  useEffect(() => {
+    favorites.current = favoriteIndicators;
+    // Redesenha as legendas (a estrela muda na hora).
+    chart.current?.resize();
+  }, [favoriteIndicators]);
+  // Arraste do histograma de um perfil de volume (id e deslocamento no começo).
+  const profileDrag = useRef<{ id: string; shift: number } | null>(null);
   const timeDrag = useRef<{ x: number; anchor: number } | null>(null);
   const priceDrag = useRef<{ y: number; wasAuto: boolean } | null>(null);
   const indicatorState = useRef(new Map<string, IndicatorState>());
@@ -449,7 +466,34 @@ export function ChartPane({
       if (overlay.id !== drawingId.current) cb.current.onSelect(overlay.id);
       return false;
     },
-    onPressedMoveEnd: () => {
+    // Perfil de volume: arrastar o histograma (não os pontos) só o desloca na horizontal. A biblioteca move os
+    // dois pontos junto; aqui eles voltam ao lugar (faixa de preço e tempo intactos) e o movimento vira deslocamento.
+    onPressedMoveStart: ({ overlay, figure }: { overlay: { id: string; name: string; extendData?: unknown }; figure?: { key?: string } }) => {
+      if (overlay.name === "fixedRangeVolumeProfile" && figure?.key === "vp_body") {
+        profileDrag.current = { id: overlay.id, shift: (overlay.extendData as OverlayExtra | undefined)?.shift ?? 0 };
+      }
+      return false;
+    },
+    onPressedMoving: (e: { overlay: { id: string; points: { timestamp?: number; value?: number; dataIndex?: number }[]; extendData?: unknown }; preventDefault?: () => void }) => {
+      const d = profileDrag.current;
+      const c = chart.current;
+      const prev = (e.overlay as unknown as { _prevPressedPoints?: { timestamp?: number; value?: number; dataIndex?: number }[] })._prevPressedPoints;
+      if (!d || d.id !== e.overlay.id || !c || !prev?.length) return false;
+      const ts = c.getDataList().map((k) => k.timestamp);
+      const at = (p: { timestamp?: number; dataIndex?: number }) => (typeof p.dataIndex === "number" ? p.dataIndex : typeof p.timestamp === "number" ? findBarIndex(ts, p.timestamp) : 0);
+      const moved = at(e.overlay.points[0]) - at(prev[0]);
+      e.overlay.points = prev.map((p) => ({ ...p }));
+      c.overrideOverlay({ id: d.id, extendData: { ...(e.overlay.extendData as object), shift: d.shift + moved } });
+      return false;
+    },
+    onPressedMoveEnd: ({ overlay }: { overlay: { id: string; extendData?: unknown } }) => {
+      const d = profileDrag.current;
+      profileDrag.current = null;
+      if (d && d.id === overlay.id) {
+        const cur = meta.current.get(d.id);
+        const shift = Math.round((overlay.extendData as OverlayExtra | undefined)?.shift ?? 0);
+        if (cur) meta.current.set(d.id, { ...cur, styles: { ...cur.styles, shiftBars: shift } });
+      }
       emitOverlays();
       return false;
     },
@@ -510,7 +554,17 @@ export function ChartPane({
           if (!text) return;
         }
         const id = newId("d");
-        meta.current.set(id, { id, name: tool, points: [], ...(text ? { text } : {}) });
+        // Perfil de volume: a faixa de preço vem dos 2 cliques; o tempo do cálculo é fixado agora (velas visíveis),
+        // para a distância horizontal entre os cliques não virar intervalo de tempo.
+        let profileWindow: { windowFrom: number; windowTo: number } | null = null;
+        if (tool === "fixedRangeVolumeProfile") {
+          const list = c.getDataList();
+          const r = c.getVisibleRange();
+          const a = list[Math.max(0, Math.min(list.length - 1, r.from))]?.timestamp;
+          const z = list[Math.max(0, Math.min(list.length - 1, r.to - 1))]?.timestamp;
+          if (typeof a === "number" && typeof z === "number" && a <= z) profileWindow = { windowFrom: a, windowTo: z };
+        }
+        meta.current.set(id, { id, name: tool, points: [], ...(text ? { text } : {}), ...(profileWindow ? { styles: profileWindow } : {}) });
         drawingId.current = id;
         // A ferramenta tem prioridade: o primeiro clique marca o ponto em vez de mover o gráfico.
         c.setScrollEnabled(false);
@@ -520,7 +574,7 @@ export function ChartPane({
           id,
           name: tool,
           mode: magnet.current,
-          extendData: TEXT_TOOLS.has(tool) ? text : {},
+          extendData: TEXT_TOOLS.has(tool) ? text : (profileWindow ?? {}),
           zLevel: z,
           // O perfil de volume usa os preços das velas: fica sempre no gráfico de preço.
           ...(PRICE_ONLY.has(tool) ? { paneId: "candle_pane" } : {}),
@@ -766,10 +820,12 @@ export function ChartPane({
     indicatorState.current.clear();
     pane.indicators.forEach((ind, index) => {
       const main = ind.pane === "main";
+      // Volume movido para o gráfico de preço: desenhado na faixa inferior, com escala própria.
+      const volMain = ind.name === "VOL" && main;
       const created = c.createIndicator(
         {
           ...(ind.id ? { id: ind.id } : {}),
-          name: ind.name,
+          name: volMain ? "VOL_MAIN" : ind.name,
           calcParams: ind.params,
           visible: ind.visible !== false,
           zLevel: index,
@@ -786,10 +842,13 @@ export function ChartPane({
             const row = data[crosshair.dataIndex ?? data.length - 1] ?? {};
             const lineColors = (indicator.styles?.lines ?? []).map((l) => l?.color);
             let lineIndex = -1;
+            const volBar = volMain ? chart.current?.getDataList()[crosshair.dataIndex ?? 0] : undefined;
             const legends =
               legend.values === false
                 ? []
-                : indicator.figures.flatMap((f) => {
+                : volMain
+                  ? [{ title: { text: "Volume: ", color: "#a1a1aa" }, value: { text: formatValue(volBar?.volume, 2, true), color: "#a1a1aa" } }]
+                  : indicator.figures.flatMap((f) => {
                     const isLine = (f.type ?? "line") === "line";
                     if (isLine) lineIndex++;
                     if (!f.title || ind.styles?.[f.key]?.visible === false) return [];
@@ -806,7 +865,7 @@ export function ChartPane({
             return {
               // Sem nome nem valores a biblioteca não desenha a linha (e os ícones sumiriam): fica um espaço.
               name: legend.name === false ? (legends.length ? "" : " ") : indicator.shortName,
-              calcParamsText: legend.params === false || !indicator.calcParams.length ? "" : `(${indicator.calcParams.join(",")})`,
+              calcParamsText: volMain || legend.params === false || !indicator.calcParams.length ? "" : `(${indicator.calcParams.join(",")})`,
               legends,
               features: hovering
                 ? [
@@ -814,6 +873,12 @@ export function ChartPane({
                     feature("settings", ICON_PATHS.settings),
                     feature("remove", ICON_PATHS.remove),
                     feature("more", ICON_PATHS.more),
+                    // Só o Volume: seta para levar ao gráfico de preço (↑) ou de volta ao painel próprio (↓).
+                    ...(ind.name === "VOL" ? [feature(main ? "volDown" : "volUp", main ? ARROW_PATHS.down : ARROW_PATHS.up)] : []),
+                    // Favorito (lista de indicadores favoritos da conta): estrela vazia cinza / cheia roxa.
+                    favorites.current.includes(ind.name)
+                      ? { ...feature("unfavorite", ICON_PATHS.star), content: { path: ICON_PATHS.star, style: "fill" as const, lineWidth: 1 }, color: "#8b7cf6", activeColor: "#a78bfa" }
+                      : feature("favorite", ICON_PATHS.star),
                   ]
                 : [],
             };
@@ -847,6 +912,25 @@ export function ChartPane({
         if (lines.length) c.overrideIndicator({ id: created, name: ind.name, styles: { lines } as never });
       }
       // Heatmap de liquidações: busca o open interest do perpétuo e entrega ao indicador.
+      // Bull Market Support Band (velas semanais) e Pi Cycle (velas diárias): calculados no tempo próprio do
+      // indicador, qualquer que seja o tempo do gráfico; cada valor vale a partir do fechamento da vela que o gerou.
+      if (ind.name === "BMSB" || ind.name === "PI_CYCLE") {
+        const weekly = ind.name === "BMSB";
+        const [pA, pB] = ind.params.length >= 2 ? ind.params : weekly ? [20, 21] : [111, 350];
+        loadCandles(pane.symbol, weekly ? "1w" : "1d", null, 1000)
+          .then((k) => {
+            const closes = k.map((b) => b.close);
+            const step = (weekly ? 7 : 1) * 86_400_000;
+            const a = sma(closes, Math.round(pA));
+            const b = weekly ? ema(closes, Math.round(pB)) : sma(closes, Math.round(pB)).map((v) => (v === null ? null : v * 2));
+            const series = k.map((bar, i) => ({ t: bar.timestamp + step, x: a[i], y: b[i] }));
+            const extendData = weekly
+              ? { weekly: series.map((s) => ({ t: s.t, sma: s.x, ema: s.y })) }
+              : { daily: series.map((s) => ({ t: s.t, fast: s.x, slow: s.y })) };
+            chart.current?.overrideIndicator({ id: created, name: ind.name, extendData });
+          })
+          .catch((e) => cb.current.onError(`${ind.name === "BMSB" ? "Bull Market Support Band" : "Pi Cycle"}: ${e instanceof Error ? e.message : "indisponível"}`));
+      }
       if (ind.name === "LIQ_HEATMAP") {
         fetch(`/api/open-interest?${new URLSearchParams({ symbol: pane.symbol, interval: pane.interval })}`)
           .then(async (res) => {
@@ -1031,10 +1115,10 @@ export function ChartPane({
       onPointerMoveCapture={(e) => {
         const d = timeDrag.current;
         if (!d) return;
-        // Para a direita expande, para a esquerda comprime (~2× a cada 115 px).
+        // Para a direita comprime (afasta), para a esquerda expande (aproxima): ~2× a cada 115 px.
         const dx = e.clientX - d.x;
         if (!dx) return;
-        chart.current?.zoomAtCoordinate(Math.exp(dx * 0.006), { x: d.anchor, y: 0 });
+        chart.current?.zoomAtCoordinate(Math.exp(-dx * 0.006), { x: d.anchor, y: 0 });
         d.x = e.clientX;
       }}
       onPointerUpCapture={(e) => {

@@ -14,8 +14,8 @@ export default async function NewsPage() {
   const prefs = parseNewsPrefs((await cookies()).get(NEWS_COOKIE)?.value);
   const now = new Date();
   const data = await getNewsData(getDb(), now);
-  // Só o que pode aparecer (de hoje até pouco mais de 1 mês): a lista fica pequena.
-  const min = now.getTime() - 2 * 86_400_000;
+  // Só o que pode aparecer (1 mês para trás e para a frente, com folga): a lista fica pequena.
+  const min = now.getTime() - 40 * 86_400_000;
   const max = now.getTime() + 40 * 86_400_000;
   return (
     <NewsView

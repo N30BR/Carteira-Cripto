@@ -11,6 +11,7 @@ const row = (o: Partial<InstallmentRow>): InstallmentRow => ({
   invoiceMonth: "2026-11",
   amountCents: 1000,
   paid: false,
+  settled: false,
   description: "x",
   nature: "PF",
   card: "PF",

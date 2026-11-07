@@ -8,6 +8,7 @@ import { listInstallments } from "@/lib/cards/store";
 import { openPurchases } from "@/lib/cards/summary";
 import { monthRange } from "@/lib/transactions/period";
 import { listTransactions } from "@/lib/transactions/store";
+import { listAccounts } from "@/lib/fiat/accounts";
 import { appTimeZone, todayIn } from "@/lib/validation";
 import { PageTitle } from "@/components/finance/ui";
 import { LaunchesView } from "./view";
@@ -44,6 +45,7 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/lancame
         categories={showInvoices ? listCategories(db, user.id) : []}
         accounts={showInvoices ? listCardAccounts(db, user.id) : []}
         transactions={showTransactions ? listTransactions(db, user.id, from, to) : []}
+        txAccounts={showTransactions ? listAccounts(db, user.id).map((a) => ({ id: a.id, name: a.name })) : []}
         open={Object.fromEntries(open.map((o) => [o.expenseId, { remainingCount: o.remainingCount, remainingCents: o.remainingCents }]))}
         overdue={open.reduce(
           (t, o) => ({ count: t.count + o.overdueCount, cents: t.cents + o.overdueCents }),

@@ -104,6 +104,8 @@ export const cardAccounts = sqliteTable(
     closingDay: integer("closing_day"),
     /** Dia de vencimento da fatura (1–31), no próprio mês da fatura; null = não informado. */
     dueDay: integer("due_day"),
+    /** Conta do R$ de onde saem as parcelas pagas (a mesma conta, compartilhada); null = ainda não ligada. */
+    fiatAccountId: integer("fiat_account_id").references(() => fiatAccounts.id, { onDelete: "set null" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [uniqueIndex("card_accounts_user_name").on(t.userId, t.name)],
@@ -155,6 +157,8 @@ export const cardInstallments = sqliteTable(
     invoiceMonth: text("invoice_month").notNull(),
     amountCents: integer("amount_cents").notNull(),
     paid: integer("paid", { mode: "boolean" }).notNull().default(false),
+    /** Quitada: obrigação encerrada sem mexer em saldo (exclusiva com "paga"). */
+    settled: integer("settled", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     uniqueIndex("card_installments_expense_number").on(t.expenseId, t.number),
@@ -285,10 +289,38 @@ export const transactions = sqliteTable(
     kind: text("kind").notNull(),
     description: text("description").notNull(),
     amountCents: integer("amount_cents").notNull(),
+    /** Conta do R$ de destino (entrada) ou origem (saída); null = sem conta (transações antigas). */
+    accountId: integer("account_id").references(() => fiatAccounts.id, { onDelete: "set null" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [index("transactions_user_date").on(t.userId, t.date)],
+);
+
+/**
+ * Movimentações das contas do R$ geradas pelo app (transação com conta, parcela paga). O saldo da conta é o
+ * último saldo informado + as movimentações feitas depois dele. Uma origem gera no máximo uma movimentação.
+ */
+export const accountMovements = sqliteTable(
+  "account_movements",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => fiatAccounts.id, { onDelete: "cascade" }),
+    /** AAAA-MM-DD */
+    date: text("date").notNull(),
+    /** Centavos com sinal: entrada positiva, saída negativa. */
+    amountCents: integer("amount_cents").notNull(),
+    /** Origem: "tx" (transação) ou "inst" (parcela paga), com o id dela. */
+    source: text("source").notNull(),
+    sourceId: integer("source_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("account_movements_source").on(t.source, t.sourceId), index("account_movements_account").on(t.accountId)],
 );
 
 /** Abas da aba Gráficos (até 10 por pessoa): layout e estado de cada divisão, em JSON validado. */

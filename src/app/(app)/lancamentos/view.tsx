@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { ArrowDown, ArrowLeftRight, ArrowUp, CalendarDays, CircleCheck, CreditCard, FilePlus2, FileText, Hourglass, Info, Layers, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, CalendarDays, ChevronDown, CircleCheck, CreditCard, FilePlus2, FileText, Hourglass, Info, Layers, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { categoryColor, tagStyle } from "@/components/cards/colors";
 import { IconBox, SectionTitle, StatCard, TotalChip, TotalsBar, accountColors, brl, dateBr } from "@/components/finance/ui";
-import { Pager, TransactionFormRow, TransactionsTable, emptyDraft } from "@/components/finance/transactions";
+import { Pager, TransactionFormRow, TransactionsTable, emptyDraft, type TxAccount } from "@/components/finance/transactions";
 import { MonthPicker } from "@/components/month-picker";
 import { Priv } from "@/components/priv";
 import type { CardAccount } from "@/lib/cards/accounts";
@@ -18,7 +18,8 @@ import { MAX_CARD_ACCOUNTS, type Side } from "@/lib/cards/account-limits";
 import type { Category } from "@/lib/cards/categories";
 import { monthLabel } from "@/lib/cards/months";
 import { dueDate, editAmount } from "@/lib/cards/due";
-import type { InstallmentRow } from "@/lib/cards/store";
+import type { InstallmentRow, MonthClosePreview } from "@/lib/cards/store";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { NO_CATEGORY, monthTotals } from "@/lib/cards/summary";
 import { safeAction, type ActionResult } from "@/lib/safe-action";
 import type { Transaction } from "@/lib/transactions/store";
@@ -31,6 +32,9 @@ import {
   renameCategoryAction,
   saveExpenseAction,
   toggleInstallmentAction,
+  settleInstallmentAction,
+  previewMonthCloseAction,
+  closeMonthAction,
   updateCardAccountAction,
   type ExpenseForm,
 } from "./actions";
@@ -94,9 +98,12 @@ export function LaunchesView({
   categories,
   accounts,
   transactions,
+  txAccounts,
   open,
   overdue,
 }: {
+  /** Contas do R$ (compartilhadas): de onde sai / para onde vai cada transação. */
+  txAccounts: TxAccount[];
   showInvoices: boolean;
   showTransactions: boolean;
   month: string;
@@ -126,7 +133,7 @@ export function LaunchesView({
     return rows.filter(
       (r) =>
         (category === "ALL" || (category === "NONE" ? r.categoryId === null : String(r.categoryId) === category)) &&
-        (status === "ALL" || (status === "paid") === r.paid) &&
+        (status === "ALL" || (status === "paid") === (r.paid || r.settled)) &&
         (!q || r.description.toLowerCase().includes(q)),
     );
   }, [rows, category, status, search]);
@@ -136,6 +143,12 @@ export function LaunchesView({
   function toggle(r: InstallmentRow) {
     start(async () => {
       const res = await safeAction(() => toggleInstallmentAction(r.installmentId, !r.paid));
+      if (!res.ok) toast.error(res.error);
+    });
+  }
+  function toggleSettled(r: InstallmentRow) {
+    start(async () => {
+      const res = await safeAction(() => settleInstallmentAction(r.installmentId, !r.settled));
       if (!res.ok) toast.error(res.error);
     });
   }
@@ -155,12 +168,12 @@ export function LaunchesView({
   const [txDialog, setTxDialog] = useState(false);
   // Como o formulário fixo de antes: o próximo cadastro começa com o mês/conta e a data/tipo do anterior.
   const [lastInvoice, setLastInvoice] = useState<{ refMonth: string; accountId: number } | null>(null);
-  const [lastTx, setLastTx] = useState<{ date: string; kind: "" | "in" | "out" } | null>(null);
+  const [lastTx, setLastTx] = useState<{ date: string; kind: "" | "in" | "out"; accountId: string } | null>(null);
   const [invoicePage, setInvoicePage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
   const page = Math.min(invoicePage, pageCount - 1);
   const pageRows = visible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const paidCount = rows.filter((r) => r.paid).length;
+  const paidCount = rows.filter((r) => r.paid || r.settled).length;
   const txIn = transactions.filter((t) => t.kind === "in").reduce((s, t) => s + t.amountCents, 0);
   const txOut = transactions.filter((t) => t.kind === "out").reduce((s, t) => s + t.amountCents, 0);
   const resetPage = () => setInvoicePage(0);
@@ -174,6 +187,7 @@ export function LaunchesView({
           <div className="flex items-center gap-3">
             <IconBox icon={CalendarDays} color="#8b7cf6" />
             <MonthPicker month={month} />
+            {showInvoices && <MonthCloseMenu month={month} />}
           </div>
           {showInvoices && <CategoriesDialog categories={categories} />}
           <p className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
@@ -362,16 +376,16 @@ export function LaunchesView({
                           </span>
                         </TableCell>
                         <TableCell className="text-center">
-                          <button
-                            type="button"
-                            disabled={pending}
-                            onClick={() => toggle(r)}
-                            title="Clique para alternar"
-                            className="rounded-full border px-2 py-0.5 text-xs font-medium"
-                            style={tagStyle(r.paid ? "#22C55E" : "#F59E0B")}
-                          >
-                            {r.paid ? "Pago" : "Pendente"}
-                          </button>
+                          <div className="flex flex-col items-start gap-0.5 text-xs">
+                            <label className="flex cursor-pointer items-center gap-1.5" title="Paga: desconta o valor da conta vinculada">
+                              <input type="checkbox" disabled={pending} checked={r.paid} onChange={() => toggle(r)} aria-label={`Paga: ${r.description}`} />
+                              <span className={r.paid ? "font-medium text-green-500" : "text-muted-foreground"}>Paga</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-1.5" title="Quitada: encerra a parcela sem alterar o saldo">
+                              <input type="checkbox" disabled={pending} checked={r.settled} onChange={() => toggleSettled(r)} aria-label={`Quitada: ${r.description}`} />
+                              <span className={r.settled ? "font-medium text-sky-400" : "text-muted-foreground"}>Quitada</span>
+                            </label>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-center gap-1">
@@ -440,7 +454,7 @@ export function LaunchesView({
                 <Priv>{brl(txIn - txOut)}</Priv>
               </StatCard>
             </div>
-            <TransactionsTable items={transactions} emptyText={`Nenhuma transação em ${monthLabel(month)}.`} pageSize={PAGE_SIZE} formLayout="modal" />
+            <TransactionsTable items={transactions} emptyText={`Nenhuma transação em ${monthLabel(month)}.`} pageSize={PAGE_SIZE} formLayout="modal" accounts={txAccounts} />
           </CardContent>
         </Card>
       )}
@@ -491,12 +505,13 @@ export function LaunchesView({
           </DialogHeader>
           {txDialog && (
             <TransactionFormRow
-              initial={lastTx ? { ...emptyDraft(lastTx.date), kind: lastTx.kind } : emptyDraft(txDefaultDate)}
+              initial={lastTx ? { ...emptyDraft(lastTx.date, lastTx.accountId), kind: lastTx.kind } : emptyDraft(txDefaultDate)}
               submitLabel="Salvar Transação"
               layout="modal"
+              accounts={txAccounts}
               onCancel={() => setTxDialog(false)}
               onDone={(saved) => {
-                setLastTx({ date: saved.date, kind: saved.kind });
+                setLastTx({ date: saved.date, kind: saved.kind, accountId: saved.accountId });
                 setTxDialog(false);
               }}
             />
@@ -670,5 +685,86 @@ function CategoriesDialog({ categories }: { categories: Category[] }) {
         </ul>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Fechamento mensal: marca todas as parcelas em aberto do mês como pagas (desconta cada uma da conta da fatura)
+ * ou quitadas (sem mexer em saldo), depois de uma confirmação com o resumo.
+ */
+function MonthCloseMenu({ month }: { month: string }) {
+  const [confirm, setConfirm] = useState<{ mode: "paid" | "settled"; preview: MonthClosePreview } | null>(null);
+  const [pending, start] = useTransition();
+  const ask = (mode: "paid" | "settled") =>
+    start(async () => {
+      const r = await safeAction(() => previewMonthCloseAction(month));
+      if (!r.ok) return void toast.error(r.error);
+      setConfirm({ mode, preview: r as MonthClosePreview });
+    });
+  const run = () =>
+    confirm &&
+    start(async () => {
+      const r = await safeAction(() => closeMonthAction(month, confirm.mode));
+      if (!r.ok) return void toast.error(r.error);
+      toast.success(`${"count" in r ? r.count : 0} parcela(s) de ${monthLabel(month)} marcada(s) como ${confirm.mode === "paid" ? "paga(s)" : "quitada(s)"}`);
+      setConfirm(null);
+    });
+  const p = confirm?.preview;
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline" disabled={pending}>
+            Fechamento mensal <ChevronDown />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem onSelect={() => ask("paid")}>Marcar mês como pago</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => ask("settled")}>Marcar mês como quitado</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog open={!!confirm} onOpenChange={(v) => !v && setConfirm(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{confirm?.mode === "paid" ? "Marcar mês como pago" : "Marcar mês como quitado"}</DialogTitle>
+          </DialogHeader>
+          {p && (
+            <div className="flex flex-col gap-2 text-sm">
+              <p>
+                Mês: <strong>{monthLabel(p.month)}</strong>
+              </p>
+              <p>
+                Parcelas em aberto afetadas: <strong>{p.count}</strong> · Total: <strong className="priv">{brl(p.totalCents)}</strong>
+              </p>
+              {p.count === 0 && <p className="text-muted-foreground">Nenhuma parcela em aberto neste mês.</p>}
+              {confirm?.mode === "paid" ? (
+                <>
+                  <p className="text-amber-400">Os valores serão descontados dos saldos das contas abaixo.</p>
+                  <ul className="list-inside list-disc text-muted-foreground">
+                    {p.accounts.map((a) => (
+                      <li key={a.name}>
+                        {a.name}: <span className="priv">− {brl(a.cents)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {p.withoutAccount > 0 && <p className="text-xs text-muted-foreground">{p.withoutAccount} parcela(s) sem conta: marcadas como pagas sem desconto.</p>}
+                </>
+              ) : (
+                <p className="text-muted-foreground">Nenhum saldo será alterado (quitar encerra as parcelas sem movimentação).</p>
+              )}
+              <p className="text-xs text-muted-foreground">Parcelas já pagas ou quitadas e os outros meses não mudam.</p>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button variant="outline" onClick={() => setConfirm(null)}>
+              Cancelar
+            </Button>
+            <Button disabled={pending || !p?.count} onClick={run}>
+              Confirmar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

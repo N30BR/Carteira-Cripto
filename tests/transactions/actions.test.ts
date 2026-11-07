@@ -3,6 +3,7 @@ import { testDb } from "../helpers/db";
 import { users } from "@/db/schema";
 import { listTransactions } from "@/lib/transactions/store";
 import { resetFiatLimits } from "@/lib/fiat/limit";
+import { createAccountNoBalance } from "@/lib/fiat/accounts";
 
 const state = vi.hoisted(() => ({ db: null as unknown, userId: 0 }));
 vi.mock("@/db/client", async (orig) => ({ ...(await orig<typeof import("@/db/client")>()), getDb: () => state.db }));
@@ -13,12 +14,14 @@ import { deleteTransactionAction, saveTransactionAction, type TransactionForm } 
 
 type Db = Parameters<typeof listTransactions>[0];
 let other = 0;
+let acc = 0;
 const mine = () => listTransactions(state.db as Db, state.userId, "2000-01-01", "2099-12-31");
 const form = (o: Partial<TransactionForm> = {}): TransactionForm => ({
   date: "2025-05-10",
   kind: "in",
   description: "Recebimento de serviço",
   amount: "2.500,00",
+  accountId: acc,
   ...o,
 });
 
@@ -30,6 +33,7 @@ beforeEach(() => {
     db.insert(users).values({ username, passwordHash: "x", isAdmin: false, createdAt: new Date() }).returning().all()[0].id;
   state.userId = mk("ana");
   other = mk("bia");
+  acc = createAccountNoBalance(db, state.userId, "Conta").id!;
 });
 
 describe("ações de transações", () => {

@@ -260,7 +260,66 @@ export function volumeProfile(bars: (Bar & { buyVolume?: number })[], fromIndex:
   return { bins, pocIndex, valueArea: { low: bins[low].from, high: bins[high].to }, sideEstimated };
 }
 
-export type Divergence = { kind: "bull" | "bear"; from: number; to: number };
+/**
+ * Volume Profile de uma FAIXA DE PREÇO escolhida (lo–hi), com as velas `fromIndex..toIndex`. Só entra a parte do
+ * volume de cada vela que cai dentro da faixa (repartido por igual entre a mínima e a máxima da vela);
+ * compra/venda como em `volumeProfile`.
+ */
+export function volumeProfileBand(
+  bars: (Bar & { buyVolume?: number })[],
+  fromIndex: number,
+  toIndex: number,
+  lo: number,
+  hi: number,
+  rows: number,
+  valueAreaShare = 0.7,
+): VolumeProfile {
+  const empty = { bins: [], pocIndex: -1, valueArea: { low: 0, high: 0 }, sideEstimated: false };
+  const bottom = Math.min(lo, hi);
+  const top = Math.max(lo, hi);
+  const slice = bars.slice(Math.max(0, fromIndex), Math.min(bars.length - 1, toIndex) + 1);
+  if (!slice.length || rows < 1 || !(top > bottom)) return empty;
+  const step = (top - bottom) / rows;
+  const bins: ProfileBin[] = Array.from({ length: rows }, (_, i) => ({ from: bottom + i * step, to: bottom + (i + 1) * step, volume: 0, buy: 0, sell: 0 }));
+  let sideEstimated = false;
+  for (const b of slice) {
+    const vol = b.volume ?? 0;
+    if (!(vol > 0) || b.high < bottom || b.low > top) continue;
+    let buy: number;
+    if (typeof b.buyVolume === "number" && b.buyVolume >= 0 && b.buyVolume <= vol) buy = b.buyVolume;
+    else {
+      sideEstimated = true;
+      buy = vol * (b.high > b.low ? (b.close - b.low) / (b.high - b.low) : 0.5);
+    }
+    const range = b.high - b.low;
+    for (const bin of bins) {
+      // Fração da vela dentro desta linha de preço (vela sem amplitude: tudo na linha que a contém).
+      const share = range > 0 ? Math.max(0, Math.min(b.high, bin.to) - Math.max(b.low, bin.from)) / range : b.low >= bin.from && b.low < bin.to ? 1 : 0;
+      if (!share) continue;
+      bin.volume += vol * share;
+      bin.buy += buy * share;
+      bin.sell += (vol - buy) * share;
+    }
+  }
+  const total = bins.reduce((s, x) => s + x.volume, 0);
+  if (!(total > 0)) return { ...empty, bins, pocIndex: 0, valueArea: { low: bottom, high: top } };
+  let pocIndex = 0;
+  bins.forEach((x, i) => {
+    if (x.volume > bins[pocIndex].volume) pocIndex = i;
+  });
+  let low = pocIndex;
+  let high = pocIndex;
+  let acc = bins[pocIndex].volume;
+  while (acc < total * valueAreaShare && (low > 0 || high < rows - 1)) {
+    const below = low > 0 ? bins[low - 1].volume : -1;
+    const above = high < rows - 1 ? bins[high + 1].volume : -1;
+    if (above >= below) acc += bins[++high].volume;
+    else acc += bins[--low].volume;
+  }
+  return { bins, pocIndex, valueArea: { low: bins[low].from, high: bins[high].to }, sideEstimated };
+}
+
+export type Divergence ={ kind: "bull" | "bear"; from: number; to: number };
 
 /**
  * Divergências entre preço e RSI em pivôs (topos/fundos com `lookback` velas de cada lado):

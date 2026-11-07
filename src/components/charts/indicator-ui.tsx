@@ -45,6 +45,8 @@ const PARAM_LABELS: Record<string, string[]> = {
   BBI: ["Média 1", "Média 2", "Média 3", "Média 4"],
   ICHIMOKU: ["Tenkan", "Kijun", "Senkou B"],
   VOLUME_PROFILE: ["Linhas de preço", "Área de valor (%)"],
+  BMSB: ["SMA (semanas)", "EMA (semanas)"],
+  PI_CYCLE: ["Média rápida (dias)", "Média lenta (dias, ×2)"],
   VOL: ["Média 1 do volume", "Média 2 do volume", "Média 3 do volume"],
   MACD: ["Rápida", "Lenta", "Sinal"],
   RSI: ["RSI 1 — período", "RSI 2 — período", "RSI 3 — período"],

@@ -145,8 +145,10 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.keyboard.press("Escape");
   await expect(cadeira).toContainText("Cartão PJ");
   await expect(page.getByTestId("month-total")).toHaveText("Total: R$ 400,00");
-  await cadeira.getByRole("button", { name: "Pendente" }).click();
-  await expect(page.getByRole("row", { name: /Cadeira/ }).getByRole("button", { name: "Pago" })).toBeVisible();
+  // "Paga" desconta a parcela da conta do cartão no R$ (Cartão PJ, criada lá com o mesmo nome)
+  await cadeira.getByLabel(/^Paga:/).click();
+  await expect(page.getByRole("row", { name: /Cadeira/ }).getByLabel(/^Paga:/)).toBeChecked();
+  await expect(page.getByRole("row", { name: /Cadeira/ }).getByLabel(/^Quitada:/)).not.toBeChecked();
   // Até a última parcela: paga a 1ª de 3, faltam 2 (R$ 800,00)
   await expect(page.getByRole("row", { name: /Cadeira/ })).toContainText("faltam 2 • R$ 800,00");
 
@@ -169,10 +171,11 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByRole("button", { name: "Cancelar" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  // Lançamento de Transações: uma entrada e uma saída
+  // Lançamento de Transações: uma entrada e uma saída, na conta "Conta PF" do R$ (o saldo dela muda)
   const tx = async (kind: "in" | "out", description: string, amount: string) => {
     await page.getByRole("button", { name: "Nova Transação" }).click();
     await page.selectOption("#tx-kind", kind);
+    await page.selectOption("#tx-account", { label: "Conta PF" });
     await page.locator("#tx-desc").fill(description);
     await page.locator("#tx-amount").fill(amount);
     await page.getByRole("button", { name: "Salvar Transação" }).click();
@@ -216,12 +219,14 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page).toHaveURL(/periodo=3M/);
   await expect(page.getByTestId("tx-balance")).toHaveText("+ US$ 344,00");
 
-  // Resumo: saldo cripto 150.000 + reais 5.000 (neutros) + entradas 2.500 − fatura 400 (vence dia 10 deste mês) − saídas 780
+  // Resumo: saldo cripto 150.000 + reais 6.720 (5.000 + entrada 2.500 − saída 780, já na conta; neutros) − fatura 400
+  // (vence dia 10 deste mês). As transações com conta não entram de novo em Entradas/Saídas (sem contar duas vezes).
   await page.getByRole("link", { name: "Resumo" }).click();
-  await expect(page.getByTestId("sum-fiat").first()).toHaveText("R$ 5.000,00");
+  // Saldo R$: 6.720 − a parcela paga da cadeira (400, descontada do Cartão PJ). Ela não entra de novo em Faturas.
+  await expect(page.getByTestId("sum-fiat").first()).toHaveText("R$ 6.320,00");
   await expect(page.getByTestId("sum-crypto").first()).not.toContainText("+");
   await expect(page.getByTestId("sum-variation").first()).toBeVisible();
-  await expect(page.getByTestId("sum-invoices").first()).toHaveText("- R$ 400,00");
+  await expect(page.getByTestId("sum-invoices").first()).toHaveText("R$ 0,00");
   await expect(page.getByTestId("sum-result")).toHaveText("+ R$ 156.320,00");
   await expect(page.getByText("Consolidação estimada (sem conciliação)")).toBeVisible();
   // Em USDT (1 USDT = R$ 5) e com período de 1 ano a partir do mês
@@ -231,8 +236,8 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.264,00");
   await page.getByRole("link", { name: "1A", exact: true }).click();
   await expect(page).toHaveURL(/periodo=1A/);
-  // Em 1 ano vencem as 3 parcelas da cadeira (R$ 1.200 = US$ 240).
-  await expect(page.getByTestId("sum-invoices").first()).toHaveText("- US$ 240,00");
+  // Em 1 ano vencem as 2 parcelas ainda não pagas da cadeira (R$ 800 = US$ 160); a 1ª já saiu do saldo.
+  await expect(page.getByTestId("sum-invoices").first()).toHaveText("- US$ 160,00");
   await expect(page.getByTestId("sum-result")).toHaveText("+ US$ 31.104,00");
   await expect(page.getByText(/Totais do período \(01\//)).toBeVisible();
 

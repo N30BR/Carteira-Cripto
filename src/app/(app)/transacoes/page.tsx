@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { TransactionBars, TransactionPie } from "@/components/finance/charts";
 import { PeriodHeader } from "@/components/finance/period-header";
 import { TransactionsTable } from "@/components/finance/transactions";
+import { listAccounts } from "@/lib/fiat/accounts";
 import { BLUE, DOWN, SectionTitle, SignedMoney, StatCard, TotalChip, TotalsBar, UP } from "@/components/finance/ui";
 
 export const metadata = { title: "Transações · BlackHole Dashboard" };
@@ -98,6 +99,7 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
             currency={currency}
             factor={convert(1)}
             emptyText={`Nenhuma transação em ${label}. Lance entradas e saídas na aba Lançamentos.`}
+            accounts={listAccounts(db, user.id).map((a) => ({ id: a.id, name: a.name }))}
           />
           <TotalsBar
             label={`Totais do período (${label})`}

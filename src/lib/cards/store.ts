@@ -4,6 +4,7 @@ import { cardAccounts, cardCategories, cardExpenses, cardInstallments } from "@/
 import { getCardAccount, type Side } from "./accounts";
 import { ownsCategory, type Result } from "./categories";
 import { buildInstallments } from "./installments";
+import { deleteMovement, deleteMovementsOfSource, fiatAccountForCard, getMovement, installmentSource, upsertMovement } from "@/lib/fiat/movements";
 
 export const MAX_EXPENSES = 2000;
 
@@ -33,6 +34,8 @@ export type InstallmentRow = {
   invoiceMonth: string;
   amountCents: number;
   paid: boolean;
+  /** Quitada: encerrada sem mexer em saldo (exclusiva com paga). */
+  settled: boolean;
   description: string;
   nature: Side;
   card: Side;
@@ -76,23 +79,42 @@ function fields(e: ExpenseInput, nature: Side, kind: Side) {
   };
 }
 
-function writeInstallments(db: Db, expenseId: number, e: ExpenseInput, keepPaid: Map<number, boolean>): void {
+type Kept = { paid: boolean; settled: boolean };
+
+/**
+ * Reescreve as parcelas da compra mantendo paga/quitada de cada número que continua existindo, e acerta as
+ * movimentações da conta SÓ nas mudanças: virou paga → desconta; deixou de ser paga ou sumiu → estorna; continua
+ * paga → atualiza valor/conta (mantém a data do pagamento). Parcelas pagas antes desta regra (sem movimentação)
+ * não geram desconto retroativo.
+ */
+function writeInstallments(db: Db, userId: number, expenseId: number, e: ExpenseInput, kept: Map<number, Kept>, today: string): void {
   db.delete(cardInstallments).where(eq(cardInstallments.expenseId, expenseId)).run();
   const paidNew = new Set(e.paidNumbers);
-  db.insert(cardInstallments)
-    .values(
-      buildInstallments(e.totalCents, e.installments, e.firstInvoice).map((p) => ({
-        expenseId,
-        number: p.number,
-        invoiceMonth: p.invoiceMonth,
-        amountCents: p.amountCents,
-        paid: keepPaid.get(p.number) ?? paidNew.has(p.number),
-      })),
-    )
-    .run();
+  const parts = buildInstallments(e.totalCents, e.installments, e.firstInvoice).map((p) => {
+    const k = kept.get(p.number);
+    return { expenseId, number: p.number, invoiceMonth: p.invoiceMonth, amountCents: p.amountCents, paid: k ? k.paid : paidNew.has(p.number), settled: k?.settled ?? false };
+  });
+  db.insert(cardInstallments).values(parts).run();
+  let fiat: number | null | undefined;
+  const account = () => (fiat === undefined ? (fiat = fiatAccountForCard(db, userId, e.accountId)) : fiat);
+  for (const p of parts) {
+    const src = installmentSource(expenseId, p.number);
+    const was = kept.get(p.number)?.paid ?? false;
+    if (p.paid && !was) {
+      const acc = account();
+      if (acc) upsertMovement(db, userId, src, { accountId: acc, date: today, amountCents: -p.amountCents });
+    } else if (!p.paid && was) deleteMovement(db, src);
+    else if (p.paid && getMovement(db, src)) {
+      const acc = account();
+      if (acc) upsertMovement(db, userId, src, { accountId: acc, date: today, amountCents: -p.amountCents }, { keepDate: true });
+    }
+  }
+  // Números que deixaram de existir (menos parcelas): estorna o que tinham.
+  const alive = new Set(parts.map((p) => p.number));
+  for (const n of kept.keys()) if (!alive.has(n)) deleteMovement(db, installmentSource(expenseId, n));
 }
 
-export function createExpense(db: Db, userId: number, e: ExpenseInput): Result {
+export function createExpense(db: Db, userId: number, e: ExpenseInput, today = new Date().toISOString().slice(0, 10)): Result {
   const account = getCardAccount(db, userId, e.accountId);
   if (!account) return BAD_ACCOUNT;
   if (e.categoryId !== null && !ownsCategory(db, userId, e.categoryId)) return BAD_CATEGORY;
@@ -100,7 +122,7 @@ export function createExpense(db: Db, userId: number, e: ExpenseInput): Result {
   if (n >= MAX_EXPENSES) return { ok: false, error: `Limite de ${MAX_EXPENSES} lançamentos atingido` };
   db.transaction((tx) => {
     const [row] = tx.insert(cardExpenses).values({ userId, ...fields(e, account.kind, account.kind), createdAt: new Date() }).returning().all();
-    writeInstallments(tx as unknown as Db, row.id, e, new Map());
+    writeInstallments(tx as unknown as Db, userId, row.id, e, new Map(), today);
   });
   return { ok: true };
 }
@@ -109,7 +131,7 @@ export function createExpense(db: Db, userId: number, e: ExpenseInput): Result {
  * Recalcula as parcelas mantendo o status de pago de cada número que continua existindo.
  * Na mesma conta, a natureza da compra fica como estava; trocando de conta, passa a ser o tipo da nova.
  */
-export function updateExpense(db: Db, userId: number, id: number, e: ExpenseInput): Result {
+export function updateExpense(db: Db, userId: number, id: number, e: ExpenseInput, today = new Date().toISOString().slice(0, 10)): Result {
   const current = getExpense(db, userId, id);
   if (!current) return NOT_FOUND;
   const account = getCardAccount(db, userId, e.accountId);
@@ -117,13 +139,13 @@ export function updateExpense(db: Db, userId: number, id: number, e: ExpenseInpu
   if (e.categoryId !== null && !ownsCategory(db, userId, e.categoryId)) return BAD_CATEGORY;
   const nature = current.accountId === account.id ? (current.nature as Side) : account.kind;
   const previous = db
-    .select({ number: cardInstallments.number, paid: cardInstallments.paid })
+    .select({ number: cardInstallments.number, paid: cardInstallments.paid, settled: cardInstallments.settled })
     .from(cardInstallments)
     .where(eq(cardInstallments.expenseId, id))
     .all();
   db.transaction((tx) => {
     tx.update(cardExpenses).set(fields(e, nature, account.kind)).where(eq(cardExpenses.id, id)).run();
-    writeInstallments(tx as unknown as Db, id, e, new Map(previous.map((p) => [p.number, p.paid])));
+    writeInstallments(tx as unknown as Db, userId, id, e, new Map(previous.map((p) => [p.number, { paid: p.paid, settled: p.settled }])), today);
   });
   return { ok: true };
 }
@@ -135,20 +157,125 @@ export function hasExpenses(db: Db, userId: number): boolean {
 
 export function deleteExpense(db: Db, userId: number, id: number): Result {
   if (!ownsExpense(db, userId, id)) return NOT_FOUND;
-  db.delete(cardExpenses).where(eq(cardExpenses.id, id)).run();
+  db.transaction((tx) => {
+    // Sem a compra, os descontos das parcelas pagas dela são estornados (o saldo volta).
+    deleteMovementsOfSource(tx as unknown as Db, installmentSource(id, 0).source);
+    tx.delete(cardExpenses).where(eq(cardExpenses.id, id)).run();
+  });
   return { ok: true };
 }
 
-export function setInstallmentPaid(db: Db, userId: number, installmentId: number, paid: boolean): Result {
-  const row = db
-    .select({ id: cardInstallments.id })
+function installmentOf(db: Db, userId: number, installmentId: number) {
+  return (
+    db
+      .select({
+        id: cardInstallments.id,
+        expenseId: cardInstallments.expenseId,
+        number: cardInstallments.number,
+        amountCents: cardInstallments.amountCents,
+        paid: cardInstallments.paid,
+        settled: cardInstallments.settled,
+        accountId: cardExpenses.accountId,
+      })
+      .from(cardInstallments)
+      .innerJoin(cardExpenses, eq(cardExpenses.id, cardInstallments.expenseId))
+      .where(and(eq(cardInstallments.id, installmentId), eq(cardExpenses.userId, userId)))
+      .get() ?? null
+  );
+}
+
+type Inst = NonNullable<ReturnType<typeof installmentOf>>;
+
+/** Paga: desconta a parcela da conta da fatura (uma vez só). Desmarcar estorna. Tira "quitada". */
+function applyPaid(db: Db, userId: number, row: Inst, paid: boolean, today: string): void {
+  const src = installmentSource(row.expenseId, row.number);
+  db.update(cardInstallments).set({ paid, ...(paid ? { settled: false } : {}) }).where(eq(cardInstallments.id, row.id)).run();
+  if (paid && !row.paid) {
+    const acc = row.accountId ? fiatAccountForCard(db, userId, row.accountId) : null;
+    if (acc) upsertMovement(db, userId, src, { accountId: acc, date: today, amountCents: -row.amountCents });
+  } else if (!paid) deleteMovement(db, src);
+}
+
+/** Quitada: encerra sem mexer em saldo. Se estava paga, deixa de estar (estorna o desconto). */
+function applySettled(db: Db, row: Inst, settled: boolean): void {
+  db.update(cardInstallments).set({ settled, ...(settled ? { paid: false } : {}) }).where(eq(cardInstallments.id, row.id)).run();
+  if (settled) deleteMovement(db, installmentSource(row.expenseId, row.number));
+}
+
+export function setInstallmentPaid(db: Db, userId: number, installmentId: number, paid: boolean, today = new Date().toISOString().slice(0, 10)): Result {
+  const row = installmentOf(db, userId, installmentId);
+  if (!row) return NOT_FOUND;
+  db.transaction((tx) => applyPaid(tx as unknown as Db, userId, row, paid, today));
+  return { ok: true };
+}
+
+export function setInstallmentSettled(db: Db, userId: number, installmentId: number, settled: boolean): Result {
+  const row = installmentOf(db, userId, installmentId);
+  if (!row) return NOT_FOUND;
+  db.transaction((tx) => applySettled(tx as unknown as Db, row, settled));
+  return { ok: true };
+}
+
+export type MonthClosePreview = {
+  month: string;
+  count: number;
+  totalCents: number;
+  /** Contas que seriam descontadas (só em "pagar"); parcelas sem conta não descontam. */
+  accounts: { name: string; cents: number }[];
+  withoutAccount: number;
+};
+
+/** Parcelas do mês ainda em aberto (nem pagas nem quitadas): as únicas que o fechamento altera. */
+function openOfMonth(db: Db, userId: number, month: string) {
+  return db
+    .select({
+      id: cardInstallments.id,
+      expenseId: cardInstallments.expenseId,
+      number: cardInstallments.number,
+      amountCents: cardInstallments.amountCents,
+      paid: cardInstallments.paid,
+      settled: cardInstallments.settled,
+      accountId: cardExpenses.accountId,
+      accountName: cardAccounts.name,
+    })
     .from(cardInstallments)
     .innerJoin(cardExpenses, eq(cardExpenses.id, cardInstallments.expenseId))
-    .where(and(eq(cardInstallments.id, installmentId), eq(cardExpenses.userId, userId)))
-    .get();
-  if (!row) return NOT_FOUND;
-  db.update(cardInstallments).set({ paid }).where(eq(cardInstallments.id, installmentId)).run();
-  return { ok: true };
+    .leftJoin(cardAccounts, eq(cardAccounts.id, cardExpenses.accountId))
+    .where(and(eq(cardExpenses.userId, userId), eq(cardInstallments.invoiceMonth, month), eq(cardInstallments.paid, false), eq(cardInstallments.settled, false)))
+    .all();
+}
+
+/** Resumo para a confirmação do fechamento mensal. */
+export function previewMonthClose(db: Db, userId: number, month: string): MonthClosePreview {
+  const rows = openOfMonth(db, userId, month);
+  const byAccount = new Map<string, number>();
+  let withoutAccount = 0;
+  for (const r of rows) {
+    if (!r.accountId || !r.accountName) withoutAccount++;
+    else byAccount.set(r.accountName, (byAccount.get(r.accountName) ?? 0) + r.amountCents);
+  }
+  return {
+    month,
+    count: rows.length,
+    totalCents: rows.reduce((s, r) => s + r.amountCents, 0),
+    accounts: [...byAccount].map(([name, cents]) => ({ name, cents })),
+    withoutAccount,
+  };
+}
+
+/**
+ * Fechamento do mês: todas as parcelas em aberto do mês viram pagas (descontando cada uma da conta da sua fatura)
+ * ou quitadas (sem mexer em saldo). Parcelas já pagas ou quitadas, e outros meses, não mudam.
+ */
+export function closeMonth(db: Db, userId: number, month: string, mode: "paid" | "settled", today = new Date().toISOString().slice(0, 10)): Result & { count?: number } {
+  const rows = openOfMonth(db, userId, month);
+  db.transaction((tx) => {
+    for (const r of rows) {
+      if (mode === "paid") applyPaid(tx as unknown as Db, userId, r, true, today);
+      else applySettled(tx as unknown as Db, r, true);
+    }
+  });
+  return { ok: true, count: rows.length };
 }
 
 export function getExpense(db: Db, userId: number, id: number) {
@@ -183,6 +310,7 @@ export function listInstallments(
       invoiceMonth: cardInstallments.invoiceMonth,
       amountCents: cardInstallments.amountCents,
       paid: cardInstallments.paid,
+      settled: cardInstallments.settled,
       description: cardExpenses.description,
       nature: cardExpenses.nature,
       card: cardExpenses.card,
@@ -204,7 +332,8 @@ export function listInstallments(
       and(
         eq(cardExpenses.userId, userId),
         between(cardInstallments.invoiceMonth, fromMonth, toMonth),
-        opts.unpaidOnly ? eq(cardInstallments.paid, false) : undefined,
+        // Em aberto = nem paga nem quitada.
+        opts.unpaidOnly ? and(eq(cardInstallments.paid, false), eq(cardInstallments.settled, false)) : undefined,
       ),
     )
     .orderBy(asc(cardInstallments.invoiceMonth), asc(cardExpenses.description), asc(cardInstallments.number))

@@ -7,7 +7,7 @@ import { createCardAccount, deleteCardAccount, setCardClosingDay, setCardDueDay,
 import { createCategory, deleteCategory, renameCategory, type Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
 import { parseMonth } from "@/lib/cards/months";
-import { createExpense, deleteExpense, setInstallmentPaid, updateExpense } from "@/lib/cards/store";
+import { closeMonth, createExpense, deleteExpense, previewMonthClose, setInstallmentPaid, setInstallmentSettled, updateExpense, type MonthClosePreview } from "@/lib/cards/store";
 import { allowFiatChange } from "@/lib/fiat/limit";
 import { appTimeZone, brlToCents, cleanNotes, parseBalanceDate, todayIn, validateLabel } from "@/lib/validation";
 
@@ -37,6 +37,9 @@ function refresh() {
   revalidatePath("/lancamentos");
   revalidatePath("/faturas");
   revalidatePath("/resumo");
+  // Parcela paga desconta da conta do R$ (o saldo dela muda).
+  revalidatePath("/fiduciario");
+  revalidatePath("/ativos");
 }
 
 /** Cria (id null) ou edita uma compra. Tudo que vem do navegador é validado aqui. */
@@ -82,7 +85,8 @@ export async function saveExpenseAction(id: number | null, f: ExpenseForm): Prom
     amountMode: f.mode,
     paidNumbers: plan.paidNumbers,
   };
-  const r = id === null ? createExpense(getDb(), user.id, input) : updateExpense(getDb(), user.id, id, input);
+  const today = todayIn(appTimeZone());
+  const r = id === null ? createExpense(getDb(), user.id, input, today) : updateExpense(getDb(), user.id, id, input, today);
   refresh();
   return r;
 }
@@ -100,7 +104,37 @@ export async function toggleInstallmentAction(installmentId: number, paid: boole
   const user = await requireModule("invoices");
   if (!Number.isInteger(installmentId) || typeof paid !== "boolean") return NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
-  const r = setInstallmentPaid(getDb(), user.id, installmentId, paid);
+  const r = setInstallmentPaid(getDb(), user.id, installmentId, paid, todayIn(appTimeZone()));
+  refresh();
+  return r;
+}
+
+/** Quitada: encerra a parcela sem mexer no saldo (exclusiva com "paga"). */
+export async function settleInstallmentAction(installmentId: number, settled: boolean): Promise<Result> {
+  const user = await requireModule("invoices");
+  if (!Number.isInteger(installmentId) || typeof settled !== "boolean") return NOT_FOUND;
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  const r = setInstallmentSettled(getDb(), user.id, installmentId, settled);
+  refresh();
+  return r;
+}
+
+/** Resumo do fechamento mensal (para a confirmação): parcelas em aberto do mês, total e contas afetadas. */
+export async function previewMonthCloseAction(rawMonth: string): Promise<({ ok: true } & MonthClosePreview) | { ok: false; error: string }> {
+  const user = await requireModule("invoices");
+  const month = parseMonth(rawMonth);
+  if (!month) return { ok: false, error: "Mês inválido" };
+  return { ok: true, ...previewMonthClose(getDb(), user.id, month) };
+}
+
+/** Fechamento mensal: paga (desconta) ou quita (sem mexer em saldo) todas as parcelas em aberto do mês. */
+export async function closeMonthAction(rawMonth: string, mode: "paid" | "settled"): Promise<Result & { count?: number }> {
+  const user = await requireModule("invoices");
+  const month = parseMonth(rawMonth);
+  if (!month) return { ok: false, error: "Mês inválido" };
+  if (mode !== "paid" && mode !== "settled") return { ok: false, error: "Ação inválida" };
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  const r = closeMonth(getDb(), user.id, month, mode, todayIn(appTimeZone()));
   refresh();
   return r;
 }

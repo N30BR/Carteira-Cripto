@@ -6,9 +6,11 @@ import { requireModule } from "@/lib/auth/modules";
 import { MAX_TOTAL_CENTS } from "@/lib/cards/installments";
 import { allowFiatChange } from "@/lib/fiat/limit";
 import { createTransaction, deleteTransaction, updateTransaction, type Result, type TxKind } from "@/lib/transactions/store";
+import { createAccountNoBalance } from "@/lib/fiat/accounts";
 import { brlToCents, parseIsoDate, validateLabel } from "@/lib/validation";
 
-export type TransactionForm = { date: string; kind: TxKind; description: string; amount: string };
+/** accountId: conta do R$ (destino da entrada / origem da saída). */
+export type TransactionForm = { date: string; kind: TxKind; description: string; amount: string; accountId: number | null };
 
 const NOT_FOUND: Result = { ok: false, error: "Transação não encontrada" };
 const TOO_MANY: Result = { ok: false, error: "Muitas alterações seguidas. Aguarde um minuto." };
@@ -17,6 +19,8 @@ function refresh() {
   revalidatePath("/lancamentos");
   revalidatePath("/transacoes");
   revalidatePath("/resumo");
+  // O saldo das contas do R$ muda com as entradas e saídas.
+  revalidatePath("/fiduciario");
 }
 
 /** Cria (id null) ou edita uma transação. Tudo que vem do navegador é validado aqui. */
@@ -36,7 +40,9 @@ export async function saveTransactionAction(id: number | null, f: TransactionFor
   // Teto por valor (o mesmo das compras): mantém as somas exatas em centavos.
   if (cents.value > MAX_TOTAL_CENTS) return { ok: false, error: "Valor muito alto" };
 
-  const input = { date: date.value, kind: f.kind, description: description.value, amountCents: cents.value };
+  // Toda transação fica ligada a uma conta (entrada soma nela; saída subtrai).
+  if (!Number.isInteger(f.accountId) || (f.accountId as number) <= 0) return { ok: false, error: "Escolha a conta" };
+  const input = { date: date.value, kind: f.kind, description: description.value, amountCents: cents.value, accountId: f.accountId as number };
   const r = id === null ? createTransaction(getDb(), user.id, input) : updateTransaction(getDb(), user.id, id, input);
   refresh();
   return r;
@@ -47,6 +53,17 @@ export async function deleteTransactionAction(id: number): Promise<Result> {
   if (!Number.isInteger(id)) return NOT_FOUND;
   if (!allowFiatChange(user.id)) return TOO_MANY;
   const r = deleteTransaction(getDb(), user.id, id);
+  refresh();
+  return r;
+}
+
+/** Conta nova criada pela aba Transações: é uma conta do R$ (compartilhada), sem saldo informado (começa em zero). */
+export async function createTxAccountAction(rawName: string): Promise<Result & { id?: number }> {
+  const user = await requireModule("transactions");
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  const name = validateLabel(String(rawName ?? ""), 40, "um nome para a conta");
+  if (!name.ok) return name;
+  const r = createAccountNoBalance(getDb(), user.id, name.value);
   refresh();
   return r;
 }

@@ -91,10 +91,13 @@ export function NewsView({
     return () => clearInterval(id);
   }, [router]);
 
-  const range = useMemo(() => periodRange(prefs.period, tz, new Date(now)), [prefs.period, tz, now]);
+  const range = useMemo(() => periodRange(prefs.period, tz, new Date(now), prefs.direction), [prefs.period, prefs.direction, tz, now]);
+  const past = prefs.direction === "past";
+  // Histórico: o que o app já guardou (a fonte gratuita publica só a semana atual).
+  const oldest = events.length ? localDate(Math.min(...events.map((e) => e.ts)), tz) : null;
   const grouped = useMemo(() => groupEvents(filterEvents(events, prefs.regions, prefs.stars), prefs.period, tz, range), [events, prefs, tz, range]);
   const coveredDate = coveredUntil ? localDate(coveredUntil, tz) : null;
-  const partial = !coveredDate || coveredDate < range.to;
+  const partial = !past && (!coveredDate || coveredDate < range.to);
   const allRegions = prefs.regions.length === REGIONS.length;
   const toggleRegion = (r: RegionId) => {
     const next = prefs.regions.includes(r) ? prefs.regions.filter((x) => x !== r) : [...prefs.regions, r];
@@ -113,7 +116,7 @@ export function NewsView({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Notícias</h1>
-          <p className="text-sm text-muted-foreground">Calendário econômico: eventos de impacto médio e alto. Horários no fuso {tz}.</p>
+          <p className="text-sm text-muted-foreground">Calendário econômico: próximos eventos e histórico, por importância. Horários no fuso {tz}.</p>
         </div>
         <Button
           size="sm"
@@ -135,6 +138,13 @@ export function NewsView({
         <CardContent className="flex flex-col gap-3 text-sm">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Período">
             <span className="w-24 text-xs font-medium tracking-wide text-muted-foreground uppercase">Período</span>
+            <Chip on={!past} onClick={() => update({ ...prefs, direction: "next" })} label="Próximos eventos">
+              Próximos
+            </Chip>
+            <Chip on={past} onClick={() => update({ ...prefs, direction: "past" })} label="Eventos já ocorridos">
+              Anteriores
+            </Chip>
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
             {NEWS_PERIODS.map((p) => (
               <Chip key={p} on={prefs.period === p} onClick={() => update({ ...prefs, period: p })}>
                 {PERIOD_LABEL[p]}
@@ -181,7 +191,16 @@ export function NewsView({
             {REGION[r].label}: sem fonte gratuita com classificação de impacto disponível — eventos não exibidos (integração pendente; opções pagas: Trading Economics, Financial Modeling Prep, Finnhub).
           </p>
         ))}
-        <p>Fonte: Forex Factory (impacto alto = ★★★, médio = ★★, baixo = ★). “Atual” fica “—” porque a fonte gratuita não informa o valor divulgado.</p>
+        {past && (
+          <p>
+            Histórico guardado pelo dashboard{oldest ? ` desde ${fmtDate(oldest)}` : ""} (a fonte gratuita publica uma semana por vez; eventos anteriores a
+            isso não estão disponíveis).
+          </p>
+        )}
+        <p>
+          Fonte: Forex Factory (impacto alto = ★★★, médio = ★★, baixo = ★). “Atual” = valor divulgado: a fonte gratuita não o informa, então fica “—”
+          (eventos já ocorridos aparecem como “Divulgado”; previsão nunca é mostrada como resultado).
+        </p>
       </div>
 
       <section aria-label="Calendário econômico" className="flex flex-col gap-4">
@@ -209,6 +228,7 @@ export function NewsView({
                           <th className="py-1 pr-3 font-medium">Moeda</th>
                           <th className="py-1 pr-3 font-medium">Impacto</th>
                           <th className="py-1 pr-3 font-medium">Evento</th>
+                          <th className="py-1 pr-3 font-medium">Situação</th>
                           <th className="py-1 pr-3 text-right font-medium">Atual</th>
                           <th className="py-1 pr-3 text-right font-medium">Previsão</th>
                           <th className="py-1 text-right font-medium">Anterior</th>
@@ -228,7 +248,16 @@ export function NewsView({
                               <StarsView n={e.stars} />
                             </td>
                             <td className="py-1.5 pr-3">{e.title}</td>
-                            <td className="py-1.5 pr-3 text-right tabular-nums">{e.actual ?? "—"}</td>
+                            <td className="py-1.5 pr-3 whitespace-nowrap">
+                              {e.ts <= now ? (
+                                <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">Divulgado</span>
+                              ) : (
+                                <span className="rounded border border-[#8b7cf6]/50 px-1.5 py-0.5 text-[11px] text-[#cdb8e6]">Previsto</span>
+                              )}
+                            </td>
+                            <td className="py-1.5 pr-3 text-right tabular-nums" title={e.ts <= now && !e.actual ? "Valor divulgado não informado pela fonte gratuita" : undefined}>
+                              {e.actual ?? "—"}
+                            </td>
                             <td className="py-1.5 pr-3 text-right tabular-nums">{e.forecast ?? "—"}</td>
                             <td className="py-1.5 text-right tabular-nums">{e.previous ?? "—"}</td>
                           </tr>

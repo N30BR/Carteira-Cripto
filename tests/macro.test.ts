@@ -124,9 +124,11 @@ describe("Ativos Principais: moeda e preferências", () => {
     expect(convertUsd(null, "EUR", usdIn)).toBeNull();
   });
   test("cookie: só valores conhecidos (padrão 1M e USD)", () => {
-    expect(parseMacroPrefs(undefined)).toEqual({ period: "1M", currency: "USD" });
-    expect(parseMacroPrefs(JSON.stringify({ period: "3M", currency: "BTC" }))).toEqual({ period: "3M", currency: "BTC" });
-    expect(parseMacroPrefs(JSON.stringify({ period: "10A", currency: "GBP" }))).toEqual({ period: "1M", currency: "USD" });
-    expect(parseMacroPrefs("{lixo")).toEqual({ period: "1M", currency: "USD" });
+    const base = { fx: "1D", indicators: "1D", markets: "1D", assets: "1D" };
+    expect(parseMacroPrefs(undefined)).toEqual({ period: "1M", currency: "USD", ...base });
+    expect(parseMacroPrefs(JSON.stringify({ period: "3M", currency: "BTC" }))).toEqual({ period: "3M", currency: "BTC", ...base });
+    expect(parseMacroPrefs(JSON.stringify({ fx: "6M", markets: "3M" }))).toMatchObject({ fx: "6M", markets: "1D" });
+    expect(parseMacroPrefs(JSON.stringify({ period: "10A", currency: "GBP" }))).toEqual({ period: "1M", currency: "USD", ...base });
+    expect(parseMacroPrefs("{lixo")).toEqual({ period: "1M", currency: "USD", ...base });
   });
 });

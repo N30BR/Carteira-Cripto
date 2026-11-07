@@ -355,7 +355,6 @@ export function ChartWorkspace({
 
   async function closeTab(t: ChartTab) {
     if (tabs.length <= 1) return toast.error("Mantenha pelo menos uma aba");
-    if (!window.confirm(`Fechar a aba "${tabTitle(t).label}"? Os gráficos e desenhos dela serão apagados.`)) return;
     const r = await safeAction(() => deleteChartTabAction(t.id));
     if (!r.ok) return toast.error(r.error);
     const rest = tabs.filter((x) => x.id !== t.id);
@@ -398,6 +397,13 @@ export function ChartWorkspace({
       // Remove na hora (sem confirmação): só esta instância; os outros indicadores ficam como estão.
       void ind;
       updatePane({ indicators: p.indicators.filter((_, j) => j !== index) }, paneI);
+    } else if (a.action === "volUp" || a.action === "volDown") {
+      // Só o Volume: vai para o gráfico de preço (faixa inferior, escala própria) ou volta ao painel próprio,
+      // com os mesmos parâmetros e estilos (a mesma instância, sem duplicar).
+      updatePane({ indicators: p.indicators.map((x, j) => (j === index ? { ...x, pane: a.action === "volUp" ? "main" : "sub", paneKey: undefined } : x)) }, paneI);
+    } else if (a.action === "favorite" || a.action === "unfavorite") {
+      // Favorito pelo tipo do indicador (mesma lista da janela de Indicadores); não muda o gráfico.
+      toggleFavoriteIndicator(ind.name);
     } else if (a.action === "more") {
       setIndMenu({ pane: paneI, index, x: a.x, y: a.y });
     }
@@ -592,6 +598,7 @@ export function ChartWorkspace({
               onIndicatorAction={(a) => indicatorAction(i, a)}
               onCompareAction={(a) => compareAction(i, a)}
               onLegendCollapse={(legendCollapsed) => updatePaneOf(tab.id, i, { legendCollapsed })}
+              favoriteIndicators={tools.favoriteIndicators}
               onAutoScaleChange={(autoScale) => updatePaneOf(tab.id, i, { autoScale })}
               onDrawingChange={(on) => setDrawing((d) => (on ? d : d?.pane === i ? null : d))}
               handleRef={(h) => (handles.current[i] = h)}

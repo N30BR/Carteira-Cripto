@@ -24,7 +24,8 @@ export function monthTotals(rows: InstallmentRow[]): MonthTotals {
     if (r.nature === "PF") t.pf += r.amountCents;
     else t.pj += r.amountCents;
     t.byAccount[r.accountId] = (t.byAccount[r.accountId] ?? 0) + r.amountCents;
-    if (r.paid) t.paid += r.amountCents;
+    // Quitada conta como encerrada (só não mexe em saldo).
+    if (r.paid || r.settled) t.paid += r.amountCents;
     else t.pending += r.amountCents;
   }
   return t;
@@ -78,7 +79,7 @@ export function projection(rows: InstallmentRow[], month: string, count: number)
     const t = monthTotals(future.filter((r) => r.invoiceMonth === m));
     return { month: m, byAccount: t.byAccount, total: t.total };
   });
-  const pendingFuture = future.filter((r) => !r.paid).reduce((s, r) => s + r.amountCents, 0);
+  const pendingFuture = future.filter((r) => !r.paid && !r.settled).reduce((s, r) => s + r.amountCents, 0);
   const activePurchases = new Set(future.filter((r) => r.installments > 1).map((r) => r.expenseId)).size;
   return { months, pendingFuture, activePurchases };
 }
@@ -111,7 +112,7 @@ export function openPurchases(rows: InstallmentRow[], month: string): OpenPurcha
   for (const r of rows) (byExpense.get(r.expenseId) ?? byExpense.set(r.expenseId, []).get(r.expenseId)!).push(r);
   const out: OpenPurchase[] = [];
   for (const [expenseId, list] of byExpense) {
-    const open = list.filter((r) => !r.paid);
+    const open = list.filter((r) => !r.paid && !r.settled);
     if (!open.length) continue;
     const overdue = open.filter((r) => r.invoiceMonth < month);
     const first = list[0];

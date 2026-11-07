@@ -57,6 +57,8 @@ export type MacroItem = {
   /** Data da última decisão (taxas). */
   decidedAt?: number | null;
   spark: Point[];
+  /** Até ~1 ano de histórico (diário, leve): a página calcula variação e minigráfico do período escolhido. */
+  history?: Point[];
   /** Sigla do país/região (US, EU, JP, CN, BR; GL = global). */
   flag?: string;
   /** Indisponível: motivo. */
@@ -191,6 +193,7 @@ function fxSection(fx: Record<string, Point[]> | null, err: string): MacroItem[]
         changeLabel: "1D",
         asOf: dxy.at(-1)![0],
         spark: tail(dxy, 90),
+        history: thin(tail(dxy, 370), 260),
       }
     : unavailableItem({ id: "USD", label: "USD (DXY)", sub: "Dólar", flag: "US", unit: "pts", changeKind: "pct" }, err);
   return [
@@ -211,6 +214,7 @@ function fxSection(fx: Record<string, Point[]> | null, err: string): MacroItem[]
         changeLabel: "1D",
         asOf: s.at(-1)![0],
         spark: tail(s, 90),
+        history: thin(tail(s, 370), 260),
       };
     }),
   ];
@@ -303,15 +307,10 @@ async function liquiditySection(db: Db, fx: Record<string, Point[]> | null, now:
           spark: usd,
         }
       : unavailableItem({ id, label, sub, flag, unit: "US$ tri", changeKind: "pct" }, reason);
-  const china = unavailableItem(
-    { id: "CN", label: "China (M2)", sub: "Banco Popular da China", flag: "CN", unit: "US$ tri", changeKind: "pct" },
-    "Sem fonte oficial gratuita com API atualizada (a série do FRED parou em 2019): não incluída.",
-  );
   const parts = [us, jp, eu].filter((p): p is Point[] => !!p?.length);
   const global = parts.length === 3 ? sumByMonth(parts) : null;
   return [
     item("US", "EUA (M2)", "Federal Reserve — dessazonalizado", "US", us, usRaw, why(0)),
-    china,
     item("JP", "Japão (M2)", "Banco do Japão — saldo médio", "JP", jp, jpRaw, jpRaw ? "câmbio indisponível" : why(1)),
     item("EU", "Zona do Euro (M2)", "BCE — dessazonalizado", "EU", eu, euRaw, euRaw ? "câmbio indisponível" : why(2)),
     global?.length
@@ -323,7 +322,7 @@ async function liquiditySection(db: Db, fx: Record<string, Point[]> | null, now:
 const LIQUIDITY_NOTE =
   "M2 de cada país na definição do próprio banco central (EUA: Fed, dessazonalizado; Japão: BoJ, saldo médio; Zona do Euro: BCE, dessazonalizado), " +
   "convertido para US$ pela média mensal da taxa de referência do BCE. A Liquidez Global soma esses três só nos meses em que os três já foram " +
-  "divulgados (as definições de M2 não são idênticas entre países). China fora: sem fonte oficial gratuita atualizada. A variação a/a de cada " +
+  "divulgados (as definições de M2 não são idênticas entre países). A variação a/a de cada " +
   "país é na moeda local; a do total é em US$. Não é a liquidez líquida dos bancos centrais (balanços).";
 
 async function fredItem(
@@ -346,6 +345,7 @@ async function fredItem(
       changeLabel: "1D",
       asOf: last[0],
       spark: tail(s, 90),
+      history: thin(tail(s, 370), 260),
       ...(def.note ? { note: def.note } : {}),
     };
   } catch (e) {
@@ -383,22 +383,13 @@ async function indicatorsSection(db: Db, fx: Record<string, Point[]> | null, fxE
 async function marketsSection(db: Db, now: Date): Promise<MacroItem[]> {
   const idx = (id: string, label: string, sub: string, flag: string, seriesId: string) =>
     fredItem(db, now, { id, label, sub, seriesId, unit: "pts", changeKind: "pct", flag });
-  const none = (id: string, label: string, sub: string, flag: string) =>
-    unavailableItem({ id, label, sub, flag, unit: "pts", changeKind: "pct" }, "Sem fonte gratuita confiável para o índice (os dados oficiais são pagos).");
   const got = await Promise.all([
     idx("SPX", "S&P 500", "Estados Unidos", "US", "SP500"),
     idx("NDX", "Nasdaq 100", "Estados Unidos", "US", "NASDAQ100"),
     idx("DJI", "Dow Jones", "Estados Unidos", "US", "DJIA"),
     idx("N225", "Nikkei 225", "Japão", "JP", "NIKKEI225"),
   ]);
-  return [
-    ...got.slice(0, 3),
-    none("SX5E", "Euro Stoxx 50", "Europa", "EU"),
-    got[3],
-    none("SSEC", "Shanghai Composite", "China", "CN"),
-    none("CSI300", "CSI 300", "China", "CN"),
-    none("IBOV", "Ibovespa", "Brasil", "BR"),
-  ];
+  return got;
 }
 
 const ASSETS = [

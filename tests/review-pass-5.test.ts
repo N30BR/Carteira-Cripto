@@ -1,5 +1,6 @@
 // Casos da revisão de Lançamentos/Transações/Resumo.
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { createAccountNoBalance } from "@/lib/fiat/accounts";
 import { testDb } from "./helpers/db";
 import { cardExpenses, users } from "@/db/schema";
 import { createCardAccount, ensureDefaultAccounts, listCardAccounts } from "@/lib/cards/accounts";
@@ -64,7 +65,8 @@ describe("contas", () => {
 
 describe("valores máximos", () => {
   test("transação acima de R$ 1 bilhão é recusada (somas continuam exatas)", async () => {
-    const f = { date: "2026-05-01", kind: "in" as const, description: "x" };
+    const acc = createAccountNoBalance(state.db as Parameters<typeof createAccountNoBalance>[0], state.userId, "Conta").id!;
+    const f = { date: "2026-05-01", kind: "in" as const, description: "x", accountId: acc };
     expect(await saveTransactionAction(null, { ...f, amount: "1.000.000.001,00" })).toEqual({ ok: false, error: "Valor muito alto" });
     expect(await saveTransactionAction(null, { ...f, amount: "1.000.000.000,00" })).toEqual({ ok: true });
   });

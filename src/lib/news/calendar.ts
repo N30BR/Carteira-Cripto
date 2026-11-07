@@ -14,9 +14,12 @@ export const REGIONS: { id: RegionId; label: string; short: string; currency: st
 const REGION_IDS = REGIONS.map((r) => r.id);
 const BY_CURRENCY: Record<string, RegionId> = { USD: "US", JPY: "JP", BRL: "BR", EUR: "EU" };
 
-export const NEWS_PERIODS = ["1d", "7d", "1m"] as const;
+export const NEWS_PERIODS = ["1d", "3d", "7d", "1m"] as const;
 export type NewsPeriod = (typeof NEWS_PERIODS)[number];
-export const PERIOD_LABEL: Record<NewsPeriod, string> = { "1d": "1 dia", "7d": "7 dias", "1m": "1 mês" };
+export const PERIOD_LABEL: Record<NewsPeriod, string> = { "1d": "1 dia", "3d": "3 dias", "7d": "7 dias", "1m": "1 mês" };
+/** Próximos eventos (a partir de hoje) ou já ocorridos (até hoje). */
+export const NEWS_DIRECTIONS = ["next", "past"] as const;
+export type NewsDirection = (typeof NEWS_DIRECTIONS)[number];
 
 export type Stars = 1 | 2 | 3;
 export type NewsEvent = {
@@ -87,11 +90,15 @@ const addMonths = (date: string, n: number) => {
   return target.toISOString().slice(0, 10);
 };
 
-/** Intervalo de datas (inclusive) do período, a partir de hoje no fuso do app. */
-export function periodRange(period: NewsPeriod, tz: string, now = new Date()): { from: string; to: string } {
-  const from = localDate(now.getTime(), tz);
-  const to = period === "1d" ? from : period === "7d" ? addDays(from, 6) : addMonths(from, 1);
-  return { from, to };
+/**
+ * Intervalo de datas (inclusive) do período no fuso do app: para a frente a partir de hoje, ou para trás até hoje
+ * (1 dia = hoje; 3 dias = hoje e os 2 anteriores; 1 mês = desde o mesmo dia do mês anterior).
+ */
+export function periodRange(period: NewsPeriod, tz: string, now = new Date(), direction: NewsDirection = "next"): { from: string; to: string } {
+  const today = localDate(now.getTime(), tz);
+  const days = period === "1d" ? 0 : period === "3d" ? 2 : period === "7d" ? 6 : null;
+  if (direction === "past") return { from: days === null ? addMonths(today, -1) : addDays(today, -days), to: today };
+  return { from: today, to: days === null ? addMonths(today, 1) : addDays(today, days) };
 }
 
 export function filterEvents(events: NewsEvent[], regions: RegionId[], stars: Stars[]): NewsEvent[] {
@@ -140,9 +147,9 @@ export function mergeEvents(stored: NewsEvent[], fresh: NewsEvent[], window: { f
   return [...keep, ...fresh].sort((a, b) => a.ts - b.ts);
 }
 
-export type NewsPrefs = { period: NewsPeriod; regions: RegionId[]; stars: Stars[] };
+export type NewsPrefs = { period: NewsPeriod; regions: RegionId[]; stars: Stars[]; direction: NewsDirection };
 export const NEWS_COOKIE = "noticias-filtros";
-export const DEFAULT_NEWS_PREFS: NewsPrefs = { period: "7d", regions: [...REGION_IDS], stars: [1, 2, 3] };
+export const DEFAULT_NEWS_PREFS: NewsPrefs = { period: "7d", regions: [...REGION_IDS], stars: [1, 2, 3], direction: "next" };
 
 /** Filtros salvos no cookie (só valores conhecidos; inválido → padrão). */
 export function parseNewsPrefs(raw: string | undefined): NewsPrefs {
@@ -154,7 +161,8 @@ export function parseNewsPrefs(raw: string | undefined): NewsPrefs {
     let stars = Array.isArray(v.stars) ? ([3, 2, 1] as Stars[]).filter((s) => (v.stars as unknown[]).includes(s)) : [];
     // Filtro salvo antes de existir ★ com as duas opções de então marcadas (= "todas"): passa a incluir ★.
     if (stars.length === 2 && stars.includes(3) && stars.includes(2) && !(v.stars as unknown[]).includes(1) && v.v !== 2) stars = [3, 2, 1];
-    return { period, regions: regions.length ? regions : [...REGION_IDS], stars: stars.length ? stars : [...DEFAULT_NEWS_PREFS.stars] };
+    const direction = (NEWS_DIRECTIONS as readonly unknown[]).includes(v.direction) ? (v.direction as NewsDirection) : DEFAULT_NEWS_PREFS.direction;
+    return { period, regions: regions.length ? regions : [...REGION_IDS], stars: stars.length ? stars : [...DEFAULT_NEWS_PREFS.stars], direction };
   } catch {
     return parseNewsPrefs(undefined);
   }

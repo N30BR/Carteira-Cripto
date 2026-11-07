@@ -124,6 +124,144 @@ export function registerChartExtensions(): void {
     },
   });
 
+  // Volume dentro do gráfico de preço (o VOL movido para o principal): escala própria — as barras ocupam a faixa
+  // inferior (22% da altura), proporcionais ao maior volume visível; não entram na escala de preço.
+  registerIndicator<Row, number, { upColor?: string; downColor?: string }>({
+    name: "VOL_MAIN",
+    shortName: "VOL",
+    series: "price",
+    calcParams: [],
+    figures: [],
+    calc: (data) => data.map(() => ({})),
+    draw: ({ ctx, chart, indicator, bounding, xAxis }) => {
+      if (!indicator.visible) return true;
+      const data = chart.getDataList();
+      const r = chart.getVisibleRange();
+      let max = 0;
+      for (let i = Math.max(0, r.from); i < Math.min(data.length, r.to); i++) max = Math.max(max, data[i].volume ?? 0);
+      if (!max) return true;
+      const band = bounding.height * 0.22;
+      const w = Math.max(1, chart.getBarSpace().bar * 0.7);
+      const x = indicator.extendData as { upColor?: string; downColor?: string } | undefined;
+      ctx.save();
+      for (let i = Math.max(0, r.from - 1); i < Math.min(data.length, r.to + 1); i++) {
+        const k = data[i];
+        const h = ((k.volume ?? 0) / max) * band;
+        ctx.fillStyle = `${(k.close >= k.open ? (x?.upColor ?? UP) : (x?.downColor ?? DOWN)).slice(0, 7)}66`;
+        ctx.fillRect(xAxis.convertToPixel(i) - w / 2, bounding.height - h, w, h);
+      }
+      ctx.restore();
+      return true;
+    },
+  });
+
+  // Bull Market Support Band: SMA de 20 semanas e EMA de 21 semanas, calculadas com velas SEMANAIS reais (o gráfico
+  // entrega a série pronta em extendData.weekly, buscada à parte), com a faixa entre elas preenchida.
+  registerIndicator<Row, number, { weekly?: { t: number; sma: number | null; ema: number | null }[]; fill?: string }>({
+    name: "BMSB",
+    shortName: "Bull Market Support Band",
+    series: "price",
+    // Os dados semanais/diários chegam depois (extendData): recalcula quando eles mudam.
+    shouldUpdate: (prev, cur) => {
+      const calc = prev.extendData !== cur.extendData || JSON.stringify(prev.calcParams) !== JSON.stringify(cur.calcParams);
+      return { calc, draw: true };
+    },
+
+    calcParams: [20, 21],
+    precision: 2,
+    figures: [
+      { key: "sma", title: "20W SMA: ", type: "line" },
+      { key: "ema", title: "21W EMA: ", type: "line" },
+    ],
+    calc: (data, ind) => {
+      const w = ind.extendData?.weekly ?? [];
+      const sma = alignStep(w.flatMap((x) => (x.sma === null ? [] : [[x.t, x.sma] as Point])), data.map((b) => b.timestamp));
+      const em = alignStep(w.flatMap((x) => (x.ema === null ? [] : [[x.t, x.ema] as Point])), data.map((b) => b.timestamp));
+      return data.map((_, i) => ({ sma: sma[i], ema: em[i] }));
+    },
+    draw: ({ ctx, chart, indicator, xAxis, yAxis }) => {
+      if (!indicator.visible) return false;
+      const rows = indicator.result as Row[];
+      const r = chart.getVisibleRange();
+      const top: { x: number; y: number }[] = [];
+      const bottom: { x: number; y: number }[] = [];
+      for (let i = Math.max(0, r.from - 1); i < Math.min(rows.length, r.to + 1); i++) {
+        const a = rows[i]?.sma;
+        const b = rows[i]?.ema;
+        if (a == null || b == null) continue;
+        const x = xAxis.convertToPixel(i);
+        top.push({ x, y: yAxis.convertToPixel(a) });
+        bottom.push({ x, y: yAxis.convertToPixel(b) });
+      }
+      if (top.length > 1) {
+        ctx.save();
+        ctx.fillStyle = (indicator.extendData as { fill?: string } | undefined)?.fill ?? "#ef444433";
+        ctx.beginPath();
+        top.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        for (let i = bottom.length - 1; i >= 0; i--) ctx.lineTo(bottom[i].x, bottom[i].y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      return false;
+    },
+  });
+
+  // Pi Cycle Top: SMA de 111 dias e 2× SMA de 350 dias, com velas DIÁRIAS (série pronta em extendData.daily);
+  // marca os cruzamentos da 111 para cima da 2×350 (o sinal histórico do indicador).
+  registerIndicator<Row, number, { daily?: { t: number; fast: number | null; slow: number | null }[]; signals?: boolean }>({
+    name: "PI_CYCLE",
+    shortName: "Pi Cycle Top",
+    series: "price",
+    // Os dados semanais/diários chegam depois (extendData): recalcula quando eles mudam.
+    shouldUpdate: (prev, cur) => {
+      const calc = prev.extendData !== cur.extendData || JSON.stringify(prev.calcParams) !== JSON.stringify(cur.calcParams);
+      return { calc, draw: true };
+    },
+
+    calcParams: [111, 350],
+    precision: 2,
+    figures: [
+      { key: "fast", title: "111DMA: ", type: "line" },
+      { key: "slow", title: "350DMA×2: ", type: "line" },
+    ],
+    calc: (data, ind) => {
+      const d = ind.extendData?.daily ?? [];
+      const ts = data.map((b) => b.timestamp);
+      const fast = alignStep(d.flatMap((x) => (x.fast === null ? [] : [[x.t, x.fast] as Point])), ts);
+      const slow = alignStep(d.flatMap((x) => (x.slow === null ? [] : [[x.t, x.slow] as Point])), ts);
+      return data.map((_, i) => ({ fast: fast[i], slow: slow[i] }));
+    },
+    draw: ({ ctx, chart, indicator, xAxis, yAxis }) => {
+      if (!indicator.visible || (indicator.extendData as { signals?: boolean } | undefined)?.signals === false) return false;
+      const rows = indicator.result as Row[];
+      const r = chart.getVisibleRange();
+      ctx.save();
+      ctx.fillStyle = "#f59e0b";
+      ctx.font = "10px Geist, sans-serif";
+      for (let i = Math.max(1, r.from); i < Math.min(rows.length, r.to + 1); i++) {
+        const a0 = rows[i - 1]?.fast;
+        const b0 = rows[i - 1]?.slow;
+        const a1 = rows[i]?.fast;
+        const b1 = rows[i]?.slow;
+        if (a0 == null || b0 == null || a1 == null || b1 == null) continue;
+        if (a0 <= b0 && a1 > b1) {
+          const x = xAxis.convertToPixel(i);
+          const y = yAxis.convertToPixel(a1);
+          ctx.beginPath();
+          ctx.moveTo(x, y - 14);
+          ctx.lineTo(x - 5, y - 22);
+          ctx.lineTo(x + 5, y - 22);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillText("Pi Cycle", x - 18, y - 26);
+        }
+      }
+      ctx.restore();
+      return false;
+    },
+  });
+
   // MA Ribbon NEO: oito médias numa única instância (padrão: SMA 25, 30, 35, 40, 45, 50, 100 e 200 no fechamento,
   // como "MA 25 close 0" das referências). Cores e traços padrão ficam em NEO_SERIES (chart-pane).
   registerIndicator<Row, number, { types?: string[]; source?: Source }>({

@@ -123,6 +123,22 @@ export function lastChange(points: Point[], kind: "pct" | "diff"): number | null
 }
 
 /**
+ * Variação num período (dias): 1 dia = contra a observação anterior (séries diárias de dias úteis);
+ * mais = contra o valor de `days` dias antes. % ou diferença (p.p./pontos). Histórico curto → null.
+ */
+export function changeOverPeriod(points: Point[], days: number, kind: "pct" | "diff"): number | null {
+  if (days <= 1) return lastChange(points, kind);
+  const last = points.at(-1);
+  if (!last) return null;
+  const target = last[0] - days * DAY;
+  if (points[0][0] > target + DAY) return null;
+  const base = valueAt(points, target);
+  if (!base) return null;
+  if (kind === "diff") return last[1] - base[1];
+  return base[1] === 0 ? null : ((last[1] - base[1]) / base[1]) * 100;
+}
+
+/**
  * Última decisão numa série de taxa oficial (degraus): data em que o valor mudou e a mudança (p.p.).
  * `minStep` ignora oscilações menores (ex.: taxa de mercado em volta da meta).
  */

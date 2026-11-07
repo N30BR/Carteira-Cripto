@@ -17,7 +17,7 @@ function setup() {
   return { db, u: mk("ana"), other: mk("bia") };
 }
 
-const tx = (date: string, kind: "in" | "out", amountCents: number, description = "x") => ({ date, kind, description, amountCents });
+const tx = (date: string, kind: "in" | "out", amountCents: number, description = "x") => ({ date, kind, description, amountCents, accountId: null });
 
 describe("transações", () => {
   test("cria, lista do mês em ordem de data (mais recente primeiro), edita e exclui", () => {

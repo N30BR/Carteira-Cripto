@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { deleteTransactionAction, saveTransactionAction, type TransactionForm } from "@/app/(app)/lancamentos/transaction-actions";
+import { createTxAccountAction, deleteTransactionAction, saveTransactionAction } from "@/app/(app)/lancamentos/transaction-actions";
 import { pageWindow } from "@/lib/pagination";
 import { safeAction } from "@/lib/safe-action";
 import { CURRENCY_SYMBOL, type RefCurrency } from "@/lib/currency";
@@ -20,7 +20,11 @@ const selectClass =
 
 const centsToInput = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
 
-type Draft = { date: string; kind: "" | "in" | "out"; description: string; amount: string };
+/** accountId: id da conta do R$ (texto do select; "" = não escolhida). */
+type Draft = { date: string; kind: "" | "in" | "out"; description: string; amount: string; accountId: string };
+/** Contas do R$ (compartilhadas com Lançamentos e R$). */
+export type TxAccount = { id: number; name: string };
+const NEW_ACCOUNT = "__nova__";
 
 /** Formulário de transação numa fileira: Data, Entrada/Saída, Descrição, Valor e o botão. */
 export function TransactionFormRow({
@@ -30,8 +34,11 @@ export function TransactionFormRow({
   onDone,
   layout = "row",
   onCancel,
+  accounts = [],
 }: {
   initial: Draft;
+  /** Contas para escolher (entrada soma na conta; saída subtrai). */
+  accounts?: TxAccount[];
   editId?: number | null;
   submitLabel: string;
   /** Depois de salvar; recebe o que foi enviado (a janela usa para lembrar data e tipo no próximo). */
@@ -42,6 +49,9 @@ export function TransactionFormRow({
 }) {
   const [f, setF] = useState<Draft>(initial);
   const [error, setError] = useState<string>();
+  // Contas criadas aqui entram na lista na hora (e ficam no R$ e em Lançamentos).
+  const [list, setList] = useState(accounts);
+  const [newName, setNewName] = useState("");
   const [pending, start] = useTransition();
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setF((s) => ({ ...s, [k]: v }));
   const prefix = editId === null ? "tx" : `tx-${editId}`;
@@ -49,11 +59,19 @@ export function TransactionFormRow({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     start(async () => {
-      const r = await safeAction(() => saveTransactionAction(editId, f as TransactionForm));
+      const r = await safeAction(() =>
+        saveTransactionAction(editId, {
+          date: f.date,
+          kind: f.kind as "in" | "out",
+          description: f.description,
+          amount: f.amount,
+          accountId: Number(f.accountId) || null,
+        }),
+      );
       if (r.ok) {
         setError(undefined);
         // Nova transação: limpa os campos, mas mantém a data e o tipo para a próxima.
-        if (editId === null) setF({ ...initial, date: f.date, kind: f.kind });
+        if (editId === null) setF({ ...initial, date: f.date, kind: f.kind, accountId: f.accountId });
         // Avisa a data: lançada em outro mês, ela aparece quando esse mês for escolhido.
         toast.success(`${editId === null ? "Transação lançada" : "Transação atualizada"} em ${dateBr(f.date)}`);
         onDone?.(f);
@@ -68,7 +86,7 @@ export function TransactionFormRow({
         className={
           modal
             ? "grid gap-3 sm:grid-cols-2 sm:items-end"
-            : "grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_2fr_minmax(130px,1fr)_auto] lg:items-end"
+            : "grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(140px,1fr)_minmax(130px,1fr)_minmax(150px,1fr)_2fr_minmax(120px,1fr)_auto] lg:items-end"
         }
       >
         <div className="flex flex-col gap-1.5">
@@ -90,6 +108,47 @@ export function TransactionFormRow({
             <option value="in">Entrada</option>
             <option value="out">Saída</option>
           </select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${prefix}-account`}>{f.kind === "out" ? "Conta de origem *" : f.kind === "in" ? "Conta de destino *" : "Conta *"}</Label>
+          <select
+            id={`${prefix}-account`}
+            className={selectClass}
+            value={f.accountId}
+            onChange={(e) => set("accountId", e.target.value)}
+            title="Entrada soma no saldo da conta; saída subtrai (contas do R$)"
+          >
+            <option value="">Selecione...</option>
+            {list.map((a) => (
+              <option key={a.id} value={String(a.id)}>
+                {a.name}
+              </option>
+            ))}
+            <option value={NEW_ACCOUNT}>+ Nova conta…</option>
+          </select>
+          {f.accountId === NEW_ACCOUNT && (
+            <div className="flex gap-1.5">
+              <Input aria-label="Nome da nova conta" placeholder="Nome da conta" maxLength={40} value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending || !newName.trim()}
+                onClick={() =>
+                  start(async () => {
+                    const r = await safeAction(() => createTxAccountAction(newName));
+                    if (!r.ok || !("id" in r) || !r.id) return setError(r.ok ? "Não foi possível criar a conta" : r.error);
+                    const id = r.id;
+                    setList((l) => (l.some((a) => a.id === id) ? l : [...l, { id, name: newName.trim() }].sort((a, b) => a.name.localeCompare(b.name))));
+                    set("accountId", String(id));
+                    setNewName("");
+                    setError(undefined);
+                  })
+                }
+              >
+                Criar
+              </Button>
+            </div>
+          )}
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${prefix}-desc`}>Descrição *</Label>
@@ -132,7 +191,7 @@ export function TransactionFormRow({
   );
 }
 
-export const emptyDraft = (date: string): Draft => ({ date, kind: "", description: "", amount: "" });
+export const emptyDraft = (date: string, accountId = ""): Draft => ({ date, kind: "", description: "", amount: "", accountId });
 
 /** Tabela de transações com filtro Todas/Entradas/Saídas, busca, edição e exclusão. */
 export function TransactionsTable({
@@ -143,8 +202,11 @@ export function TransactionsTable({
   factor = 1,
   pageSize,
   formLayout = "row",
+  accounts = [],
 }: {
   items: Transaction[];
+  /** Contas do R$ (para editar a conta de uma transação). */
+  accounts?: TxAccount[];
   emptyText: string;
   kindHeader?: string;
   /** Moeda de exibição; `factor` converte centavos de real em unidades mínimas dela. */
@@ -235,8 +297,10 @@ export function TransactionsTable({
                   <TableCell>
                     <KindBadge kind={t.kind} />
                   </TableCell>
-                  <TableCell className="max-w-[28ch] truncate" title={t.description}>
-                    {t.description}
+                  <TableCell className="max-w-[28ch]" title={t.description}>
+                    <span className="block truncate">{t.description}</span>
+                    {/* Conta do R$ movimentada (transações antigas podem não ter). */}
+                    <span className="block truncate text-xs text-muted-foreground">{t.accountName ?? "Sem conta (não altera saldo)"}</span>
                   </TableCell>
                   <TableCell className="text-right">
                     <SignedMoney cents={(t.kind === "in" ? t.amountCents : -t.amountCents) * factor} currency={currency} />
@@ -276,7 +340,14 @@ export function TransactionsTable({
               key={editing.id}
               editId={editing.id}
               submitLabel="Salvar"
-              initial={{ date: editing.date, kind: editing.kind, description: editing.description, amount: centsToInput(editing.amountCents) }}
+              initial={{
+                date: editing.date,
+                kind: editing.kind,
+                description: editing.description,
+                amount: centsToInput(editing.amountCents),
+                accountId: editing.accountId ? String(editing.accountId) : "",
+              }}
+              accounts={accounts}
               onDone={() => setEditing(null)}
               layout={formLayout}
               onCancel={() => setEditing(null)}

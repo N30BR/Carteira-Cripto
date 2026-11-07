@@ -6,16 +6,66 @@ import { ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { AssetRow, MacroItem, Panorama } from "@/lib/macro/panorama";
-import type { Point } from "@/lib/macro/calc";
+import { changeOverPeriod, tail, type Point } from "@/lib/macro/calc";
+import { ColumnsMenu, createColumnStore } from "@/components/dashboard/change-columns-menu";
 import {
   CURRENCY_INFO,
   MACRO_COOKIE,
   MACRO_CURRENCIES,
   MACRO_PERIODS,
   PERIOD_DAYS,
+  SECTION_PERIODS,
+  SECTION_PERIOD_LABEL,
   convertUsd,
+  type MacroPeriod,
   type MacroPrefs,
+  type SectionPeriod,
 } from "@/lib/macro/prefs";
+
+const SECTION_DAYS: Record<SectionPeriod, number> = { "1D": 1, "1S": 7, "1M": 30, "6M": 182, "1A": 365 };
+
+/** Variação e minigráfico do período escolhido na seção (a partir do histórico de ~1 ano). */
+function forPeriod(it: MacroItem, p: SectionPeriod): MacroItem {
+  if (!it.history?.length || it.unavailable) return it;
+  const days = SECTION_DAYS[p];
+  return {
+    ...it,
+    change: changeOverPeriod(it.history, days, it.changeKind === "pct" ? "pct" : "diff"),
+    changeLabel: p,
+    // 1 dia (dados diários): mostra a última semana para dar contexto ao minigráfico.
+    spark: tail(it.history, Math.max(days, 7)),
+  };
+}
+
+/** Seletor compacto de período de uma seção: [ 1D ▼ ]. */
+function PeriodPicker({ value, onChange, label }: { value: SectionPeriod; onChange: (p: SectionPeriod) => void; label: string }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          className="inline-flex items-center gap-1 rounded-lg border border-[#8b7cf6]/40 px-2 py-0.5 text-xs font-semibold hover:bg-[#8b7cf6]/15"
+        >
+          {value}
+          <ChevronDown className="size-3.5 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {SECTION_PERIODS.map((p) => (
+          <DropdownMenuItem key={p} onSelect={() => onChange(p)} className={cn(p === value && "bg-[#8b7cf6]/20")}>
+            <span className="w-7 font-semibold">{p}</span> {SECTION_PERIOD_LABEL[p]}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Colunas de variação de Ativos Principais (mesma seta ▼ da tabela de Ativos da aba Cripto). */
+const ASSET_COLUMNS = MACRO_PERIODS.map((p) => ({ key: p, label: p }));
+const useShownAssetColumns = createColumnStore<MacroPeriod>("macro-ativos-colunas", MACRO_PERIODS);
 import { cn } from "@/lib/utils";
 
 /** Atualiza a página a cada 5 min (as fontes ficam em cache no servidor; respeita os limites delas). */
@@ -125,12 +175,27 @@ function Row({ it }: { it: MacroItem }) {
   );
 }
 
-function Section({ title, subtitle, children, right }: { title: string; subtitle?: string; children: React.ReactNode; right?: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  children,
+  right,
+  titleExtra,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+  titleExtra?: React.ReactNode;
+}) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold tracking-wider text-[#a888c0] uppercase">{title}</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-sm font-semibold tracking-wider text-[#a888c0] uppercase">{title}</h2>
+            {titleExtra}
+          </div>
           {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
         </div>
         {right}
@@ -184,7 +249,7 @@ export function MacroView({ data, initialPrefs }: { data: Panorama; initialPrefs
     const id = setInterval(() => router.refresh(), AUTO_REFRESH);
     return () => clearInterval(id);
   }, [router]);
-  const liquidityCharts = data.liquidity.filter((l) => ["US", "CN", "JP", "GLOBAL"].includes(l.id));
+  const liquidityCharts = data.liquidity.filter((l) => ["US", "JP", "EU", "GLOBAL"].includes(l.id));
 
   return (
     <div className="flex flex-col gap-6">
@@ -202,13 +267,18 @@ export function MacroView({ data, initialPrefs }: { data: Panorama; initialPrefs
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="gap-2">
           <CardHeader>
-            <CardTitle className="text-base">Câmbio (Principais)</CardTitle>
-            <p className="text-xs text-muted-foreground">Taxas de referência do BCE (1 por dia útil); variação contra o dia útil anterior.</p>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">Câmbio (Principais)</CardTitle>
+              <PeriodPicker label="Período do câmbio" value={prefs.fx} onChange={(fx) => update({ ...prefs, fx })} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Taxas de referência do BCE (1 por dia útil); variação em {SECTION_PERIOD_LABEL[prefs.fx].toLowerCase()} ({prefs.fx === "1D" ? "contra o dia útil anterior" : prefs.fx}).
+            </p>
           </CardHeader>
           <CardContent>
             <ul className="divide-y divide-border/60" aria-label="Câmbio">
               {data.fx.map((it) => (
-                <Row key={it.id} it={it} />
+                <Row key={it.id} it={forPeriod(it, prefs.fx)} />
               ))}
             </ul>
           </CardContent>
@@ -291,19 +361,27 @@ export function MacroView({ data, initialPrefs }: { data: Panorama; initialPrefs
       </div>
 
       {/* 2ª linha: indicadores macro */}
-      <Section title="Indicadores Macro" subtitle="Risco, liquidez e sentimento de mercado">
+      <Section
+        title="Indicadores Macro"
+        subtitle="Risco, liquidez e sentimento de mercado"
+        right={<PeriodPicker label="Período dos indicadores" value={prefs.indicators} onChange={(indicators) => update({ ...prefs, indicators })} />}
+      >
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           {data.indicators.map((it) => (
-            <Tile key={it.id} it={it} />
+            <Tile key={it.id} it={forPeriod(it, prefs.indicators)} />
           ))}
         </div>
       </Section>
 
       {/* 3ª linha: bolsas */}
-      <Section title="Mercados Globais" subtitle="Principais bolsas mundiais — em pontos, último fechamento">
+      <Section
+        title="Mercados Globais"
+        subtitle="Principais bolsas mundiais — em pontos, último fechamento"
+        right={<PeriodPicker label="Período das bolsas" value={prefs.markets} onChange={(markets) => update({ ...prefs, markets })} />}
+      >
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {data.markets.map((it) => (
-            <Tile key={it.id} it={it} />
+            <Tile key={it.id} it={forPeriod(it, prefs.markets)} />
           ))}
         </div>
       </Section>
@@ -314,7 +392,7 @@ export function MacroView({ data, initialPrefs }: { data: Panorama; initialPrefs
       <p className="text-[11px] text-muted-foreground">
         Fontes: BCE (câmbio, via Frankfurter; M2 da Zona do Euro), FRED/Federal Reserve (juros, Treasuries, VIX, spread, curva, M2 dos EUA, S&amp;P 500,
         Nasdaq 100, Dow Jones, Nikkei 225), Banco do Japão (taxa call e M2) e Binance (ativos). Cores indicam a direção da variação, não uma avaliação
-        econômica. Dados indisponíveis aparecem como tal — nada é estimado no lugar.
+        econômica. Dados indisponíveis aparecem como tal — nada é estimado no lugar. Bolsas: último fechamento divulgado pelo FRED.
       </p>
     </div>
   );
@@ -332,6 +410,8 @@ function Assets({
   onPrefs: (p: MacroPrefs) => void;
 }) {
   const cur = CURRENCY_INFO[prefs.currency];
+  const [shownCols, setShownCols] = useShownAssetColumns();
+  const cols = MACRO_PERIODS.filter((p) => shownCols.includes(p));
   const price = (usd: number | null) => {
     const v = convertUsd(usd, prefs.currency, usdIn);
     if (v === null) return "—";
@@ -348,6 +428,11 @@ function Assets({
   );
   const selector = (
     <div className="flex flex-wrap items-center gap-2">
+      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        Período analisado
+        <PeriodPicker label="Período analisado (coluna em destaque)" value={prefs.assets} onChange={(assets) => onPrefs({ ...prefs, assets })} />
+      </span>
+      <span className="text-[11px] text-muted-foreground">Gráfico</span>
       <div className="inline-flex rounded-lg border p-0.5 text-xs" role="group" aria-label="Período do minigráfico">
         {MACRO_PERIODS.map((p) => (
           <button
@@ -379,7 +464,12 @@ function Assets({
     </div>
   );
   return (
-    <Section title="Ativos Principais" subtitle="Commodities, cripto e ativos globais" right={selector}>
+    <Section
+      title="Ativos Principais"
+      subtitle="Commodities, cripto e ativos globais"
+      titleExtra={<ColumnsMenu columns={ASSET_COLUMNS} shown={shownCols} onChange={(k) => setShownCols(k as MacroPeriod[])} />}
+      right={selector}
+    >
       <Card className="py-0">
         <CardContent className="overflow-x-auto px-0">
           <table className="w-full min-w-[860px] text-sm" aria-label="Ativos principais">
@@ -388,7 +478,8 @@ function Assets({
                 <th className="px-3 py-2 text-left font-medium">Ativo</th>
                 <th className="px-2 py-2 text-left font-medium">Ticker</th>
                 <th className="px-2 py-2 text-right font-medium">Preço ({prefs.currency})</th>
-                {MACRO_PERIODS.map((p) => (
+                <th className="bg-[#8b7cf6]/10 px-2 py-2 text-right font-semibold text-foreground">Var. {prefs.assets}</th>
+                {cols.map((p) => (
                   <th key={p} className={cn("px-2 py-2 text-right font-medium", p === prefs.period && "text-foreground")}>
                     {p}
                   </th>
@@ -407,13 +498,16 @@ function Assets({
                   </td>
                   <td className="px-2 py-2 font-mono text-xs">{r.ticker}</td>
                   {r.unavailable ? (
-                    <td colSpan={8} className="px-2 py-2 text-right">
+                    <td colSpan={3 + cols.length} className="px-2 py-2 text-right">
                       <Unavailable reason={r.unavailable} />
                     </td>
                   ) : (
                     <>
                       <td className="px-2 py-2 text-right font-semibold tabular-nums">{price(r.usd)}</td>
-                      {MACRO_PERIODS.map((p) => (
+                      <td className="bg-[#8b7cf6]/10 px-2 py-2 text-right text-xs font-semibold">
+                        <Change v={r.changes[prefs.assets]} kind="pct" />
+                      </td>
+                      {cols.map((p) => (
                         <td key={p} className="px-2 py-2 text-right text-xs">
                           <Change v={r.changes[p]} kind="pct" />
                         </td>

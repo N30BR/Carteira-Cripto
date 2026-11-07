@@ -19,6 +19,7 @@ import { staleRateWarning } from "@/lib/currency-display";
 import { getCurrentPrices } from "@/lib/prices";
 import { transactionTotals } from "@/lib/transactions/calc";
 import { listTransactions } from "@/lib/transactions/store";
+import { debitedInstallments } from "@/lib/fiat/movements";
 import { appTimeZone, todayIn } from "@/lib/validation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -100,9 +101,15 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
   // Faturas pela data em que vencem: no próprio mês, no dia do cartão (ou no mês seguinte, se o
   // vencimento for antes do fechamento). Por isso entram também as faturas do mês anterior ao período.
   const cardDays = Object.fromEntries(listCardAccounts(db, user.id).map((a) => [a.id, { dueDay: a.dueDay, closingDay: a.closingDay }]));
-  const invoiceRows = listInstallments(db, user.id, addMonths(win.fromDate.slice(0, 7), -1), win.toDate.slice(0, 7));
+  // Sem contar duas vezes: o saldo do R$ já inclui as transações com conta e as parcelas pagas que foram
+  // descontadas de uma conta; com o R$ ligado, elas ficam fora de "Entradas/Saídas" e de "Faturas".
+  const fiatOn = !disabled.includes("fiat");
+  const debited = fiatOn ? debitedInstallments(db, user.id) : new Set<string>();
+  const invoiceRows = listInstallments(db, user.id, addMonths(win.fromDate.slice(0, 7), -1), win.toDate.slice(0, 7)).filter(
+    (r) => !debited.has(`${r.expenseId}:${r.number}`),
+  );
   const invoices = invoicesDueBetween(invoiceRows, cardDays, win.fromDate, win.toDate);
-  const tx = transactionTotals(listTransactions(db, user.id, win.fromDate, win.toDate));
+  const tx = transactionTotals(listTransactions(db, user.id, win.fromDate, win.toDate).filter((t) => !fiatOn || t.accountId === null));
   const summary = consolidate({
     cryptoCents: cryptoNow,
     fiatCents: fromBrlCents(fiat.cents),
