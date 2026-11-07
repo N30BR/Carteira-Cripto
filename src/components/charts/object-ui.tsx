@@ -3,7 +3,7 @@
 // Edição de desenhos: barra rápida (clique esquerdo), configurações completas (clique direito)
 // e lista de desenhos (para mostrar de novo os ocultos).
 import { useRef, useState } from "react";
-import { Copy, Eye, EyeOff, GripVertical, Layers, Lock, LockOpen, MoreHorizontal, Pencil, Plus, Settings2, Trash2, Type } from "lucide-react";
+import { Copy, Eye, EyeOff, GripVertical, Layers, Lock, LockOpen, MoreHorizontal, Pencil, Plus, RefreshCw, Settings2, Trash2, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -244,6 +244,12 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
       )}
       <WidthMenu value={st.size ?? (isElliott(object.name) ? 2 : 1)} onChange={(size) => setStyle({ size })} />
       <StyleMenu value={st.style ?? "solid"} onChange={(style) => setStyle({ style })} />
+      {object.name === "fixedRangeVolumeProfile" && (
+        // Girar: espelha o perfil na horizontal (as barras passam para o outro lado; não vira de ponta-cabeça).
+        <ToolbarButton label="Girar" onClick={() => setStyle({ mirror: !st.mirror })} pressed={!!st.mirror}>
+          <RefreshCw />
+        </ToolbarButton>
+      )}
       <ToolbarButton label="Configurações" onClick={actions.settings}>
         <Settings2 />
       </ToolbarButton>

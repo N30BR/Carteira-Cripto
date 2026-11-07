@@ -16,6 +16,7 @@ import {
   saveChartTabAction,
 } from "@/app/(app)/graficos/actions";
 import { CHART_QUOTES, pairLabel, type ChartInterval } from "@/lib/charts/params";
+import { INVERTED_PAIRS, MARKET_SERIES, isMarketId } from "@/lib/market/ids";
 import type { ChartTab } from "@/lib/charts/store";
 import {
   CHART_INDICATORS,
@@ -34,6 +35,7 @@ import {
   type PaneTemplate,
   type TabState,
   type ToolPrefs,
+  withView,
 } from "@/lib/charts/workspace";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
 import { ONCHAIN_SERIES } from "@/lib/charts/onchain-ids";
@@ -126,10 +128,16 @@ export function ChartWorkspace({
   initialTabs,
   initialPrefs,
   symbols,
+  portfolio = [],
+  openSymbol = null,
 }: {
   initialTabs: ChartTab[];
   initialPrefs: { tools: ToolPrefs; activeTabId: number | null };
   symbols: SymbolOption[];
+  /** Pares dos ativos do Portfólio (ex.: SOLUSDT), para o Comparar. */
+  portfolio?: string[];
+  /** "Abrir em Gráficos" (aba Cripto): instrumento a abrir numa aba nova. */
+  openSymbol?: string | null;
 }) {
   const [tabs, setTabs] = useState(() => initialTabs.map((t) => ({ ...t, state: withIds(t.state) })));
   const [activeId, setActiveId] = useState(
@@ -176,14 +184,16 @@ export function ChartWorkspace({
   // Salva a aba na conta ~1 s depois da última mudança (estados consolidados, não cada movimento).
   function scheduleSave(id: number, state: TabState) {
     clearTimeout(pending.current.get(id)?.timer);
-    pending.current.set(id, { state, timer: setTimeout(() => flushSave(id), 1000) });
+    // Tela bloqueada por inatividade: o salvamento espera o desbloqueio (o servidor recusaria agora e nada se perde).
+    const run = () => (document.documentElement.hasAttribute("data-locked") ? pending.current.set(id, { state, timer: setTimeout(run, 3000) }) : flushSave(id));
+    pending.current.set(id, { state, timer: setTimeout(run, 1000) });
   }
   // Mudança numa divisão (usa o estado mais recente: o gráfico avisa de desenhos a qualquer momento).
-  function updatePaneOf(tabId: number, index: number, patch: Partial<PaneState>) {
+  function updatePaneOf(tabId: number, index: number, patch: Partial<PaneState> | ((p: PaneState) => Partial<PaneState>)) {
     setTabs((list) =>
       list.map((t) => {
         if (t.id !== tabId) return t;
-        const state = { ...t.state, panes: t.state.panes.map((p, i) => (i === index ? { ...p, ...patch } : p)) };
+        const state = { ...t.state, panes: t.state.panes.map((p, i) => (i === index ? { ...p, ...(typeof patch === "function" ? patch(p) : patch) } : p)) };
         scheduleSave(tabId, state);
         return { ...t, state };
       }),
@@ -329,15 +339,40 @@ export function ChartWorkspace({
     savePrefs(tools, id);
   }
 
-  async function addTab() {
-    if (tabs.length >= LIMITS.tabs) return toast.error(`Limite de ${LIMITS.tabs} abas`);
+  /** Aba nova (com o modelo dos gráficos novos). symbol: o instrumento (padrão: o do gráfico atual). */
+  async function addTab(symbol = pane.symbol) {
+    if (tabs.length >= LIMITS.tabs) return toast.error(`Limite de ${LIMITS.tabs} abas: feche uma para abrir outra`);
     const name = `Gráfico ${tabs.length + 1}`;
     const r = await safeAction(() => createChartTabAction(name));
     if (!r.ok) return toast.error(r.error);
     const id = (r as { ok: true; id: number }).id;
-    setTabs((list) => [...list, { id, name, state: { layout: 1, panes: [newPane(pane.symbol)] } }]);
+    const base = newPane(symbol);
+    // Séries de mercado são diárias: abrem em 1D (os tempos intradiários não existem para elas).
+    const first = isMarketId(symbol) ? { ...base, interval: "1d" as ChartInterval } : base;
+    const state: TabState = { layout: 1, panes: [first] };
+    setTabs((list) => [...list, { id, name, state }]);
+    scheduleSave(id, state);
     selectTab(id);
   }
+
+  // "Abrir em Gráficos" (aba Cripto): abre uma vez numa aba nova (as abas e desenhos existentes não mudam)
+  // e tira o parâmetro do endereço, para recarregar a página não abrir outra aba.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!openSymbol || opened.current) return;
+    const existing = tabs.find((t) => t.state.layout === 1 && t.state.panes[0]?.symbol === openSymbol);
+    // Fora do efeito (depois da montagem): já existe uma aba só com esse instrumento? Vai para ela; senão, cria.
+    // A trava fica no disparo (no modo estrito do React o efeito roda duas vezes e o 1º disparo é cancelado).
+    const timer = setTimeout(() => {
+      if (opened.current) return;
+      opened.current = true;
+      window.history.replaceState(null, "", "/graficos");
+      if (existing) selectTab(existing.id);
+      else void addTab(openSymbol);
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSymbol]);
 
   async function renameTab(t: ChartTab) {
     const typed = window.prompt("Nome da aba (apague para voltar a mostrar o par do gráfico):", tabTitle(t).label)?.trim();
@@ -459,7 +494,7 @@ export function ChartWorkspace({
           </div>
         ))}
         {tabs.length < LIMITS.tabs && (
-          <Button size="sm" variant="ghost" onClick={addTab} aria-label="Nova aba">
+          <Button size="sm" variant="ghost" onClick={() => void addTab()} aria-label="Nova aba">
             <Plus /> Aba
           </Button>
         )}
@@ -601,6 +636,7 @@ export function ChartWorkspace({
               favoriteIndicators={tools.favoriteIndicators}
               onAutoScaleChange={(autoScale) => updatePaneOf(tab.id, i, { autoScale })}
               onDrawingChange={(on) => setDrawing((d) => (on ? d : d?.pane === i ? null : d))}
+              onViewChange={(v) => updatePaneOf(tab.id, i, (cur) => ({ views: withView(cur.views, v) }))}
               handleRef={(h) => (handles.current[i] = h)}
             >
               {selected?.pane === i && selectedObject && <ObjectToolbar object={selectedObject} actions={objectOps(selected)} />}
@@ -640,6 +676,7 @@ export function ChartWorkspace({
         onClose={() => setDialog(null)}
         pane={pane}
         symbols={symbols}
+        portfolio={portfolio}
         onChange={(compares) => updatePane({ compares })}
         onSettings={(index) => {
           setDialog(null);
@@ -702,13 +739,25 @@ export function ChartWorkspace({
   );
 }
 
+/** Instrumentos de mercado (capitalização, dominância) e o par invertido BTC/ETH, para o seletor e a busca. */
+const MARKET_OPTIONS: { symbol: string; label: string; name: string; keywords: string }[] = [
+  ...MARKET_SERIES.map((m) => ({ symbol: m.id, label: m.short, name: m.name, keywords: m.keywords })),
+  ...Object.keys(INVERTED_PAIRS).map((s) => ({ symbol: s, label: pairLabel(s), name: "Bitcoin em Ethereum (ETH/BTC invertido)", keywords: "btc eth razão inverso" })),
+];
+const QUOTE_TABS = [...CHART_QUOTES, "Mercado"] as const;
+
 function SymbolDialog({ open, onClose, symbols, onPick }: { open: boolean; onClose: () => void; symbols: SymbolOption[]; onPick: (s: string) => void }) {
   const [q, setQ] = useState("");
   const [quote, setQuote] = useState<string>("USDT");
   const list = useMemo(() => {
     const s = q.trim().toUpperCase();
+    if (quote === "Mercado") return [];
     return symbols.filter((x) => x.quote === quote && (!s || x.symbol.includes(s) || x.base.startsWith(s))).slice(0, 80);
   }, [q, quote, symbols]);
+  const market = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return quote !== "Mercado" ? [] : MARKET_OPTIONS.filter((m) => !s || [m.symbol, m.label, m.name, m.keywords].join(" ").toLowerCase().includes(s));
+  }, [q, quote]);
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
@@ -717,9 +766,21 @@ function SymbolDialog({ open, onClose, symbols, onPick }: { open: boolean; onClo
         </DialogHeader>
         <div className="flex items-center gap-2">
           <Input autoFocus aria-label="Buscar par" placeholder="Buscar (ex.: SOL)" value={q} onChange={(e) => setQ(e.target.value)} />
-          <Seg label="Cotação" value={quote} options={CHART_QUOTES} onChange={setQuote} render={(v) => v} />
+          <Seg label="Cotação" value={quote} options={QUOTE_TABS} onChange={setQuote} render={(v) => v} />
         </div>
-        <ul className="grid max-h-80 grid-cols-2 gap-1 overflow-auto sm:grid-cols-3">
+        {quote === "Mercado" && (
+          <ul className="grid max-h-80 gap-1 overflow-auto sm:grid-cols-2" aria-label="Instrumentos de mercado">
+            {market.map((m) => (
+              <li key={m.symbol}>
+                <button type="button" onClick={() => onPick(m.symbol)} className="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted">
+                  <span className="font-medium">{m.label}</span> <span className="text-xs text-muted-foreground">{m.name}</span>
+                </button>
+              </li>
+            ))}
+            {!market.length && <li className="col-span-full py-6 text-center text-sm text-muted-foreground">Nenhum instrumento encontrado.</li>}
+          </ul>
+        )}
+        <ul className={cn("grid max-h-80 grid-cols-2 gap-1 overflow-auto sm:grid-cols-3", quote === "Mercado" && "hidden")}>
           {list.map((s) => (
             <li key={s.symbol}>
               <button type="button" onClick={() => onPick(s.symbol)} className="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted">
@@ -911,11 +972,14 @@ function ToolsDialog({ open, onClose, prefs, onChange }: { open: boolean; onClos
   );
 }
 
+type Entry = { c: CompareState; label: string; hint?: string; keywords?: string };
+
 function CompareDialog({
   open,
   onClose,
   pane,
   symbols,
+  portfolio,
   onChange,
   onSettings,
 }: {
@@ -923,37 +987,64 @@ function CompareDialog({
   onClose: () => void;
   pane: PaneState;
   symbols: SymbolOption[];
+  portfolio: string[];
   onChange: (c: CompareState[]) => void;
   onSettings?: (index: number) => void;
 }) {
   const [q, setQ] = useState("");
-  const [oq, setOq] = useState("");
   const full = pane.compares.length >= LIMITS.comparesPerPane;
-  const onchain = ONCHAIN_SERIES.filter((o) => {
-    const t = oq.trim().toLowerCase();
-    return !t || [o.short, o.name, o.description, o.purpose].join(" ").toLowerCase().includes(t);
-  });
   const has = (c: CompareState) => pane.compares.some((x) => x.kind === c.kind && x.id === c.id);
   const add = (c: CompareState) => !full && !has(c) && onChange([...pane.compares, c]);
-  const gold = symbols.filter((s) => s.symbol === "PAXGUSDT" || s.symbol === "XAUTUSDT");
-  const pairs = useMemo(() => {
-    const t = q.trim().toUpperCase();
-    return t ? symbols.filter((s) => s.symbol.includes(t)).slice(0, 30) : [];
-  }, [q, symbols]);
   const labelOf = compareLabel;
   // Onde aparece: escolha da pessoa, ou o padrão (juros do FRED em painel; o resto, inclusive on-chain, sobre o preço).
   const displayOf = compareDisplay;
   const patch = (i: number, p: Partial<CompareState>) => onChange(pane.compares.map((x, j) => (j === i ? ({ ...x, ...p } as CompareState) : x)));
-  const item = (c: CompareState, label: string, hint?: string) => (
+  const listed = useMemo(() => new Set(symbols.map((x) => x.symbol)), [symbols]);
+  // Lista inicial enxuta (os principais); todo o resto fica na busca "Procurar instrumento".
+  const main: Entry[] = [
+    ...(listed.has("PAXGUSDT") ? [{ c: { kind: "pair", id: "PAXGUSDT" } as CompareState, label: "Ouro (PAXG/USDT)", hint: "Binance" }] : []),
+    { c: { kind: "market", id: "BTC.D" }, label: "BTC.D — Dominância do Bitcoin", hint: "Mercado" },
+    { c: { kind: "market", id: "USDT.D" }, label: "USDT.D — Dominância do USDT", hint: "Mercado" },
+    { c: { kind: "market", id: "TOTAL3" }, label: "TOTAL3 — Market cap sem BTC e ETH", hint: "Mercado" },
+    ...(listed.has("ETHBTC") ? [{ c: { kind: "pair", id: "ETHBTC" } as CompareState, label: "ETH/BTC", hint: "Binance" }] : []),
+  ];
+  // Catálogo da busca: mercado, on-chain, macro, ativos do Portfólio e qualquer par da Binance.
+  const catalog = useMemo<Entry[]>(
+    () => [
+      ...MARKET_OPTIONS.map((m): Entry => ({ c: isMarketId(m.symbol) ? { kind: "market", id: m.symbol } : { kind: "pair", id: m.symbol }, label: `${m.label} — ${m.name}`, hint: "Mercado", keywords: m.keywords })),
+      ...ONCHAIN_SERIES.map((o): Entry => ({ c: { kind: "onchain", id: o.id }, label: `${o.short} — ${o.name}`, hint: "On-chain", keywords: `${o.description} ${o.purpose}` })),
+      ...MACRO_SERIES.map((m): Entry => ({ c: { kind: "macro", id: m.id }, label: m.label, hint: "Macro (FRED)", keywords: m.id })),
+      ...portfolio.map((p): Entry => ({ c: { kind: "pair", id: p }, label: `${pairLabel(p)} — no seu Portfólio`, hint: "Portfólio" })),
+      ...symbols.map((x): Entry => ({ c: { kind: "pair", id: x.symbol }, label: `${x.base}/${x.quote}`, hint: "Binance" })),
+    ],
+    [symbols, portfolio],
+  );
+  const results = useMemo(() => {
+    const raw = q.trim().toLowerCase();
+    if (!raw) return [];
+    const compact = raw.replace(/[s/.]/g, "");
+    const seen = new Set<string>();
+    return catalog
+      .filter((e) => {
+        const sym = e.c.id.toLowerCase().replace(/[s/.]/g, "");
+        const ok = sym.includes(compact) || e.label.toLowerCase().includes(raw) || (e.keywords ?? "").toLowerCase().includes(raw);
+        const key = e.c.kind + e.c.id;
+        if (!ok || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 40);
+  }, [q, catalog]);
+  const item = (e: Entry) => (
     <button
-      key={c.kind + c.id}
+      key={e.c.kind + e.c.id}
       type="button"
-      disabled={full || has(c)}
-      onClick={() => add(c)}
+      disabled={full || has(e.c)}
+      onClick={() => add(e.c)}
       className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
     >
-      <span>{label}</span>
-      {hint && <span className="shrink-0 text-xs text-muted-foreground">{hint}</span>}
+      <span className="min-w-0 truncate">{e.label}</span>
+      {e.hint && <span className="shrink-0 text-xs text-muted-foreground">{e.hint}</span>}
     </button>
   );
   return (
@@ -963,43 +1054,22 @@ function CompareDialog({
           <DialogTitle>Comparar na mesma janela</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          Sobre o preço, a comparação começa no mesmo ponto (desempenho relativo, sem distorcer o preço). Em painel separado, aparece com os valores reais.
+          Sobre o preço, a comparação começa no mesmo ponto (desempenho relativo) ou usa escala própria (unidades diferentes, como dominâncias em %), sem distorcer os valores. Em
+          painel separado, aparece com os valores reais. Todas compartilham o eixo do tempo do gráfico.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Ouro</p>
-            {gold.map((g) => item({ kind: "pair", id: g.symbol }, labelOf({ kind: "pair", id: g.symbol }), "Binance"))}
-            <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Macro (FRED)</p>
-            {MACRO_SERIES.map((m) => item({ kind: "macro", id: m.id }, m.label, m.pane === "sub" ? "painel" : "%"))}
-            <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">On-chain (rede Bitcoin)</p>
-            <Input aria-label="Buscar indicador on-chain" placeholder="Buscar (ex.: SOPR, ciclo)" value={oq} onChange={(e) => setOq(e.target.value)} />
-            <ul className="max-h-56 overflow-auto" aria-label="Indicadores on-chain">
-              {onchain.map((o) => {
-                const c: CompareState = { kind: "onchain", id: o.id };
-                return (
-                  <li key={o.id}>
-                    <button
-                      type="button"
-                      disabled={full || has(c)}
-                      onClick={() => add(c)}
-                      aria-label={`${o.short} — ${o.name}`}
-                      className="flex w-full flex-col rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
-                    >
-                      <span>
-                        <span className="font-medium">{o.short}</span> <span className="text-xs text-muted-foreground">{o.name}</span>
-                      </span>
-                      <span className="text-xs text-muted-foreground">{o.description}</span>
-                      <span className="text-xs text-muted-foreground/80">{o.purpose}</span>
-                      {o.note && <span className="text-[11px] text-amber-400/80">{o.note}</span>}
-                    </button>
-                  </li>
-                );
-              })}
-              {!onchain.length && <li className="px-2 py-2 text-xs text-muted-foreground">Nenhum indicador encontrado.</li>}
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Principais</p>
+            {main.map(item)}
+            <p className="mt-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Procurar instrumento (personalizado)</p>
+            <Input aria-label="Procurar instrumento" placeholder="Símbolo ou nome (ex.: TOTAL3, dominância do USDT, ETH/BTC, SOPR, juros)" value={q} onChange={(e) => setQ(e.target.value)} />
+            <ul className="max-h-72 overflow-auto" aria-label="Resultados da busca">
+              {results.map((e) => (
+                <li key={e.c.kind + e.c.id}>{item(e)}</li>
+              ))}
+              {q.trim() && !results.length && <li className="px-2 py-2 text-xs text-muted-foreground">Nenhum instrumento encontrado.</li>}
+              {!q.trim() && <li className="px-2 py-2 text-xs text-muted-foreground">Busca em: mercado (TOTAL, dominâncias), on-chain, macro (FRED), ativos do Portfólio e pares da Binance.</li>}
             </ul>
-            <p className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Outro par</p>
-            <Input aria-label="Buscar par para comparar" placeholder="Buscar (ex.: ETHUSDT)" value={q} onChange={(e) => setQ(e.target.value)} />
-            <div className="max-h-40 overflow-auto">{pairs.map((s) => item({ kind: "pair", id: s.symbol }, `${s.base}/${s.quote}`))}</div>
           </div>
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">

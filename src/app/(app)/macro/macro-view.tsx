@@ -476,15 +476,15 @@ function Assets({
             <thead>
               <tr className="border-b text-xs text-muted-foreground">
                 <th className="px-3 py-2 text-left font-medium">Ativo</th>
-                <th className="px-2 py-2 text-left font-medium">Ticker</th>
-                <th className="px-2 py-2 text-right font-medium">Preço ({prefs.currency})</th>
-                <th className="bg-[#8b7cf6]/10 px-2 py-2 text-right font-semibold text-foreground">Var. {prefs.assets}</th>
+                <th className="px-2 py-2 text-center font-medium">Ticker</th>
+                <th className="px-2 py-2 text-center font-medium">Preço ({prefs.currency})</th>
+                <th className="bg-[#8b7cf6]/10 px-2 py-2 text-center font-semibold text-foreground">Var. {prefs.assets}</th>
                 {cols.map((p) => (
-                  <th key={p} className={cn("px-2 py-2 text-right font-medium", p === prefs.period && "text-foreground")}>
+                  <th key={p} className={cn("px-2 py-2 text-center font-medium", p === prefs.period && "text-foreground")}>
                     {p}
                   </th>
                 ))}
-                <th className="w-32 px-3 py-2 text-right font-medium">Gráfico ({prefs.period})</th>
+                <th className="w-32 px-3 py-2 text-center font-medium">Gráfico ({prefs.period})</th>
               </tr>
             </thead>
             <tbody>
@@ -496,24 +496,26 @@ function Assets({
                       {r.per}
                     </span>
                   </td>
-                  <td className="px-2 py-2 font-mono text-xs">{r.ticker}</td>
+                  <td className="px-2 py-2 text-center font-mono text-xs">{r.ticker}</td>
                   {r.unavailable ? (
-                    <td colSpan={3 + cols.length} className="px-2 py-2 text-right">
+                    <td colSpan={3 + cols.length} className="px-2 py-2 text-center">
                       <Unavailable reason={r.unavailable} />
                     </td>
                   ) : (
                     <>
-                      <td className="px-2 py-2 text-right font-semibold tabular-nums">{price(r.usd)}</td>
-                      <td className="bg-[#8b7cf6]/10 px-2 py-2 text-right text-xs font-semibold">
+                      <td className="px-2 py-2 text-center font-semibold tabular-nums">{price(r.usd)}</td>
+                      <td className="bg-[#8b7cf6]/10 px-2 py-2 text-center text-xs font-semibold">
                         <Change v={r.changes[prefs.assets]} kind="pct" />
                       </td>
                       {cols.map((p) => (
-                        <td key={p} className="px-2 py-2 text-right text-xs">
+                        <td key={p} className="px-2 py-2 text-center text-xs">
                           <Change v={r.changes[p]} kind="pct" />
                         </td>
                       ))}
                       <td className="px-3 py-2">
-                        <Spark points={sparkFor(r)} />
+                        <div className="flex justify-center">
+                          <Spark points={sparkFor(r)} />
+                        </div>
                       </td>
                     </>
                   )}

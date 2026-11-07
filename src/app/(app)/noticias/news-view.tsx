@@ -198,8 +198,9 @@ export function NewsView({
           </p>
         )}
         <p>
-          Fonte: Forex Factory (impacto alto = ★★★, médio = ★★, baixo = ★). “Atual” = valor divulgado: a fonte gratuita não o informa, então fica “—”
-          (eventos já ocorridos aparecem como “Divulgado”; previsão nunca é mostrada como resultado).
+          Fonte: Forex Factory (impacto alto = ★★★, médio = ★★, baixo = ★). “Divulgado” = número publicado no dia do evento: para os principais
+          indicadores dos EUA vem do FRED/ALFRED (Federal Reserve), exatamente como saiu naquela data (variações calculadas com os valores da mesma
+          publicação). Demais eventos e regiões: a fonte gratuita não informa, então fica “—”. Previsão nunca é mostrada como resultado.
         </p>
       </div>
 
@@ -229,7 +230,7 @@ export function NewsView({
                           <th className="py-1 pr-3 font-medium">Impacto</th>
                           <th className="py-1 pr-3 font-medium">Evento</th>
                           <th className="py-1 pr-3 font-medium">Situação</th>
-                          <th className="py-1 pr-3 text-right font-medium">Atual</th>
+                          <th className="py-1 pr-3 text-right font-medium">Divulgado</th>
                           <th className="py-1 pr-3 text-right font-medium">Previsão</th>
                           <th className="py-1 text-right font-medium">Anterior</th>
                         </tr>
@@ -255,7 +256,7 @@ export function NewsView({
                                 <span className="rounded border border-[#8b7cf6]/50 px-1.5 py-0.5 text-[11px] text-[#cdb8e6]">Previsto</span>
                               )}
                             </td>
-                            <td className="py-1.5 pr-3 text-right tabular-nums" title={e.ts <= now && !e.actual ? "Valor divulgado não informado pela fonte gratuita" : undefined}>
+                            <td className="py-1.5 pr-3 text-right tabular-nums" title={e.ts > now ? undefined : e.actual ? "Valor publicado no dia (FRED/ALFRED)" : "Valor divulgado não disponível na fonte gratuita para este evento"}>
                               {e.actual ?? "—"}
                             </td>
                             <td className="py-1.5 pr-3 text-right tabular-nums">{e.forecast ?? "—"}</td>

@@ -5,6 +5,7 @@ import { normalizeUsername } from "@/lib/validation";
 import { clearPairFailures, ipLimited, pairLimited, recordIpFailure, recordPairFailure } from "./ip-limit";
 import { DUMMY_HASH, verifyPassword } from "./password";
 import { createSession } from "./sessions";
+import { checkLoginCode } from "./totp";
 
 /**
  * Bloqueio em duas camadas:
@@ -44,7 +45,8 @@ export function recordFailure(db: Db, userId: number, now = new Date()): void {
   db.update(users).set(update).where(eq(users.id, userId)).run();
 }
 
-export type LoginResult = { ok: true; token: string; expiresAt: Date } | { ok: false; reason: "invalid" | "ip" };
+/** "totp": senha certa, falta o código da verificação em duas etapas; "totp_invalid": código errado. */
+export type LoginResult = { ok: true; token: string; expiresAt: Date } | { ok: false; reason: "invalid" | "ip" | "totp" | "totp_invalid" };
 
 export function attemptLogin(
   db: Db,
@@ -52,6 +54,7 @@ export function attemptLogin(
   password: string,
   now = new Date(),
   ip: string | null = null,
+  code: string | null = null,
 ): Promise<LoginResult> {
   return serializeAuth(async () => {
     if (ipLimited(ip, now)) return { ok: false, reason: "ip" } as const;
@@ -71,6 +74,17 @@ export function attemptLogin(
       recordFailure(db, user.id, now);
       recordPairFailure(user.id, ip, now);
       return fail();
+    }
+
+    // Verificação em duas etapas (só contas que ativaram): sem código, pede; código errado conta como falha.
+    if (user.totpEnabled) {
+      if (!code) return { ok: false, reason: "totp" } as const;
+      if (!checkLoginCode(db, user.id, code, now.getTime())) {
+        recordFailure(db, user.id, now);
+        recordPairFailure(user.id, ip, now);
+        recordIpFailure(ip, now);
+        return { ok: false, reason: "totp_invalid" } as const;
+      }
     }
 
     db.update(users).set({ failedAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id)).run();

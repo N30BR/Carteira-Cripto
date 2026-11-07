@@ -29,7 +29,7 @@ const COLUMNS: { key: Key; label: string }[] = [
   { key: "name", label: "Ativo" },
   { key: "quantity", label: "Quantidade" },
   { key: "price", label: "Preço" },
-  { key: "value", label: "Valor" },
+  { key: "value", label: "Saldo" },
   { key: "share", label: "%" },
   ...CHANGE_COLUMNS,
 ];

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { requireModule } from "@/lib/auth/modules";
-import { deleteHolding, updateQuantity, upsertHolding } from "@/lib/holdings/holdings";
+import { addToHolding, deleteHolding, updateQuantity, upsertHolding } from "@/lib/holdings/holdings";
 import { isListedAsset } from "@/lib/prices";
 import { coinName } from "@/lib/prices/coin-names";
 import { parseQuantity } from "@/lib/validation";
@@ -42,6 +42,17 @@ export async function updateHoldingAction(holdingId: number, rawQuantity: string
   }
   refresh();
   return { ok: true };
+}
+
+/** "+Transação": soma uma quantidade a uma cripto que já está no portfólio. */
+export async function addTransactionAction(holdingId: number, rawQuantity: string): Promise<{ ok: true; quantity: string } | { ok: false; error: string }> {
+  const user = await requireModule("crypto");
+  if (!Number.isInteger(holdingId)) return { ok: false, error: "Escolha uma moeda do portfólio" };
+  const q = parseQuantity(String(rawQuantity ?? ""));
+  if (!q.ok) return q;
+  const r = addToHolding(getDb(), user.id, holdingId, q.value);
+  if (r.ok) refresh();
+  return r;
 }
 
 export async function deleteHoldingAction(holdingId: number): Promise<Result> {

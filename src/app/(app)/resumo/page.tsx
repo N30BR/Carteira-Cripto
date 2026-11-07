@@ -217,7 +217,7 @@ export default async function SummaryPage({ searchParams }: PageProps<"/resumo">
                 <Info className="size-3.5" /> Consolidação estimada (sem conciliação)
               </span>
               {nothingOn ? (
-                <p data-testid="sum-empty">Nenhum módulo financeiro ligado. Ligue Cripto, R$, Faturas ou Transações em Personalizar abas.</p>
+                <p data-testid="sum-empty">Nenhum módulo financeiro ligado. Ligue Portfólio, R$, Faturas ou Transações em Personalizar abas.</p>
               ) : (
                 <p>
                   {formula}. Não é o patrimônio efetivo: um gasto que já baixou o saldo de uma conta aparece de novo como fatura ou

@@ -91,11 +91,11 @@ export function AddAssetDialog({ owned }: { owned: Record<string, string> }) {
   return (
     <Dialog open={open} onOpenChange={reset}>
       <DialogTrigger asChild>
-        <Button>Adicionar ativo</Button>
+        <Button>Adicionar fundos</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Adicionar ativo</DialogTitle>
+          <DialogTitle>Adicionar fundos</DialogTitle>
           <DialogDescription>Moedas negociadas na Binance contra USDT. Busque pelo símbolo ou nome.</DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="flex flex-col gap-4">

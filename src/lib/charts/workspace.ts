@@ -3,6 +3,7 @@
 import { MACRO_IDS, type MacroId } from "./macro-ids";
 import { ONCHAIN_IDS, type OnchainId } from "./onchain-ids";
 import { CHART_INTERVALS, splitSymbol, type ChartInterval } from "./params";
+import { MARKET_IDS, isMarketId, type MarketId } from "@/lib/market/ids";
 
 export const CHART_TYPES = ["candle", "ohlc", "area", "line"] as const;
 export type ChartType = (typeof CHART_TYPES)[number];
@@ -172,6 +173,8 @@ export type OverlayStyleState = {
   labelPosition?: LabelPosition;
   /** Perfil de volume: deslocamento horizontal da exibição, em velas (não muda a faixa analisada). */
   shiftBars?: number;
+  /** Perfil de volume: espelhado na horizontal (botão "Girar"); só muda o lado das barras, não o cálculo. */
+  mirror?: boolean;
   /** Perfil de volume por faixa de preço: janela de tempo do cálculo (ms), guardada na inserção. */
   windowFrom?: number;
   windowTo?: number;
@@ -186,7 +189,7 @@ export type OverlayState = {
   locked?: boolean;
 };
 /** Série comparada na mesma divisão: outro par da Binance (ex.: ouro PAXGUSDT) ou série macro do FRED. */
-export type CompareState = ({ kind: "pair"; id: string } | { kind: "macro"; id: MacroId } | { kind: "onchain"; id: OnchainId }) & {
+export type CompareState = ({ kind: "pair"; id: string } | { kind: "macro"; id: MacroId } | { kind: "onchain"; id: OnchainId } | { kind: "market"; id: MarketId }) & {
   display?: "main" | "sub";
   color?: string;
   size?: number;
@@ -209,7 +212,18 @@ export type PaneState = {
   showOhlc?: boolean;
   /** Botão A/N: ajuste automático da escala de preço (A = true). Padrão: N. */
   autoScale?: boolean;
+  /** Zoom e posição salvos por par e tempo (voltam ao reabrir a aba, a página ou o mesmo par). Mais recente primeiro. */
+  views?: PaneView[];
 };
+/** Faixa do eixo de preço (os números da biblioteca, para restaurar exatamente o enquadramento). */
+export const AXIS_RANGE_KEYS = ["from", "to", "range", "realFrom", "realTo", "realRange", "displayFrom", "displayTo", "displayRange"] as const;
+export type AxisRangeState = Partial<Record<(typeof AXIS_RANGE_KEYS)[number], number>>;
+/**
+ * Janela visível de um gráfico: vale só para o par e o tempo em que foi salva.
+ * to: horário da vela-âncora (a do centro da tela), com toX = sua posição em pixels; null = acompanhando a vela mais recente.
+ * y: faixa de preço, só no modo N (no modo A a escala segue as velas).
+ */
+export type PaneView = { symbol: string; interval: ChartInterval; barSpace: number; to: number | null; /** Posição (px) da vela "to" no gráfico, para voltar sem desvio. */ toX?: number; y?: AxisRangeState };
 export type TabState = { layout: ChartLayout; panes: PaneState[] };
 export type ToolPrefs = {
   visible: string[];
@@ -456,6 +470,10 @@ function sanitizeOverlayStyles(v: unknown): OverlayStyleState | null {
     if (!Number.isInteger(v.shiftBars) || Math.abs(v.shiftBars as number) > 5000) return null;
     out.shiftBars = v.shiftBars as number;
   }
+  if (v.mirror !== undefined) {
+    if (typeof v.mirror !== "boolean") return null;
+    out.mirror = v.mirror;
+  }
   if (v.windowFrom !== undefined || v.windowTo !== undefined) {
     const a = v.windowFrom;
     const b = v.windowTo;
@@ -526,13 +544,15 @@ function sanitizeCompare(v: unknown): R<CompareState> {
   if (v.kind === "pair" && typeof v.id === "string" && /^[A-Z0-9]{2,20}$/.test(v.id) && splitSymbol(v.id)) return { ok: true, value: { kind: "pair", id: v.id, ...extra } };
   if (v.kind === "macro" && (MACRO_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "macro", id: v.id as MacroId, ...extra } };
   if (v.kind === "onchain" && (ONCHAIN_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "onchain", id: v.id as OnchainId, ...extra } };
+  if (v.kind === "market" && (MARKET_IDS as readonly unknown[]).includes(v.id)) return { ok: true, value: { kind: "market", id: v.id as MarketId, ...extra } };
   return fail("Comparação inválida");
 }
 
 function sanitizePane(v: unknown): R<PaneState> {
   if (!isObj(v)) return fail("Gráfico inválido");
   const symbol = typeof v.symbol === "string" ? v.symbol : "";
-  if (!/^[A-Z0-9]{2,20}$/.test(symbol) || !splitSymbol(symbol)) return fail("Par inválido");
+  // Par da Binance (ou BTCETH, o ETH/BTC invertido) ou um instrumento de mercado da lista fechada (TOTAL3, BTC.D...).
+  if (!isMarketId(symbol) && (!/^[A-Z0-9]{2,20}$/.test(symbol) || !splitSymbol(symbol))) return fail("Par inválido");
   if (!(CHART_INTERVALS as readonly unknown[]).includes(v.interval)) return fail("Tempo inválido");
   if (!(CHART_TYPES as readonly unknown[]).includes(v.chartType)) return fail("Tipo de gráfico inválido");
   if (!(CHART_SCALES as readonly unknown[]).includes(v.scale)) return fail("Escala inválida");
@@ -561,6 +581,8 @@ function sanitizePane(v: unknown): R<PaneState> {
     compares.push(r.value);
   }
   for (const k of ["legendCollapsed", "showOhlc", "autoScale"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
+  // Zoom salvo inválido não derruba o gráfico: só é descartado.
+  const views = Array.isArray(v.views) ? v.views.slice(0, MAX_VIEWS).map(sanitizeView).filter((x): x is PaneView => !!x) : [];
   return {
     ok: true,
     value: {
@@ -574,8 +596,39 @@ function sanitizePane(v: unknown): R<PaneState> {
       ...(v.legendCollapsed === undefined ? {} : { legendCollapsed: v.legendCollapsed as boolean }),
       ...(v.showOhlc === undefined ? {} : { showOhlc: v.showOhlc as boolean }),
       ...(v.autoScale === undefined ? {} : { autoScale: v.autoScale as boolean }),
+      ...(views.length ? { views } : {}),
     },
   };
+}
+
+export const MAX_VIEWS = 8;
+
+/** Guarda a janela do par/tempo (substitui a anterior do mesmo par/tempo; mais recente primeiro). */
+export function withView(views: PaneView[] | undefined, v: PaneView): PaneView[] {
+  return [v, ...(views ?? []).filter((x) => x.symbol !== v.symbol || x.interval !== v.interval)].slice(0, MAX_VIEWS);
+}
+
+/** Zoom/posição salvos: números finitos e dentro de limites; senão, descarta (o gráfico abre no padrão). */
+export function sanitizeView(v: unknown): PaneView | undefined {
+  if (!isObj(v)) return undefined;
+  if (typeof v.symbol !== "string" || v.symbol.length > 20 || !(CHART_INTERVALS as readonly unknown[]).includes(v.interval)) return undefined;
+  const barSpace = v.barSpace;
+  if (typeof barSpace !== "number" || !Number.isFinite(barSpace) || barSpace < 0.5 || barSpace > 200) return undefined;
+  const to = v.to;
+  if (to !== null && (typeof to !== "number" || !Number.isInteger(to) || to < 0 || to > 4_102_444_800_000)) return undefined;
+  const toX = typeof v.toX === "number" && Number.isFinite(v.toX) && Math.abs(v.toX) <= 20_000 ? v.toX : undefined;
+  let y: AxisRangeState | undefined;
+  if (isObj(v.y)) {
+    const out: AxisRangeState = {};
+    for (const k of AXIS_RANGE_KEYS) {
+      const n = v.y[k];
+      if (n === undefined) continue;
+      if (typeof n !== "number" || !Number.isFinite(n) || Math.abs(n) > 1e15) return { symbol: v.symbol, interval: v.interval as ChartInterval, barSpace, to, ...(toX === undefined ? {} : { toX }) };
+      out[k] = n;
+    }
+    if (typeof out.from === "number" && typeof out.to === "number" && out.to > out.from) y = out;
+  }
+  return { symbol: v.symbol, interval: v.interval as ChartInterval, barSpace, to, ...(toX === undefined ? {} : { toX }), ...(y ? { y } : {}) };
 }
 
 /** Valida o estado de uma aba; completa com gráficos padrão até o número do layout (e corta os que sobrarem). */

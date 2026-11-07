@@ -33,6 +33,8 @@ export type OverlayExtra = {
   labelPosition?: LabelPosition;
   /** Perfil de volume (faixa fixa): deslocamento da exibição, em velas (não muda a faixa analisada). */
   shift?: number;
+  /** Perfil de volume espelhado na horizontal (barras para o outro lado, sem virar de ponta-cabeça). */
+  mirror?: boolean;
   /** Perfil de volume por faixa de preço: janela de tempo do cálculo (ms), guardada na inserção. */
   windowFrom?: number;
   windowTo?: number;
@@ -381,8 +383,12 @@ export function registerOverlaysAndAxes(): void {
         // Faixa analisada (fundo discreto); não se arrasta por aqui.
         figures.push({ type: "rect", attrs: { x: x1, y: 0, width: span, height: bounding.height }, styles: { style: "fill", color: `${color.slice(0, 7)}0d` }, ignoreEvent: true });
       }
+      // "Girar": espelha o histograma dentro da própria caixa (mesmo lugar, mesma altura), trocando o lado das barras.
+      const boxL = anchor - width;
+      const boxR = anchor + sentiment + 2;
+      const mx = (x: number, w = 0) => (ex.mirror ? boxL + boxR - x - w : x);
       const rect = (x: number, y: number, w: number, h: number, c: string) =>
-        figures.push({ type: "rect", attrs: { x, y, width: w, height: h }, styles: { style: "fill", color: c }, ignoreEvent: true });
+        figures.push({ type: "rect", attrs: { x: mx(x, w), y, width: w, height: h }, styles: { style: "fill", color: c }, ignoreEvent: true });
       vp.bins.forEach((b, i) => {
         const yTop = yAxis.convertToPixel(b.to);
         const yBottom = yAxis.convertToPixel(b.from);
@@ -404,14 +410,22 @@ export function registerOverlaysAndAxes(): void {
       figures.push({
         key: "vp_body",
         type: "rect",
-        attrs: { x: anchor - width, y: Math.min(yHi, yLo), width: width + sentiment + 2, height: Math.abs(yLo - yHi) },
+        attrs: { x: boxL, y: Math.min(yHi, yLo), width: boxR - boxL, height: Math.abs(yLo - yHi) },
         styles: { style: "fill", color: "#00000001" },
       });
       const poc = vp.bins[vp.pocIndex];
       const line = (price: number, label: string, c: string) => {
         const y = yAxis.convertToPixel(price);
-        figures.push({ type: "line", attrs: { coordinates: [{ x: Math.min(x1, vx1), y }, { x: anchor + sentiment + 2, y }] }, styles: { color: c, style: "dashed", dashedValue: [4, 3] }, ignoreEvent: true });
-        figures.push({ type: "text", attrs: { x: anchor + sentiment + 6, y, text: `${label} ${fmt(price)}`, baseline: "middle" }, styles: { color: c, backgroundColor: "transparent", size: 11 }, ignoreEvent: true });
+        // Espelhado: a linha vai da caixa até o fim da faixa analisada e o rótulo fica à esquerda da caixa.
+        const from = ex.mirror ? boxL : Math.min(x1, vx1);
+        const to = ex.mirror ? Math.max(boxR, x2) : boxR;
+        figures.push({ type: "line", attrs: { coordinates: [{ x: from, y }, { x: to, y }] }, styles: { color: c, style: "dashed", dashedValue: [4, 3] }, ignoreEvent: true });
+        figures.push({
+          type: "text",
+          attrs: { x: ex.mirror ? boxL - 4 : boxR + 4, y, text: `${label} ${fmt(price)}`, baseline: "middle", align: ex.mirror ? "right" : "left" },
+          styles: { color: c, backgroundColor: "transparent", size: 11 },
+          ignoreEvent: true,
+        });
       };
       line((poc.from + poc.to) / 2, "POC", "#facc15");
       line(vp.valueArea.high, "VAH", "#60a5fa");

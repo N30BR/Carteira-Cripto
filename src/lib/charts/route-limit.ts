@@ -59,3 +59,18 @@ export function allowOnchainRequest(userId: number): boolean {
 export function resetOnchainRouteLimits(): void {
   onchainLimiter.reset();
 }
+
+// Rota de séries de mercado (capitalização e dominância), em cache de 10–60 min.
+const marketLimiter = createWindowLimiter(60, 60_000);
+
+export function allowMarketRequest(userId: number): boolean {
+  const key = String(userId);
+  if (marketLimiter.limited(key)) return false;
+  marketLimiter.hit(key);
+  return true;
+}
+
+/** Só para testes. */
+export function resetMarketRouteLimits(): void {
+  marketLimiter.reset();
+}

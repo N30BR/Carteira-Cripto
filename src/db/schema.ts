@@ -11,6 +11,13 @@ export const users = sqliteTable("users", {
   /** As categorias padrão já foram criadas uma vez (não recriar se a pessoa apagar todas). */
   todoDefaultsSeeded: integer("todo_defaults_seeded", { mode: "boolean" }).notNull().default(false),
   cardDefaultsSeeded: integer("card_defaults_seeded", { mode: "boolean" }).notNull().default(false),
+  /** Bloqueio por inatividade: minutos sem interação real (1, 5, 10, 15 ou 30). */
+  lockMinutes: integer("lock_minutes").notNull().default(10),
+  /** Verificação em duas etapas (TOTP, opcional): segredo em base32; só vale com totpEnabled. */
+  totpSecret: text("totp_secret"),
+  totpEnabled: integer("totp_enabled", { mode: "boolean" }).notNull().default(false),
+  /** Último intervalo de 30 s já usado (um código não vale duas vezes). */
+  totpLastStep: integer("totp_last_step"),
 });
 
 export const sessions = sqliteTable("sessions", {
@@ -19,6 +26,8 @@ export const sessions = sqliteTable("sessions", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  /** Última interação real da pessoa (não conta atualização automática de dados). Base do bloqueio por inatividade. */
+  lastActiveAt: integer("last_active_at", { mode: "timestamp_ms" }),
 });
 
 export const holdings = sqliteTable(

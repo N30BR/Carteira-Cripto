@@ -5,6 +5,7 @@ import { listHoldings } from "@/lib/holdings/holdings";
 import { appTimeZone, todayIn } from "@/lib/validation";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddAssetDialog } from "./add-asset-dialog";
+import { AddTransactionDialog } from "./add-transaction-dialog";
 import { ModulesEmpty } from "@/components/modules-empty";
 import { FiatSection } from "./fiat-section";
 import { HoldingRow } from "./holding-row";
@@ -27,7 +28,7 @@ export default async function AssetsPage() {
       <h1 className="text-2xl font-semibold">Meus ativos</h1>
 
       {!showCrypto && !showFiat && (
-        <ModulesEmpty what="Os módulos Cripto e R$ / Fiduciário" />
+        <ModulesEmpty what="Os módulos Portfólio e R$ / Fiduciário" />
       )}
 
       {showCrypto && (
@@ -36,11 +37,14 @@ export default async function AssetsPage() {
             <h2 id="crypto-title" className="text-xl font-semibold">
               Cripto
             </h2>
-            <AddAssetDialog owned={owned} />
+            <div className="flex items-center gap-2">
+              <AddTransactionDialog holdings={holdings} />
+              <AddAssetDialog owned={owned} />
+            </div>
           </div>
           {holdings.length === 0 ? (
             <p className="rounded-xl border border-dashed p-10 text-center text-muted-foreground">
-              Nenhum ativo ainda. Clique em <strong>Adicionar ativo</strong>{" "}
+              Nenhum ativo ainda. Clique em <strong>Adicionar fundos</strong>{" "}
               para começar.
             </p>
           ) : (

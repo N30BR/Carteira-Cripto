@@ -12,7 +12,7 @@ type Card = { label: string; href: string; module: ModuleKey | null; color: stri
 
 // Os oito módulos centrais, em 4 colunas × 2 linhas (como na referência).
 const CARDS: Card[] = [
-  { label: "Cripto", href: "/", module: "crypto", color: "#3b82f6", icon: Link2 },
+  { label: "Portfólio", href: "/", module: "crypto", color: "#3b82f6", icon: Link2 },
   { label: "R$ / Financeiro", href: "/fiduciario", module: "fiat", color: "#4ade80", icon: "R$" },
   { label: "Faturas", href: "/faturas", module: "invoices", color: "#c084fc", icon: CreditCard },
   { label: "Transações", href: "/transacoes", module: "transactions", color: "#4ade80", icon: ArrowLeftRight },

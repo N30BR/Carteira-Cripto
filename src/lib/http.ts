@@ -2,10 +2,10 @@
 // O corpo é lido aos poucos e a leitura é cortada ao passar do teto (vale também sem content-length e com
 // corpo comprimido, que chega já descomprimido). Redirecionamentos são recusados.
 
-async function fetchBytesCapped(url: string, maxBytes: number, label: string, timeoutMs: number, accept: string): Promise<Uint8Array> {
+async function fetchBytesCapped(url: string, maxBytes: number, label: string, timeoutMs: number, accept: string, headers: Record<string, string> = {}): Promise<Uint8Array> {
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(timeoutMs), headers: { Accept: accept } });
+    res = await fetch(url, { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(timeoutMs), headers: { ...headers, Accept: accept } });
   } catch {
     throw new Error(`${label} indisponível`);
   }
@@ -40,8 +40,9 @@ async function fetchBytesCapped(url: string, maxBytes: number, label: string, ti
   return bytes;
 }
 
-export async function fetchJsonCapped(url: string, maxBytes: number, label: string, timeoutMs = 20_000): Promise<unknown> {
-  const bytes = await fetchBytesCapped(url, maxBytes, label, timeoutMs, "application/json");
+/** headers: cabeçalhos extras (ex.: chave de API do servidor; nunca vão para mensagens de erro). */
+export async function fetchJsonCapped(url: string, maxBytes: number, label: string, timeoutMs = 20_000, headers?: Record<string, string>): Promise<unknown> {
+  const bytes = await fetchBytesCapped(url, maxBytes, label, timeoutMs, "application/json", headers);
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {

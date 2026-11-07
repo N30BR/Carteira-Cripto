@@ -1,6 +1,7 @@
 // Onde e como cada comparação aparece por padrão (sem dependências do navegador).
 import { MACRO_SERIES } from "./macro-ids";
 import { onchainInfo } from "./onchain-ids";
+import { marketInfo } from "@/lib/market/ids";
 import type { CompareScale, CompareState } from "./workspace";
 
 /** Painel: escolha da pessoa ou o padrão (juros do FRED em painel; o resto, inclusive on-chain, sobre o preço). */
@@ -17,6 +18,8 @@ export function compareDisplay(c: CompareState): "main" | "sub" {
 export function compareScale(c: CompareState, symbol: string): CompareScale {
   if (c.scale) return c.scale;
   if (c.kind === "onchain") return onchainInfo(c.id)?.unit === "usd" && symbol === "BTCUSDT" ? "price" : "fit";
+  // Dominâncias (%) têm outra unidade: escala própria; capitalizações (US$): desempenho em % desde o mesmo ponto.
+  if (c.kind === "market") return marketInfo(c.id)?.unit === "pct" ? "fit" : "percent";
   return "percent";
 }
 

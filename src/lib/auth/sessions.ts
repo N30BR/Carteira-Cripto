@@ -16,7 +16,7 @@ export function createSession(db: Db, userId: number, now = new Date()): { token
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
   // Aproveita para limpar sessões vencidas que nunca voltaram a ser usadas.
   db.delete(sessions).where(lte(sessions.expiresAt, now)).run();
-  db.insert(sessions).values({ idHash: hashToken(token), userId, expiresAt }).run();
+  db.insert(sessions).values({ idHash: hashToken(token), userId, expiresAt, lastActiveAt: now }).run();
   return { token, expiresAt };
 }
 

@@ -2,14 +2,16 @@
 // Lançamentos e Ativos ficam sempre visíveis; Admin segue a regra de administrador; /sobre é fixa.
 // Desligar um módulo só esconde e tira das contas: nenhum registro é apagado.
 
-export const MODULE_KEYS = ["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "macro", "todos"] as const;
+// "crypto" é a aba Portfólio (rota "/", carteira pessoal; a chave interna não muda para não perder preferências).
+// "market" é a aba Cripto (análise de mercado: on-chain, ETFs, altseason).
+export const MODULE_KEYS = ["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "macro", "market", "todos"] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
 export type ModuleInfo = { key: ModuleKey; label: string; menuLabel: string; href: string };
 
 /** Na ordem da barra de navegação. */
 export const MODULES: ModuleInfo[] = [
-  { key: "crypto", label: "Cripto", menuLabel: "Cripto", href: "/" },
+  { key: "crypto", label: "Portfólio", menuLabel: "Portfólio", href: "/" },
   { key: "fiat", label: "R$", menuLabel: "R$ / Fiduciário", href: "/fiduciario" },
   { key: "invoices", label: "Faturas", menuLabel: "Faturas", href: "/faturas" },
   { key: "transactions", label: "Transações", menuLabel: "Transações", href: "/transacoes" },
@@ -17,6 +19,7 @@ export const MODULES: ModuleInfo[] = [
   { key: "charts", label: "Gráficos", menuLabel: "Gráficos", href: "/graficos" },
   { key: "news", label: "Notícias", menuLabel: "Notícias", href: "/noticias" },
   { key: "macro", label: "Macro", menuLabel: "Macro (Panorama Macro)", href: "/macro" },
+  { key: "market", label: "Cripto", menuLabel: "Cripto (mercado)", href: "/cripto" },
   { key: "todos", label: "Pendências", menuLabel: "Pendências", href: "/pendencias" },
 ];
 

@@ -9,7 +9,10 @@ const mkUser = (db: ReturnType<typeof testDb>, u: string) =>
 
 describe("módulos (configuração central)", () => {
   test("sete módulos podem ser desligados; Lançamentos e Ativos não estão na lista", () => {
-    expect(MODULES.map((m) => m.key)).toEqual(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "macro", "todos"]);
+    // "crypto" = aba Portfólio; "market" = aba Cripto (mercado), logo depois de Macro.
+    expect(MODULES.map((m) => m.key)).toEqual(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "macro", "market", "todos"]);
+    expect(MODULES.find((m) => m.key === "crypto")?.label).toBe("Portfólio");
+    expect(MODULES.find((m) => m.key === "market")).toMatchObject({ label: "Cripto", href: "/cripto" });
     expect(MODULES.map((m) => m.href)).not.toContain("/lancamentos");
     expect(MODULES.map((m) => m.href)).not.toContain("/ativos");
   });
@@ -23,13 +26,14 @@ describe("módulos (configuração central)", () => {
   test("primeira aba ativa segue a ordem da barra; sem nenhuma, vai para Lançamentos", () => {
     expect(firstActiveHref([])).toBe("/");
     expect(firstActiveHref(["crypto"])).toBe("/fiduciario");
-    expect(firstActiveHref(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "macro", "todos"])).toBe("/lancamentos");
+    expect(firstActiveHref(["crypto", "fiat", "invoices", "transactions", "summary", "charts", "news", "macro", "market", "todos"])).toBe("/lancamentos");
   });
 
   test("descobre o módulo pela rota (inclui subpáginas); rotas fixas não têm módulo", () => {
     expect(moduleForPath("/")).toBe("crypto");
     expect(moduleForPath("/fiduciario")).toBe("fiat");
     expect(moduleForPath("/graficos")).toBe("charts");
+    expect(moduleForPath("/cripto")).toBe("market");
     expect(moduleForPath("/pendencias/x")).toBe("todos");
     expect(moduleForPath("/lancamentos")).toBeNull();
     expect(moduleForPath("/ativos")).toBeNull();

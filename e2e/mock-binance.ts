@@ -12,9 +12,10 @@ const PRICES: Record<string, { last: string; change: string; from: number; to: n
 };
 
 /** Velas com fechamento indo de `from` a `to` ao longo do período. */
-function klines(pair: string, count: number, stepMs: number): unknown[][] {
+function klines(pair: string, count: number, stepMs: number, endTime?: number): unknown[][] {
   const { from, to } = PRICES[pair];
-  const now = Date.now();
+  // Como a Binance: com endTime, as velas terminam nessa data (histórico mais antigo).
+  const now = endTime ?? Date.now();
   return Array.from({ length: count }, (_, i) => {
     const close = now - (count - 1 - i) * stepMs;
     const price = from + ((to - from) * i) / (count - 1);
@@ -64,7 +65,9 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === "/api/v3/klines" && PRICES[pair]) {
     const limit = Number(url.searchParams.get("limit"));
-    return send(url.searchParams.get("interval") === "1d" ? klines(pair, limit, DAY) : klines(pair, limit, HOUR));
+    const end = url.searchParams.get("endTime");
+    const endTime = end ? Number(end) : undefined;
+    return send(url.searchParams.get("interval") === "1d" ? klines(pair, limit, DAY, endTime) : klines(pair, limit, HOUR, endTime));
   }
   res.writeHead(404).end();
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookImage, KeyRound, Keyboard, LogOut } from "lucide-react";
+import { BookImage, KeyRound, Keyboard, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,6 +24,11 @@ export function UserMenu({ username }: { username: string }) {
         <DropdownMenuItem asChild>
           <Link href="/conta/senha">
             <KeyRound /> Trocar senha
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/conta/seguranca">
+            <ShieldCheck /> Segurança
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

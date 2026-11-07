@@ -15,11 +15,11 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByLabel("Senha").fill("senha-forte-123");
   await page.getByRole("button", { name: "Entrar" }).click();
   await expect(page.getByText("Adicione seu primeiro ativo")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Cripto" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Portfólio" })).toBeVisible();
 
   // Adicionar 0,5 BTC
   await page.goto("/ativos");
-  await page.getByRole("button", { name: "Adicionar ativo" }).click();
+  await page.getByRole("button", { name: "Adicionar fundos" }).click();
   await page.getByLabel("Moeda").fill("btc");
   await page.getByRole("option", { name: /BTC/ }).click();
   await page.getByLabel(/Quantidade de BTC/).fill("0,5");
@@ -72,10 +72,10 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
 
   // Escolher as variações da tabela pela seta ao lado de "Ativos"
   const heads = page.locator("thead th");
-  await expect(heads).toHaveText(["Ativo", "Quantidade", "Preço", "Valor ↓", "%", "24H", "1S", "1M", "6M", "1A"]);
+  await expect(heads).toHaveText(["Ativo", "Quantidade", "Preço", "Saldo ↓", "%", "24H", "1S", "1M", "6M", "1A"]);
   await page.getByRole("button", { name: "Escolher períodos da tabela" }).click();
   await page.getByRole("button", { name: "Ocultar 1S" }).click();
-  await expect(heads).toHaveText(["Ativo", "Quantidade", "Preço", "Valor ↓", "%", "24H", "1M", "6M", "1A"]);
+  await expect(heads).toHaveText(["Ativo", "Quantidade", "Preço", "Saldo ↓", "%", "24H", "1M", "6M", "1A"]);
   await page.reload();
   await expect(heads).toHaveCount(9);
   await page.getByRole("button", { name: "Escolher períodos da tabela" }).click();
@@ -266,7 +266,9 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Comparar: ouro (PAXG) sobre o preço; juros sem chave do FRED mostram aviso, sem quebrar
   await page.getByRole("button", { name: /^Comparar/ }).click();
   await page.getByRole("button", { name: "Ouro (PAXG/USDT) Binance" }).click();
-  await page.getByRole("button", { name: /Treasury 10 anos/ }).click();
+  // Os demais instrumentos ficam na busca "Procurar instrumento" (pelo nome ou pelo símbolo).
+  await page.getByLabel("Procurar instrumento").fill("treasury");
+  await page.getByRole("list", { name: "Resultados da busca" }).getByRole("button", { name: /Treasury 10 anos/ }).click();
   await expect(page.getByRole("list", { name: "Comparações no gráfico" }).locator("li")).toHaveCount(2);
   await page.keyboard.press("Escape");
   await expect(page.getByText(/Comparação UST10Y: Chave do FRED não configurada/)).toBeVisible();
@@ -379,25 +381,25 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
     await page.setViewportSize({ width: 1280, height: 720 });
   }
 
-  // Personalizar abas: desligar Cripto esconde a aba, o cartão, a seção em Ativos e o saldo no Resumo
+  // Personalizar abas: desligar Portfólio esconde a aba, o cartão, a seção em Ativos e o saldo no Resumo
   const nav = page.getByRole("navigation", { name: "Principal" });
   const toggle = async (name: string) => {
     await page.getByRole("button", { name: "Personalizar abas" }).click();
     await page.getByRole("menuitemcheckbox", { name }).click();
     await page.keyboard.press("Escape");
   };
-  await toggle("Cripto");
-  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toHaveCount(0);
-  await expect(page.locator("main").getByRole("link", { name: "Cripto" })).toHaveCount(0);
+  await toggle("Portfólio");
+  await expect(nav.getByRole("link", { name: "Portfólio", exact: true })).toHaveCount(0);
+  await expect(page.locator("main").getByRole("link", { name: "Portfólio" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Lançamentos" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Ativos" })).toBeVisible();
   await page.goto("/");
   await expect(page).toHaveURL(/\/fiduciario$/); // URL direta de módulo desligado → primeira aba ativa
   await page.goto("/ativos");
-  await expect(page.getByRole("button", { name: "Adicionar ativo" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Adicionar fundos" })).toHaveCount(0);
   await expect(page.getByRole("row", { name: /Conta PF/ })).toBeVisible();
   await page.goto("/resumo");
-  await expect(page.getByText(/Fora da conta \(módulo desligado/)).toContainText("Cripto");
+  await expect(page.getByText(/Fora da conta \(módulo desligado/)).toContainText("Portfólio");
   await expect(page.getByTestId("sum-crypto")).toHaveCount(0);
 
   // Desligar a aba em que está: vai para uma aba ativa; a escolha continua depois de recarregar
@@ -405,13 +407,13 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page).toHaveURL(/\/fiduciario$/);
   await page.reload();
   await expect(nav.getByRole("link", { name: "Resumo" })).toHaveCount(0);
-  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Portfólio", exact: true })).toHaveCount(0);
 
   // Ativos sem nenhum módulo: estado vazio, sem erro
   await toggle("R$ / Fiduciário");
   await expect(page).toHaveURL(/\/faturas$/);
   await page.goto("/ativos");
-  await expect(page.getByText(/Os módulos Cripto e R\$ \/ Fiduciário estão desligados/)).toBeVisible();
+  await expect(page.getByText(/Os módulos Portfólio e R\$ \/ Fiduciário estão desligados/)).toBeVisible();
 
   // O olho continua só cuidando da privacidade dos valores
   await page.getByRole("button", { name: "Modo discreto" }).click();
@@ -420,11 +422,11 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(page.locator("html")).not.toHaveAttribute("data-discreet", "");
 
   // Religar: tudo volta com os dados de antes
-  for (const name of ["Cripto", "R$ / Fiduciário", "Resumo"]) await toggle(name);
+  for (const name of ["Portfólio", "R$ / Fiduciário", "Resumo"]) await toggle(name);
   await page.goto("/ativos");
   await expect(page.getByRole("row", { name: /BTC/ })).toContainText("0,5");
   await expect(page.getByRole("row", { name: /Conta PF/ })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Portfólio", exact: true })).toBeVisible();
 
   // Admin: cria uma conta comum (sem marcar administrador)
   await page.goto("/admin");
@@ -445,7 +447,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await page.getByLabel("Usuário").fill("comum");
   await page.getByLabel("Senha").fill("senha-comum-123");
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(nav.getByRole("link", { name: "Cripto", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Portfólio", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Admin" })).toHaveCount(0);
   await page.goto("/admin");
   await expect(page).not.toHaveURL(/\/admin/);

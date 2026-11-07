@@ -3,6 +3,7 @@ import { getDb } from "@/db/client";
 import { requireModule } from "@/lib/auth/modules";
 import { NEWS_COOKIE, parseNewsPrefs } from "@/lib/news/calendar";
 import { getNewsData } from "@/lib/news/source";
+import { fillActuals } from "@/lib/news/actuals";
 import { appTimeZone } from "@/lib/validation";
 import { NewsView } from "./news-view";
 
@@ -17,10 +18,12 @@ export default async function NewsPage() {
   // Só o que pode aparecer (1 mês para trás e para a frente, com folga): a lista fica pequena.
   const min = now.getTime() - 40 * 86_400_000;
   const max = now.getTime() + 40 * 86_400_000;
+  // Valor divulgado dos eventos dos EUA já ocorridos (FRED/ALFRED, com cache; sem chave do FRED, fica "—").
+  const events = await fillActuals(getDb(), data.events.filter((e) => e.ts >= min && e.ts <= max), now);
   return (
     <NewsView
       initialPrefs={prefs}
-      events={data.events.filter((e) => e.ts >= min && e.ts <= max)}
+      events={events}
       tz={appTimeZone()}
       now={now.getTime()}
       fetchedAt={data.fetchedAt}

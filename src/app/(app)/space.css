@@ -83,3 +83,33 @@
     animation: none;
   }
 }
+
+/* Bloqueio por inatividade: o conteúdo continua montado (nada se perde), mas fica invisível e fora do foco;
+   só a tela de bloqueio aparece. */
+html[data-locked] body * {
+  visibility: hidden !important;
+}
+html[data-locked] #bh-lock,
+html[data-locked] #bh-lock * {
+  visibility: visible !important;
+}
+
+/* Impressão de páginas privadas: o conteúdo é trocado por um aviso (não muda a tela normal nem o modo privacidade;
+   não impede capturas de tela do sistema). */
+@media print {
+  body * {
+    display: none !important;
+  }
+  body::before {
+    content: "BLACKHOLE DASHBOARD\A\AImpressão de conteúdo privado desabilitada.";
+    white-space: pre-wrap;
+    display: block;
+    padding: 48px;
+    font: 600 20px/1.5 system-ui, sans-serif;
+    color: #000;
+    background: #fff;
+  }
+  body {
+    background: #fff !important;
+  }
+}

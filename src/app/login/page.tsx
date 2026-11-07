@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth/current";
+import { getSessionState } from "@/lib/auth/current";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Logo } from "@/components/logo";
 import { LoginForm } from "./login-form";
@@ -7,7 +7,9 @@ import { LoginForm } from "./login-form";
 export const metadata = { title: "Entrar · BlackHole Dashboard" };
 
 export default async function LoginPage() {
-  if (await getCurrentUser()) redirect("/");
+  const session = await getSessionState();
+  // Já entrou: vai para o app (ou para o desbloqueio, se a sessão estiver bloqueada por inatividade).
+  if (session) redirect(session.locked ? "/bloqueio" : "/");
   return (
     <main className="relative isolate flex flex-1 flex-col items-center bg-black px-4">
       {/* Fundo decorativo (referência login.png, sem a logo e o formulário ilustrados): buraco negro no alto,

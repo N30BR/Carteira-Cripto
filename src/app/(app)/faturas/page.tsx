@@ -377,8 +377,9 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/faturas
                       {brl(m.byAccount[a.id] ?? 0)}
                     </TableCell>
                   ))}
-                  <TableCell className="text-center tabular-nums">{brl(m.pf)}</TableCell>
-                  <TableCell className="text-center tabular-nums">{brl(m.pj)}</TableCell>
+                  {/* Despesas em vermelho suave (os títulos das colunas ficam como estão). */}
+                  <TableCell className="text-center text-red-400/80 tabular-nums">{brl(m.pf)}</TableCell>
+                  <TableCell className="text-center text-red-400/80 tabular-nums">{brl(m.pj)}</TableCell>
                   <TableCell className="text-center font-semibold tabular-nums">{brl(m.total)}</TableCell>
                 </TableRow>
               ))}

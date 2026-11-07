@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { dispose, init, type Chart, type Indicator, type KLineData, type OverlayCreate, type OverlayMode, type Period } from "klinecharts";
 import type { ChartInterval } from "@/lib/charts/params";
 import { splitSymbol } from "@/lib/charts/params";
-import type { IndicatorState, OverlayState, OverlayStyleState, PaneState, SeriesStyle } from "@/lib/charts/workspace";
+import type { AxisRangeState, IndicatorState, OverlayState, OverlayStyleState, PaneState, PaneView, SeriesStyle } from "@/lib/charts/workspace";
+import { AXIS_RANGE_KEYS } from "@/lib/charts/workspace";
 import { NEO_COLORS } from "@/lib/charts/drawing";
 import { ELLIOTT_LABELS } from "@/lib/charts/workspace";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
@@ -15,6 +16,7 @@ import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
 import { findBarIndex } from "@/lib/charts/drawing";
 import { ema, sma } from "@/lib/charts/indicators";
+import { INVERTED_PAIRS, isMarketId, marketInfo } from "@/lib/market/ids";
 
 const PERIOD: Record<ChartInterval, Period> = {
   "1m": { type: "minute", span: 1 },
@@ -35,6 +37,9 @@ const PERIOD: Record<ChartInterval, Period> = {
 };
 const LIMIT = 500;
 const POLL_MS = 15_000;
+/** Para voltar a uma janela antiga: até 20 pedidos de 1.000 velas (20 mil velas). */
+const RESTORE_PAGES = 20;
+const RESTORE_LIMIT = 1000;
 /** Ferramentas cujo dado extra é o texto (as outras guardam extensão, níveis etc.). */
 const TEXT_TOOLS = new Set(["simpleAnnotation", "simpleTag"]);
 const PRICE_ONLY = new Set(["fixedRangeVolumeProfile", "fibonacciLine", "anchoredVwap", ...Object.keys(ELLIOTT_LABELS)]);
@@ -131,7 +136,52 @@ function precisionFor(price: number): number {
   return Math.min(10, Math.max(2, Math.ceil(-Math.log10(price)) + 4));
 }
 
+const DAY_MS = 86_400_000;
+const INTRADAY: ChartInterval[] = ["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h"];
+/** Início do período de cada tempo (UTC): agrupa a série diária pelo último valor de cada período. */
+function bucketOf(t: number, interval: ChartInterval): number {
+  const d = new Date(t);
+  const day = Math.floor(t / DAY_MS) * DAY_MS;
+  if (interval === "2d" || interval === "3d") {
+    const n = interval === "2d" ? 2 : 3;
+    return Math.floor(day / (n * DAY_MS)) * n * DAY_MS;
+  }
+  if (interval === "1w") return day - ((d.getUTCDay() + 6) % 7) * DAY_MS;
+  if (interval === "1M") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+  if (interval === "6M") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() < 6 ? 0 : 6, 1);
+  if (interval === "1y") return Date.UTC(d.getUTCFullYear(), 0, 1);
+  return day;
+}
+
+/**
+ * Instrumento de mercado (TOTAL3, BTC.D...): só existem pontos diários reais, então cada ponto vira uma "vela" plana
+ * (abertura = máxima = mínima = fechamento) e o gráfico é sempre desenhado como linha/área — nunca como velas.
+ * Em tempos maiores que 1D, vale o último valor de cada período. Tempos intradiários não existem para estas séries.
+ */
+async function loadMarket(id: string, interval: ChartInterval, end: number | null): Promise<KLineData[]> {
+  if (INTRADAY.includes(interval)) throw new Error("Série diária: escolha 1D ou um tempo maior");
+  const res = await fetch(`/api/market?${new URLSearchParams({ id })}`);
+  const body = (await res.json().catch(() => null)) as { points?: Point[]; error?: string } | null;
+  if (!res.ok || !body?.points) throw new Error(body?.error ?? "Dados indisponíveis");
+  // Capitalizações em bilhões de US$ (o nome do gráfico mostra a unidade); dominâncias em %.
+  const scale = marketInfo(id)?.unit === "usd" ? 1e-9 : 1;
+  const byBucket = new Map<number, number>();
+  for (const [t, v] of body.points) byBucket.set(bucketOf(t, interval), v * scale);
+  return [...byBucket.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .filter(([t]) => end === null || t <= end)
+    .map(([timestamp, v]) => ({ timestamp, open: v, high: v, low: v, close: v }));
+}
+
 async function loadCandles(symbol: string, interval: ChartInterval, end: number | null, limit = LIMIT): Promise<KLineData[]> {
+  if (isMarketId(symbol)) return loadMarket(symbol, interval, end);
+  // Par invertido (BTC/ETH): as velas reais de ETH/BTC com os preços invertidos (máxima ↔ 1/mínima). Sem volume:
+  // o volume da fonte está na outra moeda.
+  const inverted = INVERTED_PAIRS[symbol];
+  if (inverted) {
+    const data = await loadCandles(inverted, interval, end, limit);
+    return data.map((k) => ({ timestamp: k.timestamp, open: 1 / k.open, high: 1 / k.low, low: 1 / k.high, close: 1 / k.close }));
+  }
   const q = new URLSearchParams({ symbol, interval, limit: String(limit) });
   if (end !== null) q.set("end", String(end));
   const res = await fetch(`/api/candles?${q}`);
@@ -214,6 +264,7 @@ const overlayExtend = (o: OverlayState): unknown =>
         labels: o.styles?.labels,
         labelPosition: o.styles?.labelPosition,
         shift: o.styles?.shiftBars,
+        mirror: o.styles?.mirror,
         windowFrom: o.styles?.windowFrom,
         windowTo: o.styles?.windowTo,
       } satisfies OverlayExtra);
@@ -285,9 +336,12 @@ export function ChartPane({
   onAutoScaleChange,
   favoriteIndicators,
   onDrawingChange,
+  onViewChange,
   handleRef,
   children,
 }: {
+  /** Zoom e posição atuais (para voltar igual ao reabrir a aba, a página ou o mesmo par/tempo). */
+  onViewChange?: (v: PaneView) => void;
   /** Clique nos ícones da legenda de uma comparação (ocultar, configurar, remover, mover de painel). */
   onCompareAction: (a: CompareAction) => void;
   /** Seta "^" ao lado do título: recolhe/mostra as legendas dos indicadores. */
@@ -316,13 +370,64 @@ export function ChartPane({
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
   const magnet = useRef<OverlayMode>("normal");
-  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange });
+  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange });
   useEffect(() => {
-    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange };
+    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange };
   });
+  // Botão A/N (ver abaixo): ajuste automático da escala de preço.
+  const autoScale = useRef(pane.autoScale === true);
+  // ---------- Zoom e posição de cada par/tempo ----------
+  // A janela salva volta ao montar o gráfico (trocar de aba, sair e voltar à página, recarregar) e ao voltar a um
+  // par/tempo já visto. Enquanto a janela salva é aplicada, as mudanças da própria carga não são salvas.
+  const savedViews = useRef(pane.views);
+  useEffect(() => {
+    savedViews.current = pane.views;
+  });
+  /** Par/tempo que o gráfico mostra agora (só depois de carregado). */
+  const shown = useRef<{ symbol: string; interval: ChartInterval } | null>(null);
+  const restoring = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const snapshotView = (c: Chart): PaneView | null => {
+    const at = shown.current;
+    const data = c.getDataList();
+    if (!at || !data.length || restoring.current) return null;
+    const barSpace = c.getBarSpace().bar;
+    const width = c.getSize("candle_pane", "main")?.width ?? 0;
+    const xOf = (p: { timestamp?: number; dataIndex?: number }) => (c.convertToPixel(p, { paneId: "candle_pane" }) as { x?: number }).x;
+    // Acompanhando o tempo atual: a vela mais recente está na tela. Senão, a âncora é a vela do centro da tela
+    // (sempre carregada e visível), com a posição exata em pixels.
+    const lastX = xOf({ dataIndex: data.length - 1 });
+    let to: number | null = null;
+    if (!(typeof lastX === "number" && lastX <= width)) {
+      const mid = c.convertFromPixel([{ x: width / 2 }], { paneId: "candle_pane" }) as { dataIndex?: number }[];
+      const i = Math.max(0, Math.min(data.length - 1, Math.round(mid[0]?.dataIndex ?? data.length - 1)));
+      to = data[i].timestamp;
+    }
+    let y: AxisRangeState | undefined;
+    const axis = priceAxis(c);
+    if (axis && !autoScale.current) {
+      const range = axis.getRange() as Record<string, unknown>;
+      y = {};
+      for (const k of AXIS_RANGE_KEYS) if (typeof range[k] === "number" && Number.isFinite(range[k])) y[k] = range[k] as number;
+    }
+    // Distância da âncora até a borda direita (a biblioteca segura a posição pela direita quando a largura muda).
+    const px = to === null ? undefined : xOf({ timestamp: to });
+    const toX = typeof px === "number" && Number.isFinite(px) ? Math.round((width - px) * 10) / 10 : undefined;
+    return { symbol: at.symbol, interval: at.interval, barSpace: Math.round(barSpace * 1000) / 1000, to, ...(toX === undefined ? {} : { toX }), ...(y ? { y } : {}) };
+  };
+  const flushView = () => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = undefined;
+    const c = chart.current;
+    const v = c ? snapshotView(c) : null;
+    if (v) cb.current.onViewChange?.(v);
+  };
+  const scheduleView = () => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flushView, 600);
+  };
   // Botão A/N. A: a escala de preço acompanha as velas visíveis (o ajuste automático da biblioteca).
   // N: o enquadramento fica como está (mover e dar zoom continuam livres, só sem reajuste automático).
-  const autoScale = useRef(pane.autoScale === true);
   /** Modo N: congela a faixa de preço atual (sai do automático sem mudar o que está na tela). */
   const freezePrice = (c: Chart) => {
     const a = priceAxis(c);
@@ -332,11 +437,35 @@ export function ChartPane({
    * Enquadra uma vez (par, tempo ou escala novos: a faixa anterior não serve) e, no modo N, congela de novo
    * logo depois de a biblioteca calcular a faixa.
    */
+  /** Faixa de preço salva (modo N) a aplicar no próximo enquadramento. */
+  const pendingY = useRef<AxisRangeState | null>(null);
+  /** Janela salva a realinhar depois do enquadramento (a largura do eixo de preço pode ter mudado). */
+  const pendingAlign = useRef<PaneView | null>(null);
+  /** Leva a vela-âncora exatamente à posição salva (contada a partir da borda direita). */
+  const alignTo = (c: Chart, v: PaneView) => {
+    if (v.to === null) return;
+    c.scrollToTimestamp(v.to);
+    const width = c.getSize("candle_pane", "main")?.width ?? 0;
+    const now = (c.convertToPixel({ timestamp: v.to }, { paneId: "candle_pane" }) as { x?: number }).x;
+    if (typeof v.toX === "number" && typeof now === "number" && width > 0) c.scrollByDistance(width - v.toX - now);
+  };
   const fitOnce = (c: Chart) => {
     priceAxis(c)?.setAutoCalcTickFlag(true);
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        if (!autoScale.current && chart.current === c) freezePrice(c);
+        if (chart.current !== c) return;
+        const y = pendingY.current;
+        pendingY.current = null;
+        const align = pendingAlign.current;
+        pendingAlign.current = null;
+        if (!autoScale.current) {
+          const a = priceAxis(c);
+          // Modo N com faixa salva: volta exatamente ao enquadramento de antes; senão congela o atual.
+          if (y && a) a.setRange({ ...(a.getRange() as object), ...y });
+          else freezePrice(c);
+          if (y) c.resize();
+        }
+        if (align) alignTo(c, align);
       }),
     );
   };
@@ -404,12 +533,17 @@ export function ChartPane({
       const r = data as { realTo?: number } | undefined;
       const n = c.getDataList().length;
       setAway(!!n && typeof r?.realTo === "number" && r.realTo < n - 1);
+      scheduleView();
     });
     return () => {
+      // Sai da aba ou da página: guarda a janela atual antes de desmontar.
+      flushView();
       ro.disconnect();
       dispose(node);
       chart.current = null;
     };
+    // Criado uma vez; flushView/scheduleView leem só refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Desenhos: lê do gráfico e avisa a tela (que salva na conta).
@@ -688,21 +822,48 @@ export function ChartPane({
     const { symbol, interval } = pane;
     let poll: ReturnType<typeof setInterval> | undefined;
     const fallback = splitSymbol(symbol)?.quote === "USDT" ? 2 : 8;
+    // Guarda a janela do par/tempo anterior antes de trocar; a do novo (se já visto) volta depois da carga.
+    if (shown.current && (shown.current.symbol !== symbol || shown.current.interval !== interval)) flushView();
+    const want = savedViews.current?.find((v) => v.symbol === symbol && v.interval === interval) ?? null;
+    restoring.current = true;
 
     void (async () => {
       // Busca primeiro (para já saber as casas decimais) e só então troca o par no gráfico.
       let first: KLineData[] | null = null;
+      let more = false;
       try {
         first = await loadCandles(symbol, interval, null);
+        more = first.length === LIMIT;
+        // Janela salva no passado: carrega velas mais antigas até cobrir a data (com teto de pedidos).
+        if (want?.to != null) {
+          for (let i = 0; i < RESTORE_PAGES && more && first.length && first[0].timestamp > want.to; i++) {
+            const oldest: number = first[0].timestamp;
+            const page: KLineData[] = await loadCandles(symbol, interval, oldest - 1, RESTORE_LIMIT);
+            if (!current()) return;
+            // Só velas realmente mais antigas (a ordem do tempo nunca se mistura); sem novas, para.
+            const older: KLineData[] = page.filter((k) => k.timestamp < oldest);
+            more = page.length === RESTORE_LIMIT && older.length > 0;
+            if (!older.length) break;
+            first = [...older, ...first];
+          }
+        }
         if (current()) cb.current.onError(null);
       } catch (e) {
         if (current()) cb.current.onError(e instanceof Error ? e.message : "Preços indisponíveis");
       }
       if (!current()) return;
+      // Sem dados (falha na carga): nada a restaurar; as próximas mudanças já podem ser salvas.
+      if (!first?.length) {
+        restoring.current = false;
+        shown.current = { symbol, interval };
+      }
       const precision = first?.length ? precisionFor(first[first.length - 1].close) : fallback;
       // Par/tempo novo: enquadra os preços novos (no modo N, congela em seguida).
       fitOnce(c);
-      c.setSymbol({ ticker: symbol, pricePrecision: precision, volumePrecision: 2 });
+      // Instrumento de mercado: nome com a unidade (ex.: "TOTAL3 (US$ bi)", "BTC.D (%)").
+      const info = marketInfo(symbol);
+      const ticker = info ? `${info.short} (${info.unit === "usd" ? "US$ bi" : "%"})` : symbol;
+      c.setSymbol({ ticker, pricePrecision: info ? 2 : precision, volumePrecision: 2 });
       c.setPeriod(PERIOD[interval]);
       c.setDataLoader({
         getBars: async ({ type, timestamp, callback }) => {
@@ -711,8 +872,20 @@ export function ChartPane({
           if (type === "init" && first) {
             const data = first;
             first = null;
-            callback(data, { forward: data.length === LIMIT, backward: false });
+            callback(data, { forward: more, backward: false });
+            // Zoom e posição salvos deste par/tempo (largura das velas e vela da borda direita).
+            if (want) {
+              c.setBarSpace(want.barSpace);
+              if (want.to !== null) {
+                alignTo(c, want);
+                // De novo depois que a escala de preço for aplicada (a largura do eixo pode mudar).
+                pendingAlign.current = want;
+              }
+              pendingY.current = want.y ?? null;
+            }
             fitOnce(c);
+            shown.current = { symbol, interval };
+            requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => (restoring.current = false))));
             return;
           }
           try {
@@ -728,11 +901,12 @@ export function ChartPane({
         },
         subscribeBar: ({ callback }) => {
           clearInterval(poll);
+          // Séries de mercado são diárias (cache de 10 min no servidor): sem atualização a cada 15 s.
+          if (isMarketId(symbol)) return;
           poll = setInterval(async () => {
             try {
-              const res = await fetch(`/api/candles?${new URLSearchParams({ symbol, interval, limit: "2" })}`);
-              if (!res.ok || !current()) return;
-              const data = (await res.json()) as KLineData[];
+              const data = await loadCandles(symbol, interval, null, 2);
+              if (!current()) return;
               // As duas últimas: fecha a vela anterior com os valores finais e atualiza a atual.
               const last = c.getDataList().at(-1)?.timestamp ?? 0;
               for (const bar of data) if (bar.timestamp >= last) callback(bar);
@@ -750,7 +924,9 @@ export function ChartPane({
   useEffect(() => {
     const c = chart.current;
     if (!c) return;
-    const type = pane.chartType === "candle" ? "candle_solid" : pane.chartType === "ohlc" ? "ohlc" : "area";
+    // Instrumentos de mercado só têm um valor por dia: sempre linha/área (velas seriam inventadas).
+    const lineOnly = isMarketId(pane.symbol);
+    const type = lineOnly ? "area" : pane.chartType === "candle" ? "candle_solid" : pane.chartType === "ohlc" ? "ohlc" : "area";
     c.setStyles({
       candle: {
         type,
@@ -760,7 +936,7 @@ export function ChartPane({
     c.overrideYAxis({ paneId: "candle_pane", name: pane.scale === "logarithm" ? LOG_AXIS : pane.scale });
     fitOnce(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.chartType, pane.scale]);
+  }, [pane.chartType, pane.scale, pane.symbol]);
 
   // Botão A/N: A liga o ajuste automático na hora (reenquadra os dados visíveis); N congela o enquadramento atual.
   useEffect(() => {
@@ -977,10 +1153,18 @@ export function ChartPane({
           // Linha de referência (ex.: SOPR = 1) no painel próprio.
           reference = sub ? info?.reference : undefined;
           dated = true;
+        } else if (cmp.kind === "market") {
+          // Capitalização/dominância: pontos diários reais (o valor de cada dia, sem interpolar).
+          const res = await fetch(`/api/market?${new URLSearchParams({ id: cmp.id })}`);
+          const body = (await res.json().catch(() => null)) as { points?: Point[]; error?: string } | null;
+          if (!res.ok || !body?.points) throw new Error(body?.error ?? "Dados indisponíveis");
+          points = body.points;
+          label = marketInfo(cmp.id)?.short ?? cmp.id;
+          dated = true;
         } else if (cmp.kind === "pair") {
           const data = await loadCandles(cmp.id, pane.interval, null, 1000);
           points = data.map((k) => [k.timestamp, k.close]);
-          label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : cmp.id;
+          label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : cmp.id === "BTCETH" ? "BTC/ETH" : cmp.id;
         } else {
           const res = await fetch(`/api/macro?${new URLSearchParams({ id: cmp.id })}`);
           if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Dados indisponíveis");

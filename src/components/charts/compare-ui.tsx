@@ -9,6 +9,7 @@ import { COMPARE_SCALE_LABEL, compareDisplay, compareScale } from "@/lib/charts/
 import { COMPARE_COLORS } from "@/lib/charts/colors";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
 import { ONCHAIN_SERIES } from "@/lib/charts/onchain-ids";
+import { marketInfo } from "@/lib/market/ids";
 import { COMPARE_SCALES, type CompareScale, type CompareState } from "@/lib/charts/workspace";
 import { cn } from "@/lib/utils";
 import { ColorPicker, StyleMenu, WidthMenu } from "./object-ui";
@@ -16,6 +17,8 @@ import { ColorPicker, StyleMenu, WidthMenu } from "./object-ui";
 export function compareLabel(c: CompareState): string {
   if (c.kind === "macro") return MACRO_SERIES.find((m) => m.id === c.id)?.label ?? c.id;
   if (c.kind === "onchain") return ONCHAIN_SERIES.find((o) => o.id === c.id)?.short ?? c.id;
+  if (c.kind === "market") return marketInfo(c.id)?.short ?? c.id;
+  if (c.id === "BTCETH") return "BTC/ETH";
   if (c.id === "PAXGUSDT") return "Ouro (PAXG/USDT)";
   if (c.id === "XAUTUSDT") return "Ouro (XAUT/USDT)";
   return c.id;
@@ -96,13 +99,26 @@ function CompareSettingsForm({
           <>
             <Row label="Série">
               <span className="rounded border bg-muted/40 px-2 py-1 font-mono text-xs">
-                {c.kind === "pair" ? `Binance: ${c.id}` : c.kind === "macro" ? `FRED: ${c.id}` : `On-chain: ${info?.name ?? c.id}`}
+                {c.kind === "pair"
+                  ? c.id === "BTCETH"
+                    ? "Binance: ETHBTC invertido"
+                    : `Binance: ${c.id}`
+                  : c.kind === "macro"
+                    ? `FRED: ${c.id}`
+                    : c.kind === "market"
+                      ? `Mercado: ${marketInfo(c.id)?.name ?? c.id}`
+                      : `On-chain: ${info?.name ?? c.id}`}
               </span>
             </Row>
             {info && <p className="text-xs text-muted-foreground">{info.description}</p>}
             {info?.note && <p className="text-xs text-amber-400/80">{info.note}</p>}
             {macro && <p className="text-xs text-muted-foreground">Série do FRED (Federal Reserve), com o valor de cada data publicada.</p>}
             {c.kind === "pair" && <p className="text-xs text-muted-foreground">Fechamento de cada vela do par, no mesmo tempo do gráfico.</p>}
+            {c.kind === "market" && (
+              <p className="text-xs text-muted-foreground">
+                {marketInfo(c.id)?.description} Valor diário (CoinMarketCap, Coin Metrics e DefiLlama), sem interpolar; o último ponto é o valor do momento.
+              </p>
+            )}
           </>
         )}
         {tab === "style" && (

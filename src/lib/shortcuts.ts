@@ -22,7 +22,7 @@ export const SHORTCUT_SECTIONS: { id: ShortcutSection; label: string; modules: M
   { id: "charts", label: "Gráficos", modules: ["charts"] },
   { id: "invoices", label: "Lançamentos", modules: ["invoices"] },
   { id: "todos", label: "Pendências", modules: ["todos"] },
-  { id: "tables", label: "Cripto e R$", modules: ["crypto", "fiat"] },
+  { id: "tables", label: "Portfólio e R$", modules: ["crypto", "fiat"] },
 ];
 
 export const SHORTCUTS: Shortcut[] = [
@@ -124,7 +124,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["Esc"],
     action: "Fechar menu de colunas",
     description: "Fecha o menu de escolha das colunas das tabelas.",
-    when: "Com o menu de colunas aberto (tabelas de Cripto e R$).",
+    when: "Com o menu de colunas aberto (tabelas de Portfólio e R$).",
   },
 ];
 
