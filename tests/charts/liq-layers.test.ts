@@ -1,47 +1,163 @@
 import { describe, expect, test } from "vitest";
-import { heatColor, liquidationHeatGrid, liquiditySideProfile, type LiqLevel } from "@/lib/charts/indicators";
+import {
+  DEFAULT_LEVERAGE_TIERS,
+  heatBucketOf,
+  heatColor,
+  heatIntensity,
+  heatReference,
+  heatValue,
+  liquidationHeatField,
+  volumeProfileBand,
+  type LiqHeatField,
+} from "@/lib/charts/indicators";
+import {
+  SIDE_ROWS,
+  SIDE_VALUE_AREA,
+  sideProfileFor,
+} from "@/lib/charts/side-profile";
 
-const lvl = (side: "long" | "short", price: number, from: number, to: number | null, notional: number): LiqLevel => ({ side, price, from, to, notional });
-
-describe("mapa de liquidações (grade)", () => {
-  test("liquidez ativa por faixa e tempo: soma, termina quando o preço atinge o nível e segue até o fim se não foi atingido", () => {
-    const levels = [lvl("short", 105, 0, 3, 10), lvl("short", 105.5, 1, null, 5), lvl("long", 95, 2, null, 7), lvl("long", 50, 0, null, 99)];
-    const g = liquidationHeatGrid(levels, 0, 5, 90, 110, 4, 5);
-    // Faixas de 5: [90,95) [95,100) [100,105) [105,110). 105 e 105.5 caem na linha 3; 95 na linha 1; 50 fica fora.
-    const row3 = g.segments.filter((s) => s.row === 3);
-    expect(row3).toEqual([
-      { row: 3, from: 0, to: 1, value: 10 },
-      { row: 3, from: 1, to: 3, value: 15 },
-      { row: 3, from: 3, to: 6, value: 5 },
-    ]);
-    expect(g.segments.filter((s) => s.row === 1)).toEqual([{ row: 1, from: 2, to: 6, value: 7 }]);
-    expect(g.max).toBe(15);
-  });
-
-  test("só as velas visíveis; faixa inválida não desenha", () => {
-    const g = liquidationHeatGrid([lvl("short", 105, 0, null, 10)], 3, 4, 90, 110, 4, 10);
-    expect(g.segments).toEqual([{ row: 3, from: 3, to: 5, value: 10 }]);
-    expect(liquidationHeatGrid([lvl("short", 105, 0, null, 10)], 0, 4, 110, 90, 4, 10).segments).toEqual([]);
-  });
+const H = 3_600_000;
+const bar = (
+  i: number,
+  low: number,
+  high: number,
+  close = (low + high) / 2,
+  volume = 10,
+  buyVolume?: number,
+) => ({
+  timestamp: i * H,
+  open: close,
+  high,
+  low,
+  close,
+  volume,
+  ...(buyVolume === undefined ? {} : { buyVolume }),
 });
+const column = (f: LiqHeatField, i: number) =>
+  Array.from({ length: f.buckets }, (_, j) => heatValue(f, i, j));
+const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
 
-describe("perfil lateral de liquidez", () => {
-  test("só níveis ainda não atingidos; acumulados a partir do preço atual (vendidos acima, comprados abaixo)", () => {
-    const levels = [lvl("short", 106, 0, null, 10), lvl("short", 102, 0, null, 4), lvl("short", 108, 0, 3, 100), lvl("long", 96, 0, null, 6), lvl("long", 92, 0, null, 2)];
-    const p = liquiditySideProfile(levels, 90, 110, 4, 100);
-    expect(p.rows.map((r) => r.value)).toEqual([2, 6, 4, 10]);
-    expect(p.rows.map((r) => r.side)).toEqual(["long", "long", "short", "short"]);
-    // Preço 100 está na linha 2: acima acumula 4, depois 14; abaixo acumula 4 (a linha do preço), depois 10, depois 12.
-    expect(p.cumAbove.slice(2)).toEqual([4, 14]);
-    expect(p.cumBelow.slice(0, 3)).toEqual([12, 10, 4]);
-    expect(p.totalAbove).toBe(14);
-    expect(p.totalBelow).toBe(12);
-    expect(p.max).toBe(10);
+describe("mapa de liquidações: campo histórico tempo × preço", () => {
+  // Preço parado em 99–101; OI: sem dado na vela 0, 1000 na 1, 1100 na 2 (+100), 1100 na 3, 550 na 4 (metade fechada).
+  const bars = [0, 1, 2, 3, 4].map((i) => bar(i, 99, 101, 100));
+  const oi: [number, number][] = [
+    [1 * H, 1000],
+    [2 * H, 1100],
+    [3 * H, 1100],
+    [4 * H, 550],
+  ];
+  const f = liquidationHeatField(bars, oi);
+
+  test("sem coluna antes do 1º open interest (não inventa o passado)", () => {
+    expect(f.start).toBe(1);
+    expect(sum(column(f, 0))).toBe(0);
+    expect(sum(column(f, 1))).toBe(0);
   });
 
-  test("escala de cores: azul na baixa, vermelho na alta", () => {
+  test("OI subiu: entra ΔOI × preço típico, metade comprada e metade vendida, espalhada pela faixa da vela", () => {
+    const total = 100 * 100;
+    expect(sum(column(f, 2))).toBeCloseTo(total, 0);
+    let long = 0;
+    let short = 0;
+    for (let j = 0; j < f.buckets; j++) {
+      long += f.long[(2 - f.start) * f.buckets + j];
+      short += f.short[(2 - f.start) * f.buckets + j];
+    }
+    expect(long).toBeCloseTo(total / 2, 0);
+    expect(short).toBeCloseTo(total / 2, 0);
+    // 10x comprado: a liquidação fica perto de 90,5–91 (não num preço só): várias faixas ocupadas.
+    const a = heatBucketOf(f, 99 * (1 - 0.1 + 0.005));
+    const z = heatBucketOf(f, 101 * (1 - 0.1 + 0.005));
+    expect(z - a).toBeGreaterThan(1);
+    for (let j = a; j <= z; j++) expect(heatValue(f, 2, j)).toBeGreaterThan(0);
+    // Nada acima do preço do lado comprado.
+    for (let j = heatBucketOf(f, 102); j < f.buckets; j++)
+      expect(f.long[(2 - f.start) * f.buckets + j]).toBe(0);
+  });
+
+  test("persiste enquanto o preço não chega; o que a vela seguinte tocou é liquidado; OI caindo à metade reduz à metade", () => {
+    // Faixas fora do caminho do preço (99–101): iguais na vela seguinte.
+    const away = (i: number) =>
+      sum(
+        column(f, i).filter(
+          (_, j) => j < heatBucketOf(f, 98.9) || j > heatBucketOf(f, 101.1),
+        ),
+      );
+    expect(away(3)).toBeCloseTo(away(2), 0);
+    expect(away(3)).toBeGreaterThan(0);
+    // 100x (±0,5%) cai dentro da faixa de 99–101: liquidado na vela seguinte.
+    expect(heatValue(f, 2, heatBucketOf(f, 100))).toBeGreaterThan(0);
+    expect(heatValue(f, 3, heatBucketOf(f, 100))).toBe(0);
+    expect(sum(column(f, 4))).toBeCloseTo(sum(column(f, 3)) / 2, 0);
+  });
+
+  test("o preço passando pelo nível liquida (zera aquelas faixas de preço)", () => {
+    const moved = [...bars.slice(0, 3), bar(3, 89, 101, 95)];
+    const g = liquidationHeatField(moved, oi.slice(0, 3));
+    // Comprados de 10x (≈ 90–91) foram atingidos pela mínima de 89.
+    expect(heatValue(g, 3, heatBucketOf(g, 90.6))).toBe(0);
+    expect(heatValue(g, 2, heatBucketOf(g, 90.6))).toBeGreaterThan(0);
+    // Vendidos de 10x (≈ 109–110) seguem vivos.
+    expect(heatValue(g, 3, heatBucketOf(g, 109.6))).toBeGreaterThan(0);
+  });
+
+  test("sem open interest: sem mapa", () => {
+    expect(liquidationHeatField(bars, []).start).toBe(-1);
+    expect(
+      DEFAULT_LEVERAGE_TIERS.reduce((s, t) => s + t.weight, 0),
+    ).toBeCloseTo(1);
+  });
+
+  test("escala: referência por percentil (um pico isolado não apaga o resto) e intensidade proporcional ao valor", () => {
+    const ref = heatReference(f, 0, 4, 0, f.buckets - 1);
+    expect(ref).toBeGreaterThan(0);
+    expect(heatIntensity(0, ref)).toBe(0);
+    expect(heatIntensity(ref, ref)).toBeCloseTo(1);
+    expect(heatIntensity(ref * 50, ref)).toBe(1);
+    expect(heatIntensity(ref / 10, ref)).toBeCloseTo(0.1);
+    expect(heatIntensity(ref / 2, ref)).toBeCloseTo(0.5);
+  });
+
+  test("cores: azul-marinho na baixa, vermelho na alta", () => {
     expect(heatColor(0)).toBe("rgba(12, 26, 92, 1)");
     expect(heatColor(1)).toBe("rgba(235, 40, 30, 1)");
     expect(heatColor(2)).toBe(heatColor(1));
+  });
+});
+
+describe("perfil de volume lateral = cálculo da ferramenta Faixa Fixa", () => {
+  const data = Array.from({ length: 30 }, (_, i) =>
+    bar(i, 100 + (i % 5), 104 + (i % 7), 102 + (i % 3), 10 + i, 4 + (i % 4)),
+  );
+
+  test("mesmas velas, mesma faixa de preço e mesmos parâmetros → resultado idêntico", () => {
+    const side = sideProfileFor(data as never, 5, 20, 101, 109);
+    const tool = volumeProfileBand(
+      data,
+      5,
+      20,
+      101,
+      109,
+      SIDE_ROWS,
+      SIDE_VALUE_AREA,
+    );
+    expect(side).toEqual(tool);
+    expect(SIDE_ROWS).toBe(24);
+    expect(side.bins).toHaveLength(24);
+  });
+
+  test("só as velas da janela e só o volume dentro da faixa de preço", () => {
+    const all = sideProfileFor(data as never, 0, 29, 0, 1000);
+    const part = sideProfileFor(data as never, 10, 19, 0, 1000);
+    const vol = (from: number, to: number) =>
+      data.slice(from, to + 1).reduce((s, b) => s + b.volume, 0);
+    expect(all.bins.reduce((s, b) => s + b.volume, 0)).toBeCloseTo(vol(0, 29));
+    expect(part.bins.reduce((s, b) => s + b.volume, 0)).toBeCloseTo(
+      vol(10, 19),
+    );
+    // Compras = volume comprador real da Binance (buyVolume).
+    expect(part.bins.reduce((s, b) => s + b.buy, 0)).toBeCloseTo(
+      data.slice(10, 20).reduce((s, b) => s + (b.buyVolume ?? 0), 0),
+    );
   });
 });

@@ -14,7 +14,7 @@ import { compareDisplay, compareScale } from "@/lib/charts/compare";
 import type { Point } from "@/lib/charts/macro-math";
 import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
-import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqSideHit } from "./liq-layers";
+import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqMapHit, mapTipLines, sideHit, sideTipLines } from "./liq-layers";
 import { findBarIndex } from "@/lib/charts/drawing";
 import { ema, sma } from "@/lib/charts/indicators";
 import { crossPair, invertedPair, isMarketId, marketInfo, ratioCandles } from "@/lib/market/ids";
@@ -1038,7 +1038,8 @@ export function ChartPane({
       c.setOffsetRightDistance(sideBase.current);
       sideBase.current = null;
     }
-    if (!pane.liqMap && !pane.sideProfile) return;
+    // O open interest só serve ao mapa (o perfil lateral é de volume, com as próprias velas).
+    if (!pane.liqMap) return;
     if (liqOi.current?.key === key) return;
     let cancelled = false;
     const apply = (data: { oi: [number, number][]; status?: string }) => {
@@ -1061,8 +1062,9 @@ export function ChartPane({
     };
   }, [pane.liqMap, pane.sideProfile, pane.symbol, pane.interval]);
 
-  // Perfil lateral: tela própria colada à direita da área do preço, por cima de tudo. Redesenha só quando muda algo
-  // (velas, faixa visível, escala de preço ou tamanho).
+  // Perfil de volume lateral: tela própria colada à direita da área do preço, por cima de tudo, com o cálculo da
+  // ferramenta Faixa Fixa sobre as velas e a faixa de preço visíveis. Redesenha só quando muda algo (velas, janela
+  // visível, escala de preço ou tamanho).
   useEffect(() => {
     if (!pane.sideProfile) {
       sideBox.current = null;
@@ -1084,8 +1086,11 @@ export function ChartPane({
       const lo = bottom?.value ?? NaN;
       const data = c.getDataList();
       const last = data[data.length - 1];
-      const liq = liqOi.current?.key === `${pane.symbol}|${pane.interval}` ? liqOi.current.data : { oi: [] as [number, number][], status: "Carregando..." };
-      const key = [size.left, size.top, size.width, H, lo, hi, data.length, last?.timestamp, last?.close, liq.oi.length, liq.status].join("|");
+      // Velas visíveis (o mesmo intervalo usado pelos perfis de volume da faixa visível).
+      const range = c.getVisibleRange();
+      const from = Math.max(0, range.from);
+      const to = Math.min(data.length - 1, range.to - 1);
+      const key = [size.left, size.top, size.width, H, lo, hi, data.length, last?.timestamp, last?.close, from, to].join("|");
       if (key === lastKey) return;
       lastKey = key;
       const left = size.left + size.width - W;
@@ -1108,9 +1113,9 @@ export function ChartPane({
         height: H,
         lo,
         hi,
+        from,
+        to,
         data,
-        oi: liq.oi,
-        status: liq.status,
         yOf: (price) => (c.convertToPixel({ value: price }, { paneId: "candle_pane" }) as { y?: number }).y ?? 0,
       });
     };
@@ -1118,8 +1123,8 @@ export function ChartPane({
     return () => cancelAnimationFrame(raf);
   }, [pane.sideProfile, pane.symbol, pane.interval]);
 
-  // Dica da faixa lateral: faixa de preço e liquidez sob o cursor.
-  const [sideTip, setSideTip] = useState<{ x: number; y: number; right: number; from: number; to: number; value: number } | null>(null);
+  // Dica do mouse: perfil lateral (faixa de preço e volume) ou mapa de liquidações (data, preço e liquidez estimada).
+  const [tip, setTip] = useState<{ id: string; x: number; y: number; side: "left" | "right"; title: string; lines: [string, string][] } | null>(null);
 
   // Indicadores: recria quando a lista muda (sem mexer nas comparações).
   const indicatorIds = useRef<string[]>([]);
@@ -1480,16 +1485,29 @@ export function ChartPane({
         }, 0);
       }}
       onMouseMove={(e) => {
-        if (!pane.sideProfile || !el.current) return sideTip && setSideTip(null);
+        const clear = () => tip && setTip(null);
+        if ((!pane.sideProfile && !pane.liqMap) || !el.current || e.buttons) return clear();
         const r = el.current.getBoundingClientRect();
         const x = e.clientX - r.left;
         const y = e.clientY - r.top;
         const box = sideBox.current;
-        const hit = box ? liqSideHit("bh_side", x - box.left, y - box.top) : null;
-        if (!hit) return sideTip && setSideTip(null);
-        if (!sideTip || sideTip.from !== hit.from || Math.abs(sideTip.y - y) > 2) setSideTip({ x, y, right: r.width - x + 12, ...hit });
+        // Sobre a faixa lateral: só a dica do perfil.
+        if (pane.sideProfile && box && x >= box.left) {
+          const h = sideHit("bh_side", x - box.left, y - box.top);
+          if (!h) return clear();
+          const id = `s${h.from}`;
+          if (tip?.id !== id || Math.abs(tip.y - y) > 2) setTip({ id, x: r.width - x + 12, y, side: "right", title: "Perfil de volume", lines: sideTipLines(h) });
+          return;
+        }
+        const size = pane.liqMap ? chart.current?.getSize("candle_pane", "main") : null;
+        const h = size ? liqMapHit(x - size.left, y - size.top) : null;
+        if (!h) return clear();
+        const id = `m${h.time}|${h.from}`;
+        const nearRight = x > r.width - 280;
+        if (tip?.id !== id || Math.abs(tip.y - y) > 2)
+          setTip({ id, x: nearRight ? r.width - x + 14 : x + 14, y, side: nearRight ? "right" : "left", title: "Liquidações (estimativa)", lines: mapTipLines(h) });
       }}
-      onMouseLeave={() => sideTip && setSideTip(null)}
+      onMouseLeave={() => tip && setTip(null)}
       className={`relative h-full min-h-0 w-full rounded-lg border ${active ? "border-[#8b7cf6]" : "border-border"}`}
       data-testid="chart-pane"
     >
@@ -1507,29 +1525,23 @@ export function ChartPane({
           </svg>
         </button>
       )}
-      {pane.sideProfile && <canvas ref={sideCanvas} aria-label="Perfil lateral de liquidez" className="pointer-events-none absolute z-[5]" />}
-      {/* Dica da faixa lateral de liquidez (como na referência: faixa de preço e liquidez alavancada). */}
-      {sideTip && (
+      {pane.sideProfile && <canvas ref={sideCanvas} aria-label="Perfil de volume lateral" className="pointer-events-none absolute z-[5]" />}
+      {tip && (
         <div
           role="tooltip"
           className="pointer-events-none absolute z-20 rounded-md border bg-popover/95 px-2.5 py-1.5 font-mono text-[11px] leading-5 shadow-lg"
-          style={{ right: sideTip.right, top: Math.max(4, sideTip.y - 24) }}
+          style={{ [tip.side]: tip.x, top: Math.max(4, tip.y - 24) }}
         >
-          <div>
-            <span className="text-muted-foreground">Faixa de preço: </span>
-            <strong>{fmtPrice((sideTip.from + sideTip.to) / 2)}</strong>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Liquidez alavancada: </span>
-            <strong>{fmtMoney(sideTip.value)}</strong>
-          </div>
+          <div className="mb-0.5 font-sans text-[11px] font-semibold text-muted-foreground">{tip.title}</div>
+          {tip.lines.map(([k, v]) => (
+            <div key={k}>
+              <span className="text-muted-foreground">{k}: </span>
+              <strong>{v}</strong>
+            </div>
+          ))}
         </div>
       )}
       {children}
     </div>
   );
 }
-
-const fmtPrice = (v: number) => `$${v.toLocaleString("pt-BR", { maximumFractionDigits: v >= 100 ? 0 : v >= 1 ? 2 : 8 })}`;
-const fmtMoney = (v: number) =>
-  v >= 1e9 ? `$${(v / 1e9).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}B` : v >= 1e6 ? `$${(v / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}M` : v >= 1e3 ? `$${(v / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}K` : `$${Math.round(v).toLocaleString("pt-BR")}`;

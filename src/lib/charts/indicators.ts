@@ -418,100 +418,174 @@ export function liquidationLevels(
   return levels;
 }
 
-// ---------- Mapa de liquidações (heatmap) e perfil lateral de liquidez ----------
-
-/** Trecho de uma faixa de preço com a mesma intensidade: de `from` a `to` (índices de vela, `to` exclusivo). */
-export type HeatSegment = { row: number; from: number; to: number; value: number };
+// ---------- Mapa de liquidações (heatmap histórico tempo × preço) ----------
 
 /**
- * Grade do mapa de liquidações: para cada faixa de preço (linha) e cada vela visível, a soma da liquidez estimada
- * ainda não liquidada naquele momento. Devolve trechos contínuos (para desenhar retângulos) e o maior valor,
- * base da escala de cores relativa (Baixa → Alta).
- * - `lo`/`hi`: faixa de preço visível; `rows`: quantas linhas; `[fromIdx, toIdx]`: velas visíveis;
- * - um nível vale da vela em que surgiu até a vela em que o preço o atingiu (ou até o fim, se não foi atingido).
+ * Campo de liquidez de liquidação ESTIMADA, vela a vela (tempo × preço), a partir do open interest (OI) real do perpétuo.
+ *
+ * Simulação, a cada vela com OI conhecido (na ordem):
+ *  1. o preço percorreu a faixa mínima–máxima da vela: a liquidez nas faixas de preço tocadas é liquidada (zera);
+ *  2. OI caiu: posições foram fechadas — a liquidez ainda aberta diminui na mesma proporção (OIₜ / OIₜ₋₁);
+ *  3. OI subiu: as posições novas (ΔOI × preço típico) entram, metade compradas e metade vendidas, repartidas pelas
+ *     faixas de alavancagem; como a entrada pode ter sido em qualquer preço da vela, o nível de liquidação de cada
+ *     faixa vira um INTERVALO (mínima e máxima da vela levadas ao nível) e o valor é repartido por ele.
+ * O retrato de cada vela (depois dos três passos) é a coluna do mapa. Antes do 1º OI não há coluna (sem dados).
+ *
+ * Preço em faixas logarítmicas (a distância de liquidação é proporcional ao preço), cobrindo as velas e os níveis
+ * de 10x (±10%). Valores em US$ (estimados).
  */
-export function liquidationHeatGrid(levels: LiqLevel[], fromIdx: number, toIdx: number, lo: number, hi: number, rows: number, lastIdx: number): { segments: HeatSegment[]; max: number } {
-  if (!(hi > lo) || rows < 1 || toIdx < fromIdx) return { segments: [], max: 0 };
-  const step = (hi - lo) / rows;
-  // Eventos por linha: +notional na vela de início, −notional na vela de fim.
-  const events = new Map<number, Map<number, number>>();
-  const end = (l: LiqLevel) => (l.to === null ? lastIdx + 1 : l.to);
-  for (const l of levels) {
-    if (l.price < lo || l.price >= hi) continue;
-    const a = Math.max(l.from, fromIdx);
-    const b = Math.min(end(l), toIdx + 1);
-    if (b <= a) continue;
-    const row = Math.min(rows - 1, Math.floor((l.price - lo) / step));
-    let ev = events.get(row);
-    if (!ev) events.set(row, (ev = new Map()));
-    ev.set(a, (ev.get(a) ?? 0) + l.notional);
-    ev.set(b, (ev.get(b) ?? 0) - l.notional);
-  }
-  const segments: HeatSegment[] = [];
-  let max = 0;
-  for (const [row, ev] of events) {
-    const xs = [...ev.keys()].sort((p, q) => p - q);
-    let acc = 0;
-    for (let i = 0; i < xs.length - 1; i++) {
-      acc += ev.get(xs[i]) as number;
-      // Arredonda para zero o resíduo de ponto flutuante quando todos os níveis da faixa terminaram.
-      if (acc > 1e-9) {
-        segments.push({ row, from: xs[i], to: xs[i + 1], value: acc });
-        if (acc > max) max = acc;
-      }
-    }
-  }
-  return { segments, max };
-}
-
-export type SideProfile = {
-  /** Liquidez ainda não liquidada por linha (de baixo para cima), na última vela. */
-  rows: { value: number; side: "long" | "short" | "mixed" }[];
-  /** Acumulado a partir do preço atual: acima (vendidos, liquidados se o preço subir) e abaixo (comprados). */
-  cumAbove: number[];
-  cumBelow: number[];
-  totalAbove: number;
-  totalBelow: number;
-  max: number;
+export type LiqHeatField = {
+  /** Índice da 1ª vela com coluna (antes: sem dados de OI). -1 = sem dados. */
+  start: number;
+  bars: number;
+  buckets: number;
+  lnLo: number;
+  lnHi: number;
+  /** Liquidez de compradas (liquidadas se o preço CAIR até ali) e vendidas (se SUBIR), [coluna × buckets + faixa]. */
+  long: Float32Array;
+  short: Float32Array;
 };
 
-/**
- * Perfil lateral de liquidez de liquidação na faixa de preço visível: quanto seria liquidado em cada faixa se o preço
- * chegasse lá (só níveis ainda não atingidos). Acima do preço atual ficam os vendidos (short) e abaixo os comprados
- * (long); os acumulados crescem a partir do preço atual em direção às pontas.
- */
-export function liquiditySideProfile(levels: LiqLevel[], lo: number, hi: number, rows: number, price: number): SideProfile {
-  const out: SideProfile = { rows: Array.from({ length: Math.max(0, rows) }, () => ({ value: 0, side: "mixed" as const })), cumAbove: [], cumBelow: [], totalAbove: 0, totalBelow: 0, max: 0 };
-  if (!(hi > lo) || rows < 1) return out;
-  const step = (hi - lo) / rows;
-  const sides = out.rows.map(() => ({ long: 0, short: 0 }));
-  for (const l of levels) {
-    if (l.to !== null || l.price < lo || l.price >= hi) continue;
-    const r = Math.min(rows - 1, Math.floor((l.price - lo) / step));
-    out.rows[r].value += l.notional;
-    sides[r][l.side] += l.notional;
-  }
-  out.rows.forEach((row, i) => {
-    row.side = sides[i].long && sides[i].short ? "mixed" : sides[i].long ? "long" : sides[i].short ? "short" : "mixed";
-    if (row.value > out.max) out.max = row.value;
+export const HEAT_BUCKETS = 480;
+
+export function liquidationHeatField(
+  bars: Bar[],
+  oi: [number, number][],
+  tiers: { leverage: number; weight: number }[] = DEFAULT_LEVERAGE_TIERS,
+  buckets = HEAT_BUCKETS,
+): LiqHeatField {
+  const empty: LiqHeatField = { start: -1, bars: bars.length, buckets, lnLo: 0, lnHi: 1, long: new Float32Array(0), short: new Float32Array(0) };
+  const sorted = [...oi].filter(([t, v]) => Number.isFinite(t) && Number.isFinite(v) && v >= 0).sort((a, b) => a[0] - b[0]);
+  let k = -1;
+  const oiAt = bars.map((b) => {
+    while (k + 1 < sorted.length && sorted[k + 1][0] <= b.timestamp) k++;
+    return k >= 0 ? sorted[k][1] : null;
   });
-  const cur = Math.min(rows - 1, Math.max(0, Math.floor((price - lo) / step)));
-  out.cumAbove = Array(rows).fill(0);
-  out.cumBelow = Array(rows).fill(0);
-  let acc = 0;
-  for (let r = cur; r < rows; r++) out.cumAbove[r] = acc += out.rows[r].value;
-  out.totalAbove = acc;
-  acc = 0;
-  for (let r = cur; r >= 0; r--) out.cumBelow[r] = acc += out.rows[r].value;
-  out.totalBelow = acc;
-  return out;
+  const start = oiAt.findIndex((v) => v !== null);
+  if (start < 0 || bars.length < 2) return empty;
+  // Faixa de preço: velas com dados, mais a distância dos níveis de 10x.
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = start; i < bars.length; i++) {
+    if (bars[i].low > 0) lo = Math.min(lo, bars[i].low);
+    hi = Math.max(hi, bars[i].high);
+  }
+  const maxDist = Math.max(...tiers.map((t) => 1 / t.leverage));
+  lo *= 1 - maxDist - 0.02;
+  hi *= 1 + maxDist + 0.02;
+  if (!(lo > 0) || !(hi > lo)) return empty;
+  const lnLo = Math.log(lo);
+  const lnHi = Math.log(hi);
+  const scale = buckets / (lnHi - lnLo);
+  const bucketOf = (p: number) => Math.min(buckets - 1, Math.max(0, Math.floor((Math.log(p) - lnLo) * scale)));
+  const cols = bars.length - start;
+  const long = new Float32Array(cols * buckets);
+  const short = new Float32Array(cols * buckets);
+  const L = new Float64Array(buckets);
+  const S = new Float64Array(buckets);
+  const spread = (arr: Float64Array, pLo: number, pHi: number, value: number) => {
+    const a = bucketOf(Math.min(pLo, pHi));
+    const z = bucketOf(Math.max(pLo, pHi));
+    const each = value / (z - a + 1);
+    for (let j = a; j <= z; j++) arr[j] += each;
+  };
+  for (let i = start; i < bars.length; i++) {
+    const b = bars[i];
+    // 1. Liquidadas: faixas de preço que a vela percorreu.
+    if (b.low > 0 && b.high >= b.low) {
+      const a = bucketOf(b.low);
+      const z = bucketOf(b.high);
+      for (let j = a; j <= z; j++) L[j] = S[j] = 0;
+    }
+    const prev = i > start ? oiAt[i - 1] : null;
+    const cur = oiAt[i];
+    if (prev !== null && cur !== null && prev > 0) {
+      if (cur < prev) {
+        // 2. Fechadas: reduz tudo o que estava aberto na mesma proporção.
+        const r = cur / prev;
+        for (let j = 0; j < buckets; j++) {
+          L[j] *= r;
+          S[j] *= r;
+        }
+      } else if (cur > prev && b.low > 0) {
+        // 3. Abertas: ΔOI × preço típico, metade de cada lado, por faixa de alavancagem.
+        const price = (b.high + b.low + b.close) / 3;
+        const half = ((cur - prev) * price) / 2;
+        for (const t of tiers) {
+          const down = 1 - 1 / t.leverage + MAINTENANCE;
+          const up = 1 + 1 / t.leverage - MAINTENANCE;
+          spread(L, b.low * down, b.high * down, half * t.weight);
+          spread(S, b.low * up, b.high * up, half * t.weight);
+        }
+      }
+    }
+    const off = (i - start) * buckets;
+    for (let j = 0; j < buckets; j++) {
+      long[off + j] = L[j];
+      short[off + j] = S[j];
+    }
+  }
+  return { start, bars: bars.length, buckets, lnLo, lnHi, long, short };
 }
+
+/** Faixa de preço (de–até) de um bucket do campo. */
+export function heatBucketRange(f: LiqHeatField, j: number): { from: number; to: number } {
+  const w = (f.lnHi - f.lnLo) / f.buckets;
+  return { from: Math.exp(f.lnLo + j * w), to: Math.exp(f.lnLo + (j + 1) * w) };
+}
+
+/** Bucket do preço (ou -1 fora do campo). */
+export function heatBucketOf(f: LiqHeatField, price: number): number {
+  if (!(price > 0)) return -1;
+  const x = ((Math.log(price) - f.lnLo) / (f.lnHi - f.lnLo)) * f.buckets;
+  return x < 0 || x >= f.buckets ? -1 : Math.floor(x);
+}
+
+/** Valor (compradas + vendidas) na vela `i`, bucket `j`; 0 sem dados. */
+export function heatValue(f: LiqHeatField, i: number, j: number): number {
+  if (f.start < 0 || i < f.start || i >= f.bars || j < 0 || j >= f.buckets) return 0;
+  const o = (i - f.start) * f.buckets + j;
+  return f.long[o] + f.short[o];
+}
+
+/**
+ * Referência da escala de cores: o percentil `p` dos valores não nulos da janela visível (velas `from..to`, buckets
+ * `jLo..jHi`). Um pico isolado não apaga o resto do mapa.
+ */
+export function heatReference(f: LiqHeatField, from: number, to: number, jLo: number, jHi: number, p = 0.99): number {
+  const vals: number[] = [];
+  const a = Math.max(from, f.start);
+  const step = Math.max(1, Math.floor(((to - a + 1) * (jHi - jLo + 1)) / 40_000));
+  let n = 0;
+  for (let i = a; i <= Math.min(to, f.bars - 1); i++)
+    for (let j = Math.max(0, jLo); j <= Math.min(f.buckets - 1, jHi); j++) {
+      if (n++ % step) continue;
+      const v = heatValue(f, i, j);
+      if (v > 0) vals.push(v);
+    }
+  if (!vals.length) return 0;
+  vals.sort((x, y) => x - y);
+  return vals[Math.min(vals.length - 1, Math.floor(p * (vals.length - 1)))];
+}
+
+/**
+ * Intensidade 0..1: proporcional ao valor até a referência (percentil 99 da área visível); acima dela, 1.
+ * Linear de propósito: com os dados reais, a mediana fica perto de 40% da referência — numa escala logarítmica quase
+ * tudo viraria amarelo/vermelho e as concentrações deixariam de se destacar.
+ */
+export const heatIntensity = (v: number, ref: number) => (v > 0 && ref > 0 ? Math.min(1, v / ref) : 0);
 
 /**
  * Escala de cores do mapa (azul → ciano → verde → amarelo → laranja → vermelho), como nos mapas de liquidação usuais.
  * `t` de 0 (baixa) a 1 (alta).
  */
 export function heatColor(t: number, alpha = 1): string {
+  const c = heatRgb(t);
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
+}
+
+/** A mesma escala em [r, g, b] (para montar imagens). */
+export function heatRgb(t: number): [number, number, number] {
   const stops: [number, [number, number, number]][] = [
     [0, [12, 26, 92]],
     [0.2, [24, 78, 200]],
@@ -527,6 +601,5 @@ export function heatColor(t: number, alpha = 1): string {
   const [p0, c0] = stops[i];
   const [p1, c1] = stops[i + 1];
   const k = (x - p0) / (p1 - p0 || 1);
-  const c = c0.map((v, j) => Math.round(v + (c1[j] - v) * k));
-  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
+  return [0, 1, 2].map((j) => Math.round(c0[j] + (c1[j] - c0[j]) * k)) as [number, number, number];
 }
