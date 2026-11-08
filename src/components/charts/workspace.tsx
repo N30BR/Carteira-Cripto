@@ -1076,6 +1076,9 @@ export function ChartWorkspace({
                 updatePaneOf(tab.id, i, { sideWidth })
               }
               sideColorsDefault={tools.sideColors}
+              onSideIntegratedChange={(sideIntegrated) =>
+                updatePaneOf(tab.id, i, { sideIntegrated })
+              }
               onSideColorsChange={(sideColors) => {
                 changePrefs({ ...tools, sideColors });
                 if (p.sideColors) updatePaneOf(tab.id, i, { sideColors: undefined });

@@ -16,6 +16,7 @@ import type { Point } from "@/lib/charts/macro-math";
 import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
 import { SIDE_WIDTH_MAX, SIDE_WIDTH_MIN } from "@/lib/charts/workspace";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ColorPicker } from "./object-ui";
 import { PROFILE_BUY, PROFILE_SELL } from "./profile";
 import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqMapHit, mapTipLines, sideHit, sideTipLines } from "./liq-layers";
@@ -373,6 +374,7 @@ export function ChartPane({
   onViewChange,
   onSideWidthChange,
   onSideColorsChange,
+  onSideIntegratedChange,
   sideColorsDefault,
   styleDefaults,
   onStyleDefault,
@@ -383,6 +385,8 @@ export function ChartPane({
   onSideWidthChange?: (width: number) => void;
   /** Cores do perfil lateral escolhidas pela seleção dele (salvas na conta). */
   onSideColorsChange?: (colors: { buy?: string; sell?: string }) => void;
+  /** Perfil lateral integrado ao gráfico (true) ou em painel próprio (false); salvo no gráfico. */
+  onSideIntegratedChange?: (integrated: boolean) => void;
   /** Cores do perfil lateral da conta (valem quando o gráfico não tem as suas, de versões antigas). */
   sideColorsDefault?: { buy?: string; sell?: string };
   /** Padrão visual de cada tipo de desenho (da conta): um desenho novo nasce com o do seu tipo. */
@@ -419,9 +423,9 @@ export function ChartPane({
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
   const magnet = useRef<OverlayMode>("normal");
-  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onStyleDefault });
+  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault });
   useEffect(() => {
-    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onStyleDefault };
+    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault };
   });
   const styleDefaultsRef = useRef(styleDefaults);
   useEffect(() => {
@@ -1100,6 +1104,11 @@ export function ChartPane({
   useEffect(() => {
     sideColors.current = sideColorsNow;
   }, [sideColorsNow]);
+  /** Perfil integrado ao gráfico (lido pelo laço de desenho). */
+  const sideIntegratedRef = useRef(!!pane.sideIntegrated);
+  useEffect(() => {
+    sideIntegratedRef.current = !!pane.sideIntegrated;
+  }, [pane.sideIntegrated]);
   /** Perfil lateral selecionado (clique numa barra): minibarra com as cores; `open` = seletor aberto. */
   const [sideSelected, setSideSelected] = useState<{ open: "buy" | "sell" | null; left: number; top: number; width: number; height: number; right: number } | null>(null);
   const sidePress = useRef<{ x: number; y: number } | null>(null);
@@ -1142,8 +1151,9 @@ export function ChartPane({
         true,
       );
     } else if (!pane.liqMap && exists) c.removeIndicator({ id: MAP_ID });
-    // Espaço à direita para a faixa lateral (a última vela não fica atrás dela).
-    if (pane.sideProfile) {
+    // Espaço à direita para a faixa lateral (a última vela não fica atrás dela). Integrada ao gráfico: sem espaço
+    // reservado (as barras ficam sobre a borda direita do gráfico).
+    if (pane.sideProfile && !pane.sideIntegrated) {
       if (sideBase.current === null) sideBase.current = c.getOffsetRightDistance();
       c.setOffsetRightDistance(sideBase.current + sideWidth.current);
     } else if (sideBase.current !== null) {
@@ -1195,7 +1205,7 @@ export function ChartPane({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [pane.liqMap, pane.sideProfile, pane.sideWidth, pane.symbol, pane.interval]);
+  }, [pane.liqMap, pane.sideProfile, pane.sideWidth, pane.sideIntegrated, pane.symbol, pane.interval]);
 
   // Perfil de volume lateral: tela própria colada à direita da área do preço, por cima de tudo, com o cálculo da
   // ferramenta Faixa Fixa sobre as velas e a faixa de preço visíveis. Redesenha só quando muda algo (velas, janela
@@ -1226,7 +1236,7 @@ export function ChartPane({
       const from = Math.max(0, range.from);
       const to = Math.min(data.length - 1, range.to - 1);
       const colors = sideColors.current;
-      const key = [size.left, size.top, size.width, W, H, lo, hi, data.length, last?.timestamp, last?.close, from, to, colors?.buy, colors?.sell].join("|");
+      const key = [size.left, size.top, size.width, W, H, lo, hi, data.length, last?.timestamp, last?.close, from, to, colors?.buy, colors?.sell, sideIntegratedRef.current].join("|");
       if (key === lastKey) return;
       lastKey = key;
       const left = size.left + size.width - W;
@@ -1250,6 +1260,7 @@ export function ChartPane({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       drawSideProfile(ctx, {
+        integrated: sideIntegratedRef.current,
         key: "bh_side",
         width: W,
         height: H,
@@ -1725,7 +1736,7 @@ export function ChartPane({
             const w = Math.round(Math.max(SIDE_WIDTH_MIN, Math.min(max, d.width + (d.x - e.clientX))));
             if (w === sideWidth.current) return;
             sideWidth.current = w;
-            if (sideBase.current !== null) c.setOffsetRightDistance(sideBase.current + w);
+            if (sideBase.current !== null && !sideIntegratedRef.current) c.setOffsetRightDistance(sideBase.current + w);
           }}
           onPointerUp={(e) => {
             if (!sideDrag.current) return;
@@ -1773,6 +1784,19 @@ export function ChartPane({
               value={sideColorsNow?.sell ?? PROFILE_SELL}
               onChange={(c) => cb.current.onSideColorsChange?.({ ...sideColorsNow, sell: c })}
             />
+            {/* Encaixe: ← integra ao gráfico (sem painel próprio); → volta ao painel lateral. Só muda o desenho. */}
+            <button
+              type="button"
+              aria-label={pane.sideIntegrated ? "Voltar para painel lateral" : "Integrar ao gráfico"}
+              title={pane.sideIntegrated ? "Voltar para painel lateral" : "Integrar ao gráfico"}
+              onClick={() => {
+                cb.current.onSideIntegratedChange?.(!pane.sideIntegrated);
+                setSideSelected(null);
+              }}
+              className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-4"
+            >
+              {pane.sideIntegrated ? <ChevronRight /> : <ChevronLeft />}
+            </button>
             <button type="button" aria-label="Fechar" title="Fechar" onClick={() => setSideSelected(null)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
               ×
             </button>

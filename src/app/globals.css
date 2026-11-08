@@ -169,3 +169,36 @@
     -webkit-text-security: disc;
   }
 }
+/* Barras de rolagem INTERNAS (tabelas, listas, painéis, menus, janelas): discretas no tema escuro — trilho quase da
+   cor do fundo e polegar cinza-escuro, um pouco mais claro no hover. Só elementos dentro do body (a rolagem principal
+   da página continua a do navegador). Em camada base: quem esconde a própria barra (ex.: menu principal) continua
+   escondendo. */
+@layer base {
+  body *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  body *::-webkit-scrollbar-track {
+    background: rgba(9, 9, 11, 0.6);
+  }
+  body *::-webkit-scrollbar-thumb {
+    background: #27272a;
+    border: 2px solid rgba(9, 9, 11, 0.6);
+    border-radius: 9999px;
+  }
+  body *::-webkit-scrollbar-thumb:hover {
+    background: #3f3f46;
+  }
+  body *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  body *::-webkit-scrollbar-button {
+    display: none;
+  }
+  /* Firefox (não tem os seletores acima): só cor do polegar e do trilho. */
+  @supports (-moz-appearance: none) {
+    body * {
+      scrollbar-color: #27272a rgba(9, 9, 11, 0.6);
+    }
+  }
+}

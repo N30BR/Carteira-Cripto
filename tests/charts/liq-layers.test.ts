@@ -161,3 +161,17 @@ describe("perfil de volume lateral = cálculo da ferramenta Faixa Fixa", () => {
     );
   });
 });
+
+describe("mapa: cores suavizadas (só o desenho)", () => {
+  test("mesma ordem de intensidade; vermelho menos saturado/brilhante e menos opaco que antes", async () => {
+    const { softHeat } = await import("@/lib/charts/heat-soft");
+    const lum = ([r, g, b]: number[]) => 0.3 * r + 0.59 * g + 0.11 * b;
+    const [r, g, b, a] = softHeat(1);
+    expect(a).toBeCloseTo(0.7);
+    expect(softHeat(0.05)[3]).toBeGreaterThan(0.28);
+    expect(r).toBeLessThan(235);
+    expect(r - Math.min(g, b)).toBeLessThan(235 - 30);
+    expect(lum(softHeat(0.75))).toBeLessThan(lum([236, 222, 30]));
+    for (let t = 0; t < 0.85; t += 0.1) expect(softHeat(t + 0.1)[3]).toBeGreaterThan(softHeat(t)[3]);
+  });
+});

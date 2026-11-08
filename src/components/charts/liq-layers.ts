@@ -12,7 +12,8 @@
 //   valor 70% — sobre as velas visíveis e a faixa de preço visível. Só as barras de compra/venda (a parte esquerda do
 //   histograma da ferramenta), ancoradas à direita. Sem "girar".
 import { registerIndicator, type KLineData } from "klinecharts";
-import { heatBucketOf, heatBucketRange, heatColor, heatIntensity, heatReference, heatRgb, heatValue, liquidationHeatField, type LiqHeatField, type VolumeProfile } from "@/lib/charts/indicators";
+import { heatBucketOf, heatBucketRange, heatIntensity, heatReference, heatValue, liquidationHeatField, type LiqHeatField, type VolumeProfile } from "@/lib/charts/indicators";
+import { softHeat } from "@/lib/charts/heat-soft";
 import { sideProfileFor } from "@/lib/charts/side-profile";
 import { PROFILE_BUY, PROFILE_SELL, withAlpha } from "./profile";
 
@@ -43,6 +44,7 @@ const fmtPrice = (v: number) => `$${v.toLocaleString("pt-BR", { maximumFractionD
 const day = (t: number) => new Date(t).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 
 // ---------- mapa ----------
+
 
 type Axis = { convertToPixel: (v: number) => number; convertFromPixel: (p: number) => number };
 /** Último desenho do mapa (para a dica do mouse). */
@@ -150,13 +152,13 @@ export function registerLiqLayers(): void {
                 } else v = heatValue(field, first + c, j0) * (1 - f) + heatValue(field, first + c, j1) * f;
                 const t = heatIntensity(v, ref);
                 if (t < 0.03) continue;
-                const [R, G, B] = heatRgb(t);
+                const [R, G, B, A] = softHeat(t);
                 const p = (r * w + c) * 4;
                 img.data[p] = R;
                 img.data[p + 1] = G;
                 img.data[p + 2] = B;
-                // Baixa intensidade mais transparente (o fundo continua escuro); alta, quase opaca.
-                img.data[p + 3] = Math.round(255 * (0.35 + 0.55 * t));
+                // Baixa intensidade mais transparente; alta mais presente, sem cobrir as velas.
+                img.data[p + 3] = Math.round(255 * A);
               }
             }
             g.putImageData(img, 0, 0);
@@ -193,7 +195,11 @@ export function registerLiqLayers(): void {
       ctx.fillText("Intensidade relativa  Baixa", lx, ly);
       const gx = lx + ctx.measureText("Intensidade relativa  Baixa").width + 6;
       const grad = ctx.createLinearGradient(gx, 0, gx + 80, 0);
-      for (const p of [0, 0.2, 0.4, 0.6, 0.75, 0.88, 1]) grad.addColorStop(p, heatColor(p));
+      // Legenda com as mesmas cores suavizadas do mapa (opacas, para ler bem).
+      for (const p of [0, 0.2, 0.4, 0.6, 0.75, 0.88, 1]) {
+        const [R, G, B] = softHeat(p);
+        grad.addColorStop(p, `rgb(${R}, ${G}, ${B})`);
+      }
       ctx.fillStyle = grad;
       ctx.fillRect(gx, ly - 6, 80, 4);
       ctx.fillStyle = "#d4d4d8";
@@ -210,7 +216,7 @@ export function registerLiqLayers(): void {
 // ---------- perfil lateral ----------
 
 /** Geometria do perfil desenhado por último (para a dica ao passar o mouse). */
-const sideAreas = new Map<string, { width: number; height: number; vp: VolumeProfile; yOf: (p: number) => number; max: number; anchor: number; inner: number }>();
+const sideAreas = new Map<string, { width: number; height: number; vp: VolumeProfile; yOf: (p: number) => number; max: number; anchor: number; inner: number; integrated: boolean }>();
 
 /** O que está sob o cursor na faixa lateral (coordenadas da própria faixa); null fora das barras. */
 export type SideHit = { from: number; to: number; volume: number; buy: number; sell: number; /** Trecho sob o cursor: compras (junto à borda direita) ou vendas (à esquerda delas). */ part: "buy" | "sell" };
@@ -229,6 +235,8 @@ export function sideHit(key: string, x: number, y: number): SideHit | null {
   if (!best) return null;
   const b = best.b;
   const wBuy = (b.buy / a.max) * a.inner;
+  // Integrado ao gráfico: só sobre a própria barra (o resto da borda é gráfico e continua dele).
+  if (a.integrated && x < a.anchor - wBuy - (b.sell / a.max) * a.inner - 4) return null;
   // Compras ficam junto à borda direita; à esquerda delas (vendas e o espaço livre da linha), vendas.
   const part = x >= a.anchor - wBuy - 3 ? "buy" : "sell";
   return { from: b.from, to: b.to, volume: b.volume, buy: b.buy, sell: b.sell, part };
@@ -252,18 +260,22 @@ export function sideTipLines(h: SideHit): [string, string][] {
  */
 export function drawSideProfile(
   ctx: CanvasRenderingContext2D,
-  o: { key: string; width: number; height: number; lo: number; hi: number; from: number; to: number; data: KLineData[]; yOf: (price: number) => number; buyColor?: string; sellColor?: string },
+  o: { key: string; width: number; height: number; lo: number; hi: number; from: number; to: number; data: KLineData[]; yOf: (price: number) => number; buyColor?: string; sellColor?: string; integrated?: boolean },
 ): void {
   const { width: W, height, yOf } = o;
   ctx.clearRect(0, 0, W, height);
-  ctx.fillStyle = "rgba(9, 9, 11, 0.94)";
-  ctx.fillRect(0, 0, W, height);
-  ctx.fillStyle = "rgba(139, 124, 246, 0.35)";
-  ctx.fillRect(0, 0, 1, height);
+  // Painel isolado: fundo e borda próprios. Integrado ao gráfico: sem fundo (as barras ficam sobre o gráfico).
+  if (!o.integrated) {
+    ctx.fillStyle = "rgba(9, 9, 11, 0.94)";
+    ctx.fillRect(0, 0, W, height);
+    ctx.fillStyle = "rgba(139, 124, 246, 0.35)";
+    ctx.fillRect(0, 0, 1, height);
+  }
   const vp = o.data.length && o.hi > o.lo && o.to >= o.from ? sideProfileFor(o.data, o.from, o.to, o.lo, o.hi) : null;
   const max = vp ? Math.max(0, ...vp.bins.map((b) => b.volume)) : 0;
   if (!vp || !max) {
     sideAreas.delete(o.key);
+    if (o.integrated) return;
     ctx.fillStyle = "#71717a";
     ctx.font = "10px Geist, sans-serif";
     ctx.fillText("Sem volume neste trecho", 8, 18);
@@ -271,14 +283,15 @@ export function drawSideProfile(
   }
   const anchor = W - 3;
   const inner = W - 12;
-  sideAreas.set(o.key, { width: W, height, vp, yOf, max, anchor, inner });
+  sideAreas.set(o.key, { width: W, height, vp, yOf, max, anchor, inner, integrated: !!o.integrated });
   vp.bins.forEach((b, i) => {
     const yTop = yOf(b.to);
     const yBottom = yOf(b.from);
     const top = Math.min(yTop, yBottom);
     const h = Math.max(1, Math.abs(yBottom - yTop) - 1);
     const inValue = b.from >= vp.valueArea.low - 1e-12 && b.to <= vp.valueArea.high + 1e-12;
-    const a = i === vp.pocIndex ? 1 : inValue ? 0.8 : 0.35;
+    // Integrado ao gráfico: mais transparente, para as velas por baixo continuarem legíveis.
+    const a = (i === vp.pocIndex ? 1 : inValue ? 0.8 : 0.35) * (o.integrated ? 0.65 : 1);
     const wBuy = (b.buy / max) * inner;
     const wSell = (b.sell / max) * inner;
     ctx.fillStyle = withAlpha(o.buyColor ?? PROFILE_BUY, a);

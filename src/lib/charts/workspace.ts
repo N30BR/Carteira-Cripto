@@ -233,6 +233,8 @@ export type PaneState = {
   sideProfile?: boolean;
   /** Largura da faixa do perfil lateral (px), ajustada arrastando a borda esquerda dela. */
   sideWidth?: number;
+  /** Perfil lateral integrado ao gráfico (sem painel próprio: barras sobre a borda direita do gráfico). */
+  sideIntegrated?: boolean;
   /** Cores do perfil lateral (compras e vendas, com opacidade), escolhidas clicando nas barras. Só o desenho. */
   sideColors?: { buy?: string; sell?: string };
   /** Zoom e posição salvos por par e tempo (voltam ao reabrir a aba, a página ou o mesmo par). Mais recente primeiro. */
@@ -737,7 +739,7 @@ function sanitizePane(v: unknown): R<PaneState> {
     if (!r.ok) return r;
     compares.push(r.value);
   }
-  for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
+  for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile", "sideIntegrated"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
   if (v.sideWidth !== undefined && !(typeof v.sideWidth === "number" && Number.isInteger(v.sideWidth) && v.sideWidth >= SIDE_WIDTH_MIN && v.sideWidth <= SIDE_WIDTH_MAX)) return fail("Gráfico inválido");
   let sideColors: { buy?: string; sell?: string } | undefined;
   if (v.sideColors !== undefined) {
@@ -764,6 +766,7 @@ function sanitizePane(v: unknown): R<PaneState> {
       ...(v.liqMap === undefined ? {} : { liqMap: v.liqMap as boolean }),
       ...(v.sideProfile === undefined ? {} : { sideProfile: v.sideProfile as boolean }),
       ...(v.sideWidth === undefined ? {} : { sideWidth: v.sideWidth as number }),
+      ...(v.sideIntegrated === undefined ? {} : { sideIntegrated: v.sideIntegrated as boolean }),
       ...(sideColors ? { sideColors } : {}),
       ...(views.length ? { views } : {}),
     },
