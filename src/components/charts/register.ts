@@ -21,6 +21,7 @@ import {
 } from "@/lib/charts/indicators";
 import { drawProfile, PROFILE_BUY, PROFILE_SELL } from "./profile";
 import { registerOverlaysAndAxes } from "./overlays";
+import { registerLiqLayers } from "./liq-layers";
 import { alignStep, rebase, type Point } from "@/lib/charts/macro-math";
 
 const UP = "#22c55e";
@@ -60,6 +61,7 @@ function fitToPrice(values: (number | null)[], data: KLineData[]): (number | nul
 
 export function registerChartExtensions(): void {
   registerOverlaysAndAxes();
+  registerLiqLayers();
   if (done) return;
   done = true;
 

@@ -417,3 +417,116 @@ export function liquidationLevels(
   }
   return levels;
 }
+
+// ---------- Mapa de liquidações (heatmap) e perfil lateral de liquidez ----------
+
+/** Trecho de uma faixa de preço com a mesma intensidade: de `from` a `to` (índices de vela, `to` exclusivo). */
+export type HeatSegment = { row: number; from: number; to: number; value: number };
+
+/**
+ * Grade do mapa de liquidações: para cada faixa de preço (linha) e cada vela visível, a soma da liquidez estimada
+ * ainda não liquidada naquele momento. Devolve trechos contínuos (para desenhar retângulos) e o maior valor,
+ * base da escala de cores relativa (Baixa → Alta).
+ * - `lo`/`hi`: faixa de preço visível; `rows`: quantas linhas; `[fromIdx, toIdx]`: velas visíveis;
+ * - um nível vale da vela em que surgiu até a vela em que o preço o atingiu (ou até o fim, se não foi atingido).
+ */
+export function liquidationHeatGrid(levels: LiqLevel[], fromIdx: number, toIdx: number, lo: number, hi: number, rows: number, lastIdx: number): { segments: HeatSegment[]; max: number } {
+  if (!(hi > lo) || rows < 1 || toIdx < fromIdx) return { segments: [], max: 0 };
+  const step = (hi - lo) / rows;
+  // Eventos por linha: +notional na vela de início, −notional na vela de fim.
+  const events = new Map<number, Map<number, number>>();
+  const end = (l: LiqLevel) => (l.to === null ? lastIdx + 1 : l.to);
+  for (const l of levels) {
+    if (l.price < lo || l.price >= hi) continue;
+    const a = Math.max(l.from, fromIdx);
+    const b = Math.min(end(l), toIdx + 1);
+    if (b <= a) continue;
+    const row = Math.min(rows - 1, Math.floor((l.price - lo) / step));
+    let ev = events.get(row);
+    if (!ev) events.set(row, (ev = new Map()));
+    ev.set(a, (ev.get(a) ?? 0) + l.notional);
+    ev.set(b, (ev.get(b) ?? 0) - l.notional);
+  }
+  const segments: HeatSegment[] = [];
+  let max = 0;
+  for (const [row, ev] of events) {
+    const xs = [...ev.keys()].sort((p, q) => p - q);
+    let acc = 0;
+    for (let i = 0; i < xs.length - 1; i++) {
+      acc += ev.get(xs[i]) as number;
+      // Arredonda para zero o resíduo de ponto flutuante quando todos os níveis da faixa terminaram.
+      if (acc > 1e-9) {
+        segments.push({ row, from: xs[i], to: xs[i + 1], value: acc });
+        if (acc > max) max = acc;
+      }
+    }
+  }
+  return { segments, max };
+}
+
+export type SideProfile = {
+  /** Liquidez ainda não liquidada por linha (de baixo para cima), na última vela. */
+  rows: { value: number; side: "long" | "short" | "mixed" }[];
+  /** Acumulado a partir do preço atual: acima (vendidos, liquidados se o preço subir) e abaixo (comprados). */
+  cumAbove: number[];
+  cumBelow: number[];
+  totalAbove: number;
+  totalBelow: number;
+  max: number;
+};
+
+/**
+ * Perfil lateral de liquidez de liquidação na faixa de preço visível: quanto seria liquidado em cada faixa se o preço
+ * chegasse lá (só níveis ainda não atingidos). Acima do preço atual ficam os vendidos (short) e abaixo os comprados
+ * (long); os acumulados crescem a partir do preço atual em direção às pontas.
+ */
+export function liquiditySideProfile(levels: LiqLevel[], lo: number, hi: number, rows: number, price: number): SideProfile {
+  const out: SideProfile = { rows: Array.from({ length: Math.max(0, rows) }, () => ({ value: 0, side: "mixed" as const })), cumAbove: [], cumBelow: [], totalAbove: 0, totalBelow: 0, max: 0 };
+  if (!(hi > lo) || rows < 1) return out;
+  const step = (hi - lo) / rows;
+  const sides = out.rows.map(() => ({ long: 0, short: 0 }));
+  for (const l of levels) {
+    if (l.to !== null || l.price < lo || l.price >= hi) continue;
+    const r = Math.min(rows - 1, Math.floor((l.price - lo) / step));
+    out.rows[r].value += l.notional;
+    sides[r][l.side] += l.notional;
+  }
+  out.rows.forEach((row, i) => {
+    row.side = sides[i].long && sides[i].short ? "mixed" : sides[i].long ? "long" : sides[i].short ? "short" : "mixed";
+    if (row.value > out.max) out.max = row.value;
+  });
+  const cur = Math.min(rows - 1, Math.max(0, Math.floor((price - lo) / step)));
+  out.cumAbove = Array(rows).fill(0);
+  out.cumBelow = Array(rows).fill(0);
+  let acc = 0;
+  for (let r = cur; r < rows; r++) out.cumAbove[r] = acc += out.rows[r].value;
+  out.totalAbove = acc;
+  acc = 0;
+  for (let r = cur; r >= 0; r--) out.cumBelow[r] = acc += out.rows[r].value;
+  out.totalBelow = acc;
+  return out;
+}
+
+/**
+ * Escala de cores do mapa (azul → ciano → verde → amarelo → laranja → vermelho), como nos mapas de liquidação usuais.
+ * `t` de 0 (baixa) a 1 (alta).
+ */
+export function heatColor(t: number, alpha = 1): string {
+  const stops: [number, [number, number, number]][] = [
+    [0, [12, 26, 92]],
+    [0.2, [24, 78, 200]],
+    [0.4, [22, 170, 196]],
+    [0.6, [70, 200, 110]],
+    [0.75, [236, 222, 30]],
+    [0.88, [245, 150, 20]],
+    [1, [235, 40, 30]],
+  ];
+  const x = Math.max(0, Math.min(1, t));
+  let i = 0;
+  while (i < stops.length - 2 && x > stops[i + 1][0]) i++;
+  const [p0, c0] = stops[i];
+  const [p1, c1] = stops[i + 1];
+  const k = (x - p0) / (p1 - p0 || 1);
+  const c = c0.map((v, j) => Math.round(v + (c1[j] - v) * k));
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
+}

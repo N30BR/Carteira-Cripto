@@ -404,7 +404,7 @@ export type CryptoOverview = {
   now: number;
   market: Part<MarketData>;
   altseason: Part<AltseasonData>;
-  coins: Part<{ top: CoinRow[]; btc: CoinRow | null }>;
+  coins: Part<{ top: CoinRow[]; btc: CoinRow | null; usdt: CoinRow | null }>;
   onchain: OnchainData;
   etf: Part<EtfData> & { configured?: boolean };
 };
@@ -424,7 +424,7 @@ export async function getCryptoOverview(db: Db, now = new Date()): Promise<Crypt
         }
       : { ok: false, error: parts.a.ok ? "Índice indisponível" : parts.a.error };
   const coins: CryptoOverview["coins"] = parts.l.ok
-    ? { ok: true, stale: parts.l.stale, at: parts.l.at, data: { top: topEligible(parts.l.data, 100), btc: parts.l.data.find((c) => c.symbol === "BTC") ?? null } }
+    ? { ok: true, stale: parts.l.stale, at: parts.l.at, data: { top: topEligible(parts.l.data, 100), btc: parts.l.data.find((c) => c.symbol === "BTC") ?? null, usdt: parts.l.data.find((c) => c.symbol === "USDT") ?? null } }
     : parts.l;
   return { now: now.getTime(), market, altseason, coins, onchain: chain, etf: etfs };
 }

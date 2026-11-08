@@ -428,10 +428,6 @@ function Assets({
   );
   const selector = (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-        Período analisado
-        <PeriodPicker label="Período analisado (coluna em destaque)" value={prefs.assets} onChange={(assets) => onPrefs({ ...prefs, assets })} />
-      </span>
       <span className="text-[11px] text-muted-foreground">Gráfico</span>
       <div className="inline-flex rounded-lg border p-0.5 text-xs" role="group" aria-label="Período do minigráfico">
         {MACRO_PERIODS.map((p) => (
@@ -478,7 +474,6 @@ function Assets({
                 <th className="px-3 py-2 text-left font-medium">Ativo</th>
                 <th className="px-2 py-2 text-center font-medium">Ticker</th>
                 <th className="px-2 py-2 text-center font-medium">Preço ({prefs.currency})</th>
-                <th className="bg-[#8b7cf6]/10 px-2 py-2 text-center font-semibold text-foreground">Var. {prefs.assets}</th>
                 {cols.map((p) => (
                   <th key={p} className={cn("px-2 py-2 text-center font-medium", p === prefs.period && "text-foreground")}>
                     {p}
@@ -498,15 +493,12 @@ function Assets({
                   </td>
                   <td className="px-2 py-2 text-center font-mono text-xs">{r.ticker}</td>
                   {r.unavailable ? (
-                    <td colSpan={3 + cols.length} className="px-2 py-2 text-center">
+                    <td colSpan={2 + cols.length} className="px-2 py-2 text-center">
                       <Unavailable reason={r.unavailable} />
                     </td>
                   ) : (
                     <>
                       <td className="px-2 py-2 text-center font-semibold tabular-nums">{price(r.usd)}</td>
-                      <td className="bg-[#8b7cf6]/10 px-2 py-2 text-center text-xs font-semibold">
-                        <Change v={r.changes[prefs.assets]} kind="pct" />
-                      </td>
                       {cols.map((p) => (
                         <td key={p} className="px-2 py-2 text-center text-xs">
                           <Change v={r.changes[p]} kind="pct" />

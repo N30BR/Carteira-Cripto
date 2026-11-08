@@ -212,6 +212,10 @@ export type PaneState = {
   showOhlc?: boolean;
   /** Botão A/N: ajuste automático da escala de preço (A = true). Padrão: N. */
   autoScale?: boolean;
+  /** Botão do mapa de liquidações (camada atrás das velas). */
+  liqMap?: boolean;
+  /** Botão do perfil lateral de liquidez (faixa fixa à direita). */
+  sideProfile?: boolean;
   /** Zoom e posição salvos por par e tempo (voltam ao reabrir a aba, a página ou o mesmo par). Mais recente primeiro. */
   views?: PaneView[];
 };
@@ -551,7 +555,7 @@ function sanitizeCompare(v: unknown): R<CompareState> {
 function sanitizePane(v: unknown): R<PaneState> {
   if (!isObj(v)) return fail("Gráfico inválido");
   const symbol = typeof v.symbol === "string" ? v.symbol : "";
-  // Par da Binance (ou BTCETH, o ETH/BTC invertido) ou um instrumento de mercado da lista fechada (TOTAL3, BTC.D...).
+  // Par da Binance (ou um par invertido: BTCETH, USDTBTC) ou um instrumento de mercado da lista fechada (TOTAL3, BTC.D...).
   if (!isMarketId(symbol) && (!/^[A-Z0-9]{2,20}$/.test(symbol) || !splitSymbol(symbol))) return fail("Par inválido");
   if (!(CHART_INTERVALS as readonly unknown[]).includes(v.interval)) return fail("Tempo inválido");
   if (!(CHART_TYPES as readonly unknown[]).includes(v.chartType)) return fail("Tipo de gráfico inválido");
@@ -580,7 +584,7 @@ function sanitizePane(v: unknown): R<PaneState> {
     if (!r.ok) return r;
     compares.push(r.value);
   }
-  for (const k of ["legendCollapsed", "showOhlc", "autoScale"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
+  for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
   // Zoom salvo inválido não derruba o gráfico: só é descartado.
   const views = Array.isArray(v.views) ? v.views.slice(0, MAX_VIEWS).map(sanitizeView).filter((x): x is PaneView => !!x) : [];
   return {
@@ -596,6 +600,8 @@ function sanitizePane(v: unknown): R<PaneState> {
       ...(v.legendCollapsed === undefined ? {} : { legendCollapsed: v.legendCollapsed as boolean }),
       ...(v.showOhlc === undefined ? {} : { showOhlc: v.showOhlc as boolean }),
       ...(v.autoScale === undefined ? {} : { autoScale: v.autoScale as boolean }),
+      ...(v.liqMap === undefined ? {} : { liqMap: v.liqMap as boolean }),
+      ...(v.sideProfile === undefined ? {} : { sideProfile: v.sideProfile as boolean }),
       ...(views.length ? { views } : {}),
     },
   };

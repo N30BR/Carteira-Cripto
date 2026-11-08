@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FLUSH_PENDING_EVENT } from "@/lib/modules";
-import { ArrowDown, ArrowUp, Eye, EyeOff, LayoutGrid, ListTree, Magnet, Plus, Search, Settings2, Star, Trash2, X } from "lucide-react";
+import { AlignRight, ArrowDown, ArrowUp, Eye, EyeOff, Flame, LayoutGrid, ListTree, Magnet, Plus, Search, Settings2, Star, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,7 +16,7 @@ import {
   saveChartTabAction,
 } from "@/app/(app)/graficos/actions";
 import { CHART_QUOTES, pairLabel, type ChartInterval } from "@/lib/charts/params";
-import { INVERTED_PAIRS, MARKET_SERIES, isMarketId } from "@/lib/market/ids";
+import { INVERTED_PAIRS, MARKET_SERIES, instrumentLabel, isMarketId } from "@/lib/market/ids";
 import type { ChartTab } from "@/lib/charts/store";
 import {
   CHART_INDICATORS,
@@ -92,7 +92,7 @@ function withIds(state: TabState): TabState {
  * se a pessoa renomeou a aba, vale o nome dela. `full` (dica ao passar o mouse) lista todos os pares.
  */
 function tabTitle(t: ChartTab): { label: string; full: string } {
-  const pairs = [...new Set(t.state.panes.slice(0, t.state.layout).map((p) => pairLabel(p.symbol)))];
+  const pairs = [...new Set(t.state.panes.slice(0, t.state.layout).map((p) => instrumentLabel(p.symbol, pairLabel)))];
   const auto = pairs.length > 1 ? `${pairs[0]} +${pairs.length - 1}` : (pairs[0] ?? t.name);
   const label = /^Gráfico \d+$/.test(t.name) ? auto : t.name;
   return { label, full: label === pairs.join(", ") ? label : `${label} (${pairs.join(", ")})` };
@@ -506,7 +506,7 @@ export function ChartWorkspace({
       {/* Barra superior (gráfico selecionado) */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-2 py-1.5">
         <Button size="sm" variant="outline" onClick={() => setDialog("symbol")} aria-label="Escolher par">
-          <Search /> {pane.symbol}
+          <Search /> {instrumentLabel(pane.symbol, (s) => s)}
         </Button>
         <IntervalBar
           value={pane.interval}
@@ -524,6 +524,23 @@ export function ChartWorkspace({
         </Button>
         <FavoritesBar prefs={tools} activeTool={activeTool} onDraw={draw} />
         <div className="ml-auto flex items-center gap-1.5">
+          {/* Mapa de liquidações e perfil lateral de liquidez (independentes; valem para o gráfico selecionado). */}
+          <LayerToggle
+            on={!!pane.liqMap}
+            onToggle={() => updatePane({ liqMap: !pane.liqMap })}
+            labelOn="Ocultar mapa de liquidações"
+            labelOff="Mostrar mapa de liquidações"
+          >
+            <Flame />
+          </LayerToggle>
+          <LayerToggle
+            on={!!pane.sideProfile}
+            onToggle={() => updatePane({ sideProfile: !pane.sideProfile })}
+            labelOn="Ocultar perfil lateral"
+            labelOff="Mostrar perfil lateral"
+          >
+            <AlignRight />
+          </LayerToggle>
           {/* Botão A/N do gráfico selecionado: A = ajuste automático da escala de preço; N = enquadramento manual. */}
           <button
             type="button"
@@ -742,9 +759,36 @@ export function ChartWorkspace({
 /** Instrumentos de mercado (capitalização, dominância) e o par invertido BTC/ETH, para o seletor e a busca. */
 const MARKET_OPTIONS: { symbol: string; label: string; name: string; keywords: string }[] = [
   ...MARKET_SERIES.map((m) => ({ symbol: m.id, label: m.short, name: m.name, keywords: m.keywords })),
-  ...Object.keys(INVERTED_PAIRS).map((s) => ({ symbol: s, label: pairLabel(s), name: "Bitcoin em Ethereum (ETH/BTC invertido)", keywords: "btc eth razão inverso" })),
+  ...Object.entries(INVERTED_PAIRS).map(([s, p]) => ({ symbol: s, label: p.label, name: p.name, keywords: p.keywords })),
 ];
 const QUOTE_TABS = [...CHART_QUOTES, "Mercado"] as const;
+
+/** Botão de camada do gráfico (liga/desliga), com a etiqueta embaixo ao passar o mouse (como na referência). */
+function LayerToggle({ on, onToggle, labelOn, labelOff, children }: { on: boolean; onToggle: () => void; labelOn: string; labelOff: string; children: React.ReactNode }) {
+  const label = on ? labelOn : labelOff;
+  return (
+    <span className="group relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={on}
+        aria-label={label}
+        className={cn(
+          "grid size-7 cursor-pointer place-items-center rounded-md border transition-colors [&_svg]:size-3.5",
+          on ? "border-[#8b7cf6] bg-[#8b7cf6]/20 text-white hover:bg-[#8b7cf6]/30" : "border-border bg-zinc-900 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200",
+        )}
+      >
+        {children}
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute top-full left-1/2 z-40 mt-1.5 hidden -translate-x-1/2 rounded-md border border-border bg-zinc-800/95 px-2 py-1 text-xs whitespace-nowrap text-zinc-100 shadow-lg group-focus-within:block group-hover:block"
+      >
+        {label}
+      </span>
+    </span>
+  );
+}
 
 function SymbolDialog({ open, onClose, symbols, onPick }: { open: boolean; onClose: () => void; symbols: SymbolOption[]; onPick: (s: string) => void }) {
   const [q, setQ] = useState("");

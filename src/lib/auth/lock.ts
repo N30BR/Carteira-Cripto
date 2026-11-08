@@ -17,6 +17,8 @@ export function isIdleLocked(lastActiveAt: Date | null, minutes: number, now: Da
   // Sessões antigas (sem registro): contam como ativas agora e passam a ser registradas no próximo aviso.
   if (!lastActiveAt) return false;
   const m = isLockMinutes(minutes) ? minutes : DEFAULT_LOCK_MINUTES;
+  // Desativado pela pessoa: nunca bloqueia por inatividade (a sessão continua expirando em 7 dias e no "Sair").
+  if (m === 0) return false;
   return now.getTime() - lastActiveAt.getTime() > m * 60_000 + graceMs(m);
 }
 

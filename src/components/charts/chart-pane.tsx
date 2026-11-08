@@ -14,9 +14,10 @@ import { compareDisplay, compareScale } from "@/lib/charts/compare";
 import type { Point } from "@/lib/charts/macro-math";
 import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
+import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqSideHit } from "./liq-layers";
 import { findBarIndex } from "@/lib/charts/drawing";
 import { ema, sma } from "@/lib/charts/indicators";
-import { INVERTED_PAIRS, isMarketId, marketInfo } from "@/lib/market/ids";
+import { invertedPair, isMarketId, marketInfo } from "@/lib/market/ids";
 
 const PERIOD: Record<ChartInterval, Period> = {
   "1m": { type: "minute", span: 1 },
@@ -177,9 +178,9 @@ async function loadCandles(symbol: string, interval: ChartInterval, end: number 
   if (isMarketId(symbol)) return loadMarket(symbol, interval, end);
   // Par invertido (BTC/ETH): as velas reais de ETH/BTC com os preços invertidos (máxima ↔ 1/mínima). Sem volume:
   // o volume da fonte está na outra moeda.
-  const inverted = INVERTED_PAIRS[symbol];
+  const inverted = invertedPair(symbol);
   if (inverted) {
-    const data = await loadCandles(inverted, interval, end, limit);
+    const data = await loadCandles(inverted.source, interval, end, limit);
     return data.map((k) => ({ timestamp: k.timestamp, open: 1 / k.open, high: 1 / k.low, low: 1 / k.high, close: 1 / k.close }));
   }
   const q = new URLSearchParams({ symbol, interval, limit: String(limit) });
@@ -505,6 +506,9 @@ export function ChartPane({
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       // Velas podem ficar bem finas ao afastar (a biblioteca desenha cada uma com pelo menos 1 px).
       layout: { barSpaceLimit: { min: 0.3, max: 60 } },
+      // Números pequenos por extenso (ex.: 0.000017373 em USDTUSD/BTCUSD); a forma compacta "0.0{4}17373" só a
+      // partir de 8 zeros.
+      decimalFold: { threshold: 8 },
     });
     chart.current = c;
     // Arrastar a escala de tempo desloca o gráfico inteiro (abaixo); a biblioteca dava zoom ancorado no ponto do arraste.
@@ -734,7 +738,12 @@ export function ChartPane({
         if (what === "drawings") {
           // Respeita os desenhos ocultos um a um.
           for (const o of c.getOverlays()) c.overrideOverlay({ id: o.id, visible: !hidden && meta.current.get(o.id)?.visible !== false });
-        } else for (const i of c.getIndicators()) c.overrideIndicator({ id: i.id, name: i.name, visible: !hidden && indicatorState.current.get(i.id)?.visible !== false });
+        } else
+          for (const i of c.getIndicators()) {
+            // Mapa de liquidações e perfil lateral têm botões próprios: "ocultar indicadores" não mexe neles.
+            if (i.name === LIQ_MAP) continue;
+            c.overrideIndicator({ id: i.id, name: i.name, visible: !hidden && indicatorState.current.get(i.id)?.visible !== false });
+          }
       },
       clearDrawings: () => {
         chart.current?.removeOverlay();
@@ -862,7 +871,7 @@ export function ChartPane({
       fitOnce(c);
       // Instrumento de mercado: nome com a unidade (ex.: "TOTAL3 (US$ bi)", "BTC.D (%)").
       const info = marketInfo(symbol);
-      const ticker = info ? `${info.short} (${info.unit === "usd" ? "US$ bi" : "%"})` : symbol;
+      const ticker = info ? `${info.short} (${info.unit === "usd" ? "US$ bi" : "%"})` : (invertedPair(symbol)?.label ?? symbol);
       c.setSymbol({ ticker, pricePrecision: info ? 2 : precision, volumePrecision: 2 });
       c.setPeriod(PERIOD[interval]);
       c.setDataLoader({
@@ -984,6 +993,127 @@ export function ChartPane({
       },
     } as never);
   }, [pane.legendCollapsed, pane.showOhlc, pane.interval]);
+
+  // ---------- Mapa de liquidações e perfil lateral (botões próprios) ----------
+  // Camadas internas (fora da lista de indicadores e das legendas). O open interest do perpétuo é buscado uma vez por
+  // par/tempo e entregue às duas. Com o perfil lateral ligado, o gráfico ganha espaço à direita (a última vela não
+  // fica atrás da faixa).
+  const liqOi = useRef<{ key: string; data: { oi: [number, number][]; status?: string } } | null>(null);
+  const sideBase = useRef<number | null>(null);
+  const sideCanvas = useRef<HTMLCanvasElement>(null);
+  /** Posição da faixa lateral dentro do gráfico (para a dica do mouse). */
+  const sideBox = useRef<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    const c = chart.current;
+    if (!c) return;
+    const MAP_ID = "bh_liq_map";
+    const key = `${pane.symbol}|${pane.interval}`;
+    const current = liqOi.current?.key === key ? liqOi.current.data : { oi: [], status: "Carregando..." };
+    const exists = c.getIndicators({ id: MAP_ID }).length > 0;
+    if (pane.liqMap && !exists) {
+      c.createIndicator(
+        {
+          id: MAP_ID,
+          name: LIQ_MAP,
+          // Atrás das velas, como nos mapas de liquidação usuais.
+          zLevel: -1,
+          paneId: "candle_pane",
+          extendData: current,
+          createTooltipDataSource: () => ({ name: "", calcParamsText: "", legends: [], features: [] }),
+        } as never,
+        true,
+      );
+    } else if (!pane.liqMap && exists) c.removeIndicator({ id: MAP_ID });
+    // Espaço à direita para a faixa lateral (a última vela não fica atrás dela).
+    if (pane.sideProfile && sideBase.current === null) {
+      sideBase.current = c.getOffsetRightDistance();
+      c.setOffsetRightDistance(sideBase.current + SIDE_WIDTH);
+    } else if (!pane.sideProfile && sideBase.current !== null) {
+      c.setOffsetRightDistance(sideBase.current);
+      sideBase.current = null;
+    }
+    if (!pane.liqMap && !pane.sideProfile) return;
+    if (liqOi.current?.key === key) return;
+    let cancelled = false;
+    const apply = (data: { oi: [number, number][]; status?: string }) => {
+      liqOi.current = { key, data };
+      if (c.getIndicators({ id: MAP_ID }).length) c.overrideIndicator({ id: MAP_ID, name: LIQ_MAP, extendData: data });
+    };
+    fetch(`/api/open-interest?${new URLSearchParams({ symbol: pane.symbol, interval: pane.interval })}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "indisponível");
+        if (!cancelled) apply({ oi: (await res.json()) as [number, number][] });
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : "indisponível";
+        apply({ oi: [], status: `Sem dados: ${msg}` });
+        cb.current.onError(`Mapa de liquidações: ${msg}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pane.liqMap, pane.sideProfile, pane.symbol, pane.interval]);
+
+  // Perfil lateral: tela própria colada à direita da área do preço, por cima de tudo. Redesenha só quando muda algo
+  // (velas, faixa visível, escala de preço ou tamanho).
+  useEffect(() => {
+    if (!pane.sideProfile) {
+      sideBox.current = null;
+      return;
+    }
+    let raf = 0;
+    let lastKey = "";
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const c = chart.current;
+      const cv = sideCanvas.current;
+      if (!c || !cv) return;
+      const size = c.getSize("candle_pane", "main");
+      if (!size || size.width <= 0 || size.height <= 0) return;
+      const W = Math.min(SIDE_WIDTH, size.width * 0.35);
+      const H = size.height;
+      const [top, bottom] = c.convertFromPixel([{ y: 0 }, { y: H }], { paneId: "candle_pane" }) as { value?: number }[];
+      const hi = top?.value ?? NaN;
+      const lo = bottom?.value ?? NaN;
+      const data = c.getDataList();
+      const last = data[data.length - 1];
+      const liq = liqOi.current?.key === `${pane.symbol}|${pane.interval}` ? liqOi.current.data : { oi: [] as [number, number][], status: "Carregando..." };
+      const key = [size.left, size.top, size.width, H, lo, hi, data.length, last?.timestamp, last?.close, liq.oi.length, liq.status].join("|");
+      if (key === lastKey) return;
+      lastKey = key;
+      const left = size.left + size.width - W;
+      sideBox.current = { left, top: size.top };
+      cv.style.left = `${left}px`;
+      cv.style.top = `${size.top}px`;
+      cv.style.width = `${W}px`;
+      cv.style.height = `${H}px`;
+      const dpr = window.devicePixelRatio || 1;
+      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+        cv.width = Math.round(W * dpr);
+        cv.height = Math.round(H * dpr);
+      }
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawSideProfile(ctx, {
+        key: "bh_side",
+        width: W,
+        height: H,
+        lo,
+        hi,
+        data,
+        oi: liq.oi,
+        status: liq.status,
+        yOf: (price) => (c.convertToPixel({ value: price }, { paneId: "candle_pane" }) as { y?: number }).y ?? 0,
+      });
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [pane.sideProfile, pane.symbol, pane.interval]);
+
+  // Dica da faixa lateral: faixa de preço e liquidez sob o cursor.
+  const [sideTip, setSideTip] = useState<{ x: number; y: number; right: number; from: number; to: number; value: number } | null>(null);
 
   // Indicadores: recria quando a lista muda (sem mexer nas comparações).
   const indicatorIds = useRef<string[]>([]);
@@ -1164,7 +1294,7 @@ export function ChartPane({
         } else if (cmp.kind === "pair") {
           const data = await loadCandles(cmp.id, pane.interval, null, 1000);
           points = data.map((k) => [k.timestamp, k.close]);
-          label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : cmp.id === "BTCETH" ? "BTC/ETH" : cmp.id;
+          label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : (invertedPair(cmp.id)?.label ?? cmp.id);
         } else {
           const res = await fetch(`/api/macro?${new URLSearchParams({ id: cmp.id })}`);
           if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Dados indisponíveis");
@@ -1343,6 +1473,17 @@ export function ChartPane({
           target.dispatchEvent(new MouseEvent("mouseup", { ...init, buttons: 0 }));
         }, 0);
       }}
+      onMouseMove={(e) => {
+        if (!pane.sideProfile || !el.current) return sideTip && setSideTip(null);
+        const r = el.current.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const y = e.clientY - r.top;
+        const box = sideBox.current;
+        const hit = box ? liqSideHit("bh_side", x - box.left, y - box.top) : null;
+        if (!hit) return sideTip && setSideTip(null);
+        if (!sideTip || sideTip.from !== hit.from || Math.abs(sideTip.y - y) > 2) setSideTip({ x, y, right: r.width - x + 12, ...hit });
+      }}
+      onMouseLeave={() => sideTip && setSideTip(null)}
       className={`relative h-full min-h-0 w-full rounded-lg border ${active ? "border-[#8b7cf6]" : "border-border"}`}
       data-testid="chart-pane"
     >
@@ -1360,7 +1501,29 @@ export function ChartPane({
           </svg>
         </button>
       )}
+      {pane.sideProfile && <canvas ref={sideCanvas} aria-label="Perfil lateral de liquidez" className="pointer-events-none absolute z-[5]" />}
+      {/* Dica da faixa lateral de liquidez (como na referência: faixa de preço e liquidez alavancada). */}
+      {sideTip && (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute z-20 rounded-md border bg-popover/95 px-2.5 py-1.5 font-mono text-[11px] leading-5 shadow-lg"
+          style={{ right: sideTip.right, top: Math.max(4, sideTip.y - 24) }}
+        >
+          <div>
+            <span className="text-muted-foreground">Faixa de preço: </span>
+            <strong>{fmtPrice((sideTip.from + sideTip.to) / 2)}</strong>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Liquidez alavancada: </span>
+            <strong>{fmtMoney(sideTip.value)}</strong>
+          </div>
+        </div>
+      )}
       {children}
     </div>
   );
 }
+
+const fmtPrice = (v: number) => `$${v.toLocaleString("pt-BR", { maximumFractionDigits: v >= 100 ? 0 : v >= 1 ? 2 : 8 })}`;
+const fmtMoney = (v: number) =>
+  v >= 1e9 ? `$${(v / 1e9).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}B` : v >= 1e6 ? `$${(v / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}M` : v >= 1e3 ? `$${(v / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}K` : `$${Math.round(v).toLocaleString("pt-BR")}`;

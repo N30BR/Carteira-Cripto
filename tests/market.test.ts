@@ -305,3 +305,15 @@ describe("rota /api/market", () => {
     void (state.db as Db);
   });
 });
+
+describe("pares invertidos (BTC/ETH e USDTUSD/BTCUSD)", () => {
+  test("USDTUSD/BTCUSD sai do BTC/USDT invertido, com nome próprio; aceito como gráfico e comparação", async () => {
+    const { invertedPair, instrumentLabel } = await import("@/lib/market/ids");
+    expect(invertedPair("USDTBTC")).toMatchObject({ source: "BTCUSDT", label: "USDTUSD/BTCUSD" });
+    expect(invertedPair("BTCETH")?.source).toBe("ETHBTC");
+    expect(invertedPair("toString")).toBeUndefined();
+    expect(instrumentLabel("USDTBTC", (s) => s)).toBe("USDTUSD/BTCUSD");
+    expect(instrumentLabel("BTCUSDT", (s) => `${s}!`)).toBe("BTCUSDT!");
+    expect(sanitizeTabState({ layout: 1, panes: [{ ...defaultPane("USDTBTC"), compares: [{ kind: "pair", id: "USDTBTC" }] }] }).ok).toBe(true);
+  });
+});

@@ -28,7 +28,7 @@ export function SecurityForm({ lockMinutes, totpEnabled, email }: { lockMinutes:
     start(async () => {
       const r = await safeAction(() => setLockMinutesAction(m));
       if (r.ok) {
-        toast.success(`Bloqueio após ${m} ${m === 1 ? "minuto" : "minutos"} sem uso`);
+        toast.success(m === 0 ? "Bloqueio por inatividade desativado" : `Bloqueio após ${m} ${m === 1 ? "minuto" : "minutos"} sem uso`);
         // Atualiza o tempo usado pela tela.
         router.refresh();
       } else toast.error(r.error);
@@ -60,11 +60,16 @@ export function SecurityForm({ lockMinutes, totpEnabled, email }: { lockMinutes:
           >
             {LOCK_OPTIONS.map((m) => (
               <option key={m} value={m}>
-                {m} {m === 1 ? "minuto" : "minutos"}
-                {m === 10 ? " (recomendado)" : ""}
+                {m === 0 ? "Desativado" : `${m} ${m === 1 ? "minuto" : "minutos"}${m === 10 ? " (recomendado)" : ""}`}
               </option>
             ))}
           </select>
+          {minutes === 0 && (
+            <p className="mt-2 text-xs text-amber-400/90">
+              Desativado: a sessão não é bloqueada por falta de uso. Ela continua terminando ao clicar em Sair e após 7 dias. Em computadores
+              compartilhados, prefira deixar ligado.
+            </p>
+          )}
         </CardContent>
       </Card>
 

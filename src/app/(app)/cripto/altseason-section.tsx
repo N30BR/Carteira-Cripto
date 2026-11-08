@@ -187,14 +187,22 @@ function Relations({ data }: { data: CryptoOverview }) {
   const btc = coins?.btc ?? null;
   const eth = coins?.top.find((c) => c.symbol === "ETH") ?? null;
   const ethBtc = btc && eth ? eth.price / btc.price : null;
+  // USDTUSD/BTCUSD = (preço do USDT em US$) ÷ (preço do BTC em US$): quanto 1 USDT vale em BTC.
+  const usdtBtc = btc && coins?.usdt ? coins.usdt.price / btc.price : null;
   const items = [
     { label: "ETH/BTC", value: ethBtc === null ? "—" : `${num(ethBtc, 5)} BTC`, sub: "Preço do Ethereum em Bitcoin", symbol: "ETHBTC" },
     { label: "BTC/ETH", value: ethBtc === null ? "—" : `${num(1 / ethBtc, 2)} ETH`, sub: "Preço do Bitcoin em Ethereum (inverso)", symbol: "BTCETH" },
+    {
+      label: "USDTUSD/BTCUSD",
+      value: usdtBtc === null ? "—" : `${num(usdtBtc, 8)} BTC`,
+      sub: `Dólar (USDT) em Bitcoin${usdtBtc === null ? "" : ` · ${num(usdtBtc * 1e8, 0)} sats`}`,
+      symbol: "USDTBTC",
+    },
     { label: "BTC/USDT", value: btc ? usd(btc.price) : "—", sub: "Preço do Bitcoin em dólar", symbol: "BTCUSDT" },
   ];
   return (
     <Panel title="Relações entre ativos" subtitle="Pares para comparar a força relativa (gráficos completos na aba Gráficos)." icon={<ArrowRightLeft />}>
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {items.map((it) => (
           <Card key={it.label} className="flex items-center justify-between gap-2">
             <div>
@@ -206,7 +214,10 @@ function Relations({ data }: { data: CryptoOverview }) {
           </Card>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-muted-foreground">Valores do momento pela CoinMarketCap; nos Gráficos, ETH/BTC e BTC/USDT vêm da Binance e BTC/ETH é o ETH/BTC invertido (mesmas velas).</p>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        Valores do momento pela CoinMarketCap. Nos Gráficos, ETH/BTC e BTC/USDT vêm da Binance; BTC/ETH é o ETH/BTC invertido e USDTUSD/BTCUSD é o BTC/USDT
+        invertido (mesmas velas, outra unidade; o USDT é tratado como US$ 1 no gráfico).
+      </p>
     </Panel>
   );
 }
@@ -328,6 +339,7 @@ function ComparableList() {
     ...MARKET_SERIES.map((s) => ({ symbol: s.id, label: s.short, sub: s.name })),
     { symbol: "ETHBTC", label: "ETH/BTC", sub: "Razão de preço ETH ÷ BTC" },
     { symbol: "BTCETH", label: "BTC/ETH", sub: "Razão de preço BTC ÷ ETH" },
+    { symbol: "USDTBTC", label: "USDTUSD/BTCUSD", sub: "Dólar (USDT) em Bitcoin" },
     { symbol: "BTCUSDT", label: "BTC/USDT", sub: "Preço do BTC em USDT" },
   ];
   return (

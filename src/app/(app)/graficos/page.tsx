@@ -3,7 +3,7 @@ import { getModuleState, requireModule } from "@/lib/auth/modules";
 import { listChartSymbols } from "@/lib/charts/market";
 import { getChartPrefs, listChartTabs } from "@/lib/charts/store";
 import { listHoldings } from "@/lib/holdings/holdings";
-import { INVERTED_PAIRS, isMarketId } from "@/lib/market/ids";
+import { invertedPair, isMarketId } from "@/lib/market/ids";
 import { ChartWorkspace } from "@/components/charts/workspace";
 
 export const metadata = { title: "Gráficos · BlackHole Dashboard" };
@@ -20,7 +20,7 @@ export default async function ChartsPage({ searchParams }: { searchParams: Promi
   const portfolio = on("crypto") ? [...new Set(listHoldings(db, user.id).map((h) => `${h.symbol}USDT`))].filter((s) => listed.has(s)) : [];
   // "Abrir em Gráficos" (aba Cripto): só instrumentos conhecidos — par listado, par invertido ou série de mercado.
   const raw = (await searchParams).abrir;
-  const abrir = typeof raw === "string" && (isMarketId(raw) || raw in INVERTED_PAIRS || listed.has(raw)) ? raw : null;
+  const abrir = typeof raw === "string" && (isMarketId(raw) || !!invertedPair(raw) || listed.has(raw)) ? raw : null;
 
   return (
     // Usa a largura toda da tela (o gráfico precisa de espaço).

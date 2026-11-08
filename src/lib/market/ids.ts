@@ -95,10 +95,27 @@ export const isMarketId = (s: string): s is MarketId => (MARKET_IDS as readonly 
 export const marketInfo = (id: string) => MARKET_SERIES.find((m) => m.id === id);
 
 /**
- * BTC/ETH: não é um par da Binance; sai das velas reais de ETH/BTC invertidas (abertura = 1/abertura,
- * máxima = 1/mínima, mínima = 1/máxima, fechamento = 1/fechamento). Mesmos dados, outra unidade.
+ * Pares invertidos (não existem na Binance): saem das velas reais do par oposto, com os preços invertidos
+ * (abertura = 1/abertura, máxima = 1/mínima, mínima = 1/máxima, fechamento = 1/fechamento). Mesmos dados, outra unidade.
+ * - BTC/ETH: quantos ETH vale 1 BTC (ETH/BTC invertido).
+ * - USDTUSD/BTCUSD: (preço do USDT em US$) ÷ (preço do BTC em US$) = quanto 1 USDT vale em BTC (BTC/USDT invertido).
  */
-export const INVERTED_PAIRS: Record<string, string> = { BTCETH: "ETHBTC" };
+export type InvertedPair = { source: string; label: string; name: string; keywords: string };
+export const INVERTED_PAIRS: Record<string, InvertedPair> = {
+  BTCETH: { source: "ETHBTC", label: "BTC/ETH", name: "Bitcoin em Ethereum (ETH/BTC invertido)", keywords: "btc eth razão inverso" },
+  USDTBTC: {
+    source: "BTCUSDT",
+    label: "USDTUSD/BTCUSD",
+    name: "Dólar (USDT) em Bitcoin — BTC/USDT invertido",
+    keywords: "usdtusd btcusd usdt btc dólar dolar bitcoin razão inverso",
+  },
+};
+export const invertedPair = (symbol: string): InvertedPair | undefined => (Object.hasOwn(INVERTED_PAIRS, symbol) ? INVERTED_PAIRS[symbol] : undefined);
+
+/** Nome de exibição de um instrumento (par invertido e séries de mercado têm nome próprio). */
+export function instrumentLabel(symbol: string, fallback: (s: string) => string): string {
+  return invertedPair(symbol)?.label ?? marketInfo(symbol)?.short ?? fallback(symbol);
+}
 
 /** Instrumento de mercado (série diária, desenhada como linha/área; sem velas inventadas). */
 export const isLineInstrument = (symbol: string) => isMarketId(symbol);

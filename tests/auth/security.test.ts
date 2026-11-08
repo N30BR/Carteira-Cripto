@@ -140,3 +140,15 @@ describe("origem do pedido (CSRF)", () => {
     expect(sameOrigin(req({ origin: "lixo", host: "painel.exemplo.com" }))).toBe(false);
   });
 });
+
+describe("bloqueio por inatividade desativado (opção da pessoa)", () => {
+  test("0 = desativado: aceito e nunca bloqueia; outros valores fora da lista continuam recusados", async () => {
+    const { db, u } = await setup();
+    expect(setLockMinutes(db, u.id, 0)).toBe(true);
+    expect(setLockMinutes(db, u.id, -1)).toBe(false);
+    const t0 = new Date("2026-01-01T00:00:00Z");
+    const { token } = createSession(db, u.id, t0);
+    expect(sessionState(db, token, new Date(t0.getTime() + 6 * 24 * 60 * MIN))?.locked).toBe(false);
+    expect(isIdleLocked(t0, 0, new Date(t0.getTime() + 365 * 24 * 60 * MIN))).toBe(false);
+  });
+});

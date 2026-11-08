@@ -9,7 +9,7 @@ import { COMPARE_SCALE_LABEL, compareDisplay, compareScale } from "@/lib/charts/
 import { COMPARE_COLORS } from "@/lib/charts/colors";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
 import { ONCHAIN_SERIES } from "@/lib/charts/onchain-ids";
-import { marketInfo } from "@/lib/market/ids";
+import { invertedPair, marketInfo } from "@/lib/market/ids";
 import { COMPARE_SCALES, type CompareScale, type CompareState } from "@/lib/charts/workspace";
 import { cn } from "@/lib/utils";
 import { ColorPicker, StyleMenu, WidthMenu } from "./object-ui";
@@ -18,7 +18,8 @@ export function compareLabel(c: CompareState): string {
   if (c.kind === "macro") return MACRO_SERIES.find((m) => m.id === c.id)?.label ?? c.id;
   if (c.kind === "onchain") return ONCHAIN_SERIES.find((o) => o.id === c.id)?.short ?? c.id;
   if (c.kind === "market") return marketInfo(c.id)?.short ?? c.id;
-  if (c.id === "BTCETH") return "BTC/ETH";
+  const inv = invertedPair(c.id);
+  if (inv) return inv.label;
   if (c.id === "PAXGUSDT") return "Ouro (PAXG/USDT)";
   if (c.id === "XAUTUSDT") return "Ouro (XAUT/USDT)";
   return c.id;
@@ -100,8 +101,8 @@ function CompareSettingsForm({
             <Row label="Série">
               <span className="rounded border bg-muted/40 px-2 py-1 font-mono text-xs">
                 {c.kind === "pair"
-                  ? c.id === "BTCETH"
-                    ? "Binance: ETHBTC invertido"
+                  ? invertedPair(c.id)
+                    ? `Binance: ${invertedPair(c.id)!.source} invertido`
                     : `Binance: ${c.id}`
                   : c.kind === "macro"
                     ? `FRED: ${c.id}`

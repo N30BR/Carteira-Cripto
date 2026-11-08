@@ -130,8 +130,9 @@ export function LockGuard({ lockMinutes, username }: { lockMinutes: number; user
     document.addEventListener("visibilitychange", check);
     window.addEventListener("focus", check);
 
+    // 0 = bloqueio por inatividade desativado: não há contagem (o servidor também não bloqueia).
     const timer = setInterval(() => {
-      if (!lockedRef.current && Date.now() - lastActivity.current >= lockMs) lock(true);
+      if (lockMs > 0 && !lockedRef.current && Date.now() - lastActivity.current >= lockMs) lock(true);
     }, 1000);
     // Primeiro aviso ao abrir a página (a sessão começa a contar daqui).
     beat();
