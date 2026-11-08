@@ -85,6 +85,13 @@
       "when": 1794062005995,
       "tag": "0011_sparkling_centennial",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794071510594,
+      "tag": "0012_cultured_puff_adder",
+      "breakpoints": true
     }
   ]
 }

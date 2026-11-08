@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- logo original fixa em /public/brand */
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeftRight, ChartColumn, CreditCard, Layers, Link2, Plus, SquareCheck, Target } from "lucide-react";
+import { ArrowLeftRight, Bitcoin, ChartCandlestick, ChartColumn, CreditCard, Globe, Layers, Link2, Newspaper, Plus, SquareCheck, Target } from "lucide-react";
 import { getModuleState } from "@/lib/auth/modules";
 import type { ModuleKey } from "@/lib/modules";
 import "./sobre.css";
@@ -10,13 +10,18 @@ export const metadata = { title: "Sobre · BlackHole Dashboard" };
 
 type Card = { label: string; href: string; module: ModuleKey | null; color: string; icon: LucideIcon | "R$" };
 
-// Os oito módulos centrais, em 4 colunas × 2 linhas (como na referência).
+// Os doze módulos centrais (as abas funcionais), em 4 colunas × 3 linhas. Os oito originais mantêm a ordem;
+// Gráficos, Notícias, Macro e Cripto entram entre Resumo e Lançamentos, como na navegação.
 const CARDS: Card[] = [
   { label: "Portfólio", href: "/", module: "crypto", color: "#3b82f6", icon: Link2 },
   { label: "R$ / Financeiro", href: "/fiduciario", module: "fiat", color: "#4ade80", icon: "R$" },
   { label: "Faturas", href: "/faturas", module: "invoices", color: "#c084fc", icon: CreditCard },
   { label: "Transações", href: "/transacoes", module: "transactions", color: "#4ade80", icon: ArrowLeftRight },
   { label: "Resumo", href: "/resumo", module: "summary", color: "#3b82f6", icon: ChartColumn },
+  { label: "Gráficos", href: "/graficos", module: "charts", color: "#4ade80", icon: ChartCandlestick },
+  { label: "Notícias", href: "/noticias", module: "news", color: "#c084fc", icon: Newspaper },
+  { label: "Macro", href: "/macro", module: "macro", color: "#3b82f6", icon: Globe },
+  { label: "Cripto", href: "/cripto", module: "market", color: "#fb923c", icon: Bitcoin },
   { label: "Lançamentos", href: "/lancamentos", module: null, color: "#fb923c", icon: Plus },
   { label: "Ativos", href: "/ativos", module: null, color: "#3b82f6", icon: Layers },
   { label: "Pendências", href: "/pendencias", module: "todos", color: "#c084fc", icon: SquareCheck },
@@ -114,7 +119,7 @@ export default async function AboutPage() {
 
         <p className="relative mt-6 max-w-2xl px-6 text-xl leading-snug font-medium text-balance sm:text-[1.7rem]">
           <span aria-hidden className="absolute inset-y-0 left-0 w-2.5 rounded-l-sm border-y-2 border-l-2 border-violet-300/70" />
-          Centralize suas informações em um único ponto denso de <span className="bh-accent">dados úteis</span>, claros e{" "}
+          Concentre suas informações em um único ponto denso de <span className="bh-accent">dados úteis</span>, claros e{" "}
           <span className="bh-accent">acionáveis</span>.
           <span aria-hidden className="absolute inset-y-0 right-0 w-2.5 rounded-r-sm border-y-2 border-r-2 border-violet-300/70" />
         </p>

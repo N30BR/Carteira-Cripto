@@ -31,7 +31,16 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    // Páginas abertas por link de e-mail (token no fragmento #): nunca enviar a origem a outros sites nem guardar em cache.
+    const linkPages = [
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "Cache-Control", value: "no-store" },
+    ];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      { source: "/redefinir-senha", headers: linkPages },
+      { source: "/verificar-email", headers: linkPages },
+    ];
   },
   serverExternalPackages: ["better-sqlite3", "@node-rs/argon2"],
   experimental: {

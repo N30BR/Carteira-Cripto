@@ -367,11 +367,11 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   await expect(tasks.locator("li").first()).toContainText("Pesquisar cursos de IA");
   await expect(tasks.locator("li").last()).toContainText("Enviar orçamento");
 
-  // Página Sobre: a logo abre /sobre na mesma guia, com os 8 módulos como links
+  // Página Sobre: a logo abre /sobre na mesma guia, com os 12 módulos (abas funcionais) como links
   await page.getByRole("link", { name: "Sobre o BlackHole Dashboard" }).click();
   await expect(page).toHaveURL(/\/sobre$/);
   await expect(page.getByText("Concentrar sinais essenciais, reduzir fragmentação")).toBeVisible();
-  await expect(page.locator("main").getByRole("listitem")).toHaveCount(8);
+  await expect(page.locator("main").getByRole("listitem")).toHaveCount(12);
   await expect(page.locator("main").getByRole("link", { name: "Faturas" })).toHaveAttribute("href", "/faturas");
   if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT + "/sobre.png", fullPage: true });
   if (process.env.SHOT) {

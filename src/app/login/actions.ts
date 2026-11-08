@@ -4,6 +4,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { attemptLogin } from "@/lib/auth/login";
+import { requestPasswordReset } from "@/lib/auth/recovery";
 import { clientIp } from "@/lib/auth/ip-limit";
 import { sessionCookieName, sessionCookieOptions } from "@/lib/auth/cookie";
 
@@ -27,4 +28,11 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
   (await cookies()).set(sessionCookieName(), result.token, sessionCookieOptions(result.expiresAt));
   redirect("/");
+}
+
+/** "Esqueceu a senha": sempre a mesma resposta (não revela se o e-mail tem conta). */
+export async function requestResetAction(email: string): Promise<{ ok: true; message: string }> {
+  const ip = clientIp((await headers()).get("x-forwarded-for"));
+  const r = requestPasswordReset(getDb(), email, ip);
+  return { ok: true, message: r.message };
 }

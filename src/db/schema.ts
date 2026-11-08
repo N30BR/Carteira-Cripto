@@ -18,6 +18,38 @@ export const users = sqliteTable("users", {
   totpEnabled: integer("totp_enabled", { mode: "boolean" }).notNull().default(false),
   /** Último intervalo de 30 s já usado (um código não vale duas vezes). */
   totpLastStep: integer("totp_last_step"),
+  /** E-mail de recuperação VERIFICADO (minúsculas). Só ele recebe links de redefinição. */
+  email: text("email").unique(),
+  emailVerifiedAt: integer("email_verified_at", { mode: "timestamp_ms" }),
+  /** E-mail novo aguardando confirmação pelo link (não vale para nada até ser confirmado). */
+  pendingEmail: text("pending_email"),
+});
+
+/**
+ * Links de uso único enviados por e-mail (confirmar e-mail, redefinir senha). Só o hash SHA-256 do token fica no banco;
+ * usedAt marca o consumo (atômico); expiresAt limita a validade.
+ */
+export const accountTokens = sqliteTable("account_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  purpose: text("purpose", { enum: ["verify_email", "reset_password"] }).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  /** E-mail a confirmar (verify_email). */
+  email: text("email"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  usedAt: integer("used_at", { mode: "timestamp_ms" }),
+});
+
+/** Auditoria de segurança da conta (sem senhas, tokens nem links). */
+export const securityEvents = sqliteTable("security_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  event: text("event").notNull(),
+  ip: text("ip"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
 export const sessions = sqliteTable("sessions", {

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Timer } from "lucide-react";
+import { Mail, ShieldCheck, Timer } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,9 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LOCK_OPTIONS } from "@/lib/auth/lock-config";
 import { safeAction } from "@/lib/safe-action";
-import { confirmTotpAction, disableTotpAction, setLockMinutesAction, startTotpAction } from "./actions";
+import { confirmTotpAction, disableTotpAction, requestEmailAction, setLockMinutesAction, startTotpAction } from "./actions";
+import type { EmailStatus } from "@/lib/auth/recovery";
 
-export function SecurityForm({ lockMinutes, totpEnabled }: { lockMinutes: number; totpEnabled: boolean }) {
+export function SecurityForm({ lockMinutes, totpEnabled, email }: { lockMinutes: number; totpEnabled: boolean; email: EmailStatus }) {
+  const emailOk = email.state === "verified";
   const router = useRouter();
   const [pending, start] = useTransition();
   const [minutes, setMinutes] = useState(lockMinutes);
@@ -66,6 +68,8 @@ export function SecurityForm({ lockMinutes, totpEnabled }: { lockMinutes: number
         </CardContent>
       </Card>
 
+      <EmailCard email={email} totpEnabled={totpEnabled} />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -80,6 +84,7 @@ export function SecurityForm({ lockMinutes, totpEnabled }: { lockMinutes: number
             <>
               <p className="font-medium text-green-500">Ativa nesta conta.</p>
               <p className="text-muted-foreground">Para desligar, confirme a senha e um código atual do aplicativo.</p>
+              {!emailOk && <p className="text-xs text-amber-400/90">Cadastre e confirme seu e-mail antes de alterar a autenticação de dois fatores (o acesso continua normal).</p>}
               <Input type="password" aria-label="Senha" placeholder="Senha" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
               <Input aria-label="Código do aplicativo" placeholder="Código de 6 dígitos" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} />
               {error && <p className="text-destructive">{error}</p>}
@@ -140,10 +145,11 @@ export function SecurityForm({ lockMinutes, totpEnabled }: { lockMinutes: number
           ) : (
             <>
               <p className="text-muted-foreground">Desligada.</p>
+              {!emailOk && <p className="text-xs text-muted-foreground">Cadastre e confirme seu e-mail para habilitar a autenticação de dois fatores.</p>}
               <Button
                 variant="outline"
                 className="self-start"
-                disabled={pending}
+                disabled={pending || !emailOk}
                 onClick={() =>
                   start(async () => {
                     const r = await safeAction(() => startTotpAction());
@@ -161,5 +167,89 @@ export function SecurityForm({ lockMinutes, totpEnabled }: { lockMinutes: number
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+const STATE_LABEL: Record<EmailStatus["state"], { text: string; cls: string }> = {
+  none: { text: "Não cadastrado", cls: "text-muted-foreground" },
+  pending: { text: "Pendente de verificação", cls: "text-amber-400" },
+  verified: { text: "Verificado", cls: "text-green-500" },
+};
+
+/** E-mail de recuperação: cadastrar ou trocar exige a senha (e o código, com 2FA ativo); só vale depois de confirmado. */
+function EmailCard({ email, totpEnabled }: { email: EmailStatus; totpEnabled: boolean }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string>();
+  const [message, setMessage] = useState<string>();
+  const st = STATE_LABEL[email.state];
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    start(async () => {
+      const r = await safeAction(() => requestEmailAction(value, password, code));
+      setPassword("");
+      setCode("");
+      if (r.ok) {
+        setMessage("message" in r ? r.message : undefined);
+        setError(undefined);
+        setEditing(false);
+        setValue("");
+        router.refresh();
+      } else setError(r.error);
+    });
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Mail className="size-5 text-[#a888c0]" /> E-mail de recuperação
+        </CardTitle>
+        <CardDescription>Usado só para redefinir a senha e para avisos de segurança. Precisa ser confirmado pelo link enviado a ele.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 text-sm">
+        <p>
+          Situação: <span className={st.cls + " font-medium"}>{st.text}</span>
+          {email.email && <span className="ml-2 text-muted-foreground">{email.email}</span>}
+        </p>
+        {email.pending && (
+          <p className="text-xs text-muted-foreground">
+            Aguardando confirmação de <span className="text-foreground">{email.pending}</span> (link válido por 24 horas).
+            {email.state === "verified" && " O e-mail atual continua valendo até lá."}
+          </p>
+        )}
+        {message && (
+          <p role="status" className="text-xs text-green-500">
+            {message}
+          </p>
+        )}
+        {!email.mailReady && <p className="text-xs text-amber-400/90">O envio de e-mails ainda não está configurado no servidor (SMTP).</p>}
+        {editing ? (
+          <form onSubmit={submit} className="flex flex-col gap-2">
+            <Input type="email" aria-label="Novo e-mail de recuperação" placeholder="seu@email.com" autoComplete="email" value={value} onChange={(e) => setValue(e.target.value)} required />
+            <Input type="password" aria-label="Senha atual" placeholder="Senha atual (confirmação)" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            {totpEnabled && (
+              <Input aria-label="Código do aplicativo" placeholder="Código de 6 dígitos" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} required />
+            )}
+            {error && <p className="text-destructive">{error}</p>}
+            <div className="flex gap-2">
+              <Button type="submit" disabled={pending || !value.trim() || !password}>
+                {pending ? "Enviando..." : "Enviar link de confirmação"}
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => (setEditing(false), setError(undefined))}>
+                Cancelar
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <Button variant="outline" className="self-start" disabled={!email.mailReady} onClick={() => (setEditing(true), setMessage(undefined))}>
+            {email.state === "none" ? "Cadastrar e-mail" : "Alterar e-mail"}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
