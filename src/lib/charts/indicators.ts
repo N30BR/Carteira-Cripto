@@ -446,15 +446,18 @@ export type LiqHeatField = {
   short: Float32Array;
 };
 
+/** Faixas de preço do campo: ~0,15% de preço cada, entre 480 e 2000 (histórico longo cobre preços muito diferentes). */
 export const HEAT_BUCKETS = 480;
+export const HEAT_BUCKETS_MAX = 2000;
+const HEAT_STEP = 0.0015;
 
 export function liquidationHeatField(
   bars: Bar[],
   oi: [number, number][],
   tiers: { leverage: number; weight: number }[] = DEFAULT_LEVERAGE_TIERS,
-  buckets = HEAT_BUCKETS,
+  fixedBuckets?: number,
 ): LiqHeatField {
-  const empty: LiqHeatField = { start: -1, bars: bars.length, buckets, lnLo: 0, lnHi: 1, long: new Float32Array(0), short: new Float32Array(0) };
+  const empty: LiqHeatField = { start: -1, bars: bars.length, buckets: fixedBuckets ?? HEAT_BUCKETS, lnLo: 0, lnHi: 1, long: new Float32Array(0), short: new Float32Array(0) };
   const sorted = [...oi].filter(([t, v]) => Number.isFinite(t) && Number.isFinite(v) && v >= 0).sort((a, b) => a[0] - b[0]);
   let k = -1;
   const oiAt = bars.map((b) => {
@@ -476,6 +479,7 @@ export function liquidationHeatField(
   if (!(lo > 0) || !(hi > lo)) return empty;
   const lnLo = Math.log(lo);
   const lnHi = Math.log(hi);
+  const buckets = fixedBuckets ?? Math.round(Math.max(HEAT_BUCKETS, Math.min(HEAT_BUCKETS_MAX, (lnHi - lnLo) / HEAT_STEP)));
   const scale = buckets / (lnHi - lnLo);
   const bucketOf = (p: number) => Math.min(buckets - 1, Math.max(0, Math.floor((Math.log(p) - lnLo) * scale)));
   const cols = bars.length - start;

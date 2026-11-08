@@ -73,6 +73,16 @@ export const CHART_INDICATORS: { name: string; label: string; pane: "main" | "su
 ];
 const INDICATOR_NAMES = new Set(CHART_INDICATORS.map((i) => i.name));
 
+/**
+ * Eixos em que o desenho inteiro pode ser arrastado (para os bloqueios X/Y da barra rápida): a linha horizontal só
+ * anda na vertical e a vertical só na horizontal; os demais desenhos, nos dois.
+ */
+export function movableAxes(tool: string): { x: boolean; y: boolean } {
+  if (tool === "horizontalStraightLine") return { x: false, y: true };
+  if (tool === "verticalStraightLine") return { x: true, y: false };
+  return { x: true, y: true };
+}
+
 /** Ferramentas de desenho (barra lateral): nome interno e rótulo. */
 export const CHART_TOOLS: { name: string; label: string }[] = [
   { name: "segment", label: "Linha de tendência" },
@@ -175,6 +185,8 @@ export type OverlayStyleState = {
   shiftBars?: number;
   /** Perfil de volume: espelhado na horizontal (botão "Girar"); só muda o lado das barras, não o cálculo. */
   mirror?: boolean;
+  /** Perfil de volume (faixa fixa): largura visual do histograma, em % do padrão (só o desenho, não o cálculo). */
+  histWidth?: number;
   /** Perfil de volume por faixa de preço: janela de tempo do cálculo (ms), guardada na inserção. */
   windowFrom?: number;
   windowTo?: number;
@@ -187,6 +199,9 @@ export type OverlayState = {
   styles?: OverlayStyleState;
   visible?: boolean;
   locked?: boolean;
+  /** Arrastar o desenho inteiro não muda o tempo (X) / o preço (Y). Os pontos de controle continuam livres. */
+  lockX?: boolean;
+  lockY?: boolean;
 };
 /** Série comparada na mesma divisão: outro par da Binance (ex.: ouro PAXGUSDT) ou série macro do FRED. */
 export type CompareState = ({ kind: "pair"; id: string } | { kind: "macro"; id: MacroId } | { kind: "onchain"; id: OnchainId } | { kind: "market"; id: MarketId }) & {
@@ -214,8 +229,12 @@ export type PaneState = {
   autoScale?: boolean;
   /** Botão do mapa de liquidações (camada atrás das velas). */
   liqMap?: boolean;
-  /** Botão do perfil lateral de liquidez (faixa fixa à direita). */
+  /** Botão do perfil lateral de volume (faixa fixa à direita). */
   sideProfile?: boolean;
+  /** Largura da faixa do perfil lateral (px), ajustada arrastando a borda esquerda dela. */
+  sideWidth?: number;
+  /** Cores do perfil lateral (compras e vendas, com opacidade), escolhidas clicando nas barras. Só o desenho. */
+  sideColors?: { buy?: string; sell?: string };
   /** Zoom e posição salvos por par e tempo (voltam ao reabrir a aba, a página ou o mesmo par). Mais recente primeiro. */
   views?: PaneView[];
 };
@@ -239,6 +258,15 @@ export type ToolPrefs = {
    * o mesmo do gráfico: par da Binance (ex.: ETHBTC), par sintético (ex.: BTCETH, XLMBTC) ou série de mercado (TOTAL3).
    */
   favoriteSymbols?: string[];
+  /**
+   * Padrão visual de cada tipo de desenho (últimas configurações visuais confirmadas): cada desenho NOVO daquele tipo
+   * nasce com ele; os já desenhados guardam as suas. Só propriedades visuais (ver OVERLAY_VISUAL_KEYS).
+   */
+  styleDefaults?: Record<string, OverlayStyleState>;
+  /** Padrão visual de cada tipo de indicador: cor/espessura/traço das séries e cores de alta/baixa. */
+  indicatorDefaults?: Record<string, IndicatorVisual>;
+  /** Cores do perfil lateral (barras verdes/compras e vermelhas/vendas, com opacidade): da conta, em todos os gráficos. */
+  sideColors?: { buy?: string; sell?: string };
   /** Ferramentas que já existiam quando as preferências foram salvas (as criadas depois entram visíveis). */
   known?: string[];
   /** Modelo para gráficos novos: a configuração do gráfico de referência (1º gráfico da aba indicada). */
@@ -340,6 +368,116 @@ export const defaultPrefs = (): ToolPrefs => ({
   favoriteSymbols: [],
   known: CHART_TOOLS.map((t) => t.name),
 });
+
+/** Limites da largura do histograma da Faixa Fixa (% do padrão). */
+export const HIST_WIDTH_MIN = 25;
+export const HIST_WIDTH_MAX = 300;
+
+/** Limites da largura do perfil lateral (px). */
+export const SIDE_WIDTH_MIN = 60;
+export const SIDE_WIDTH_MAX = 600;
+
+/**
+ * Propriedades VISUAIS de um desenho (aba Estilo): entram no padrão do tipo e o botão "Padrão" as restaura.
+ * Fora daqui ficam posição, pontos, janela analisada, deslocamento, espelhamento e textos dos rótulos.
+ */
+export const OVERLAY_VISUAL_KEYS = ["color", "size", "style", "textColor", "buyColor", "sellColor", "histWidth", "labelSize", "showLabels", "showPoints", "labelPosition", "levels"] as const;
+type VisualKey = (typeof OVERLAY_VISUAL_KEYS)[number];
+
+/** Só as propriedades visuais definidas de um estilo de desenho. */
+export function visualStyles(st: OverlayStyleState | undefined): OverlayStyleState {
+  const out: OverlayStyleState = {};
+  if (!st) return out;
+  for (const k of OVERLAY_VISUAL_KEYS) if (st[k] !== undefined) (out as Record<VisualKey, unknown>)[k] = st[k];
+  return out;
+}
+
+/** Padrão de fábrica de um estilo: tira as propriedades visuais (níveis do Fibonacci: só as cores voltam às originais). */
+export function factoryVisualStyles(st: OverlayStyleState, defaultLevels: FibLevel[]): OverlayStyleState {
+  const out: OverlayStyleState = { ...st };
+  for (const k of OVERLAY_VISUAL_KEYS) if (k !== "levels") (out as Record<VisualKey, unknown>)[k] = undefined;
+  if (st.levels) out.levels = st.levels.map((l) => ({ ...l, color: defaultLevels.find((d) => d.value === l.value)?.color ?? l.color }));
+  return out;
+}
+
+/** Visual de um indicador: cor/espessura/traço de cada série e cores de alta/baixa (períodos e opções de cálculo, não). */
+export type IndicatorVisual = { styles?: Record<string, { color?: string; size?: number; style?: LineStyleName }>; upColor?: string; downColor?: string };
+
+export function indicatorVisual(ind: Pick<IndicatorState, "styles" | "options">): IndicatorVisual {
+  const styles: Record<string, { color?: string; size?: number; style?: LineStyleName }> = {};
+  for (const [k, v] of Object.entries(ind.styles ?? {})) {
+    const line = { ...(v.color ? { color: v.color } : {}), ...(v.size ? { size: v.size } : {}), ...(v.style ? { style: v.style } : {}) };
+    if (Object.keys(line).length) styles[k] = line;
+  }
+  return {
+    ...(Object.keys(styles).length ? { styles } : {}),
+    ...(ind.options?.upColor ? { upColor: ind.options.upColor } : {}),
+    ...(ind.options?.downColor ? { downColor: ind.options.downColor } : {}),
+  };
+}
+
+/** Indicador novo com o padrão visual do tipo (as séries guardam a própria visibilidade). */
+export function withIndicatorVisual(ind: IndicatorState, v: IndicatorVisual | undefined): IndicatorState {
+  if (!v || (!v.styles && !v.upColor && !v.downColor)) return ind;
+  return {
+    ...ind,
+    ...(v.styles ? { styles: Object.fromEntries(Object.entries(v.styles).map(([k, line]) => [k, { ...line, ...(ind.styles?.[k]?.visible === undefined ? {} : { visible: ind.styles[k].visible }) }])) } : {}),
+    ...(v.upColor || v.downColor ? { options: { ...ind.options, ...(v.upColor ? { upColor: v.upColor } : {}), ...(v.downColor ? { downColor: v.downColor } : {}) } } : {}),
+  };
+}
+
+/** Padrão de fábrica do visual de um indicador: tira cores/espessuras/traços (mantém visibilidade, períodos e opções). */
+export function factoryIndicatorVisual(ind: IndicatorState): IndicatorState {
+  const styles = Object.fromEntries(Object.entries(ind.styles ?? {}).flatMap(([k, v]) => (v.visible === undefined ? [] : [[k, { visible: v.visible }]])));
+  const options = { ...ind.options };
+  delete options.upColor;
+  delete options.downColor;
+  const out: IndicatorState = { ...ind };
+  if (Object.keys(styles).length) out.styles = styles;
+  else delete out.styles;
+  if (Object.keys(options).length) out.options = options;
+  else delete out.options;
+  return out;
+}
+
+function sanitizeStyleDefaults(v: unknown, legacyProfileColors: unknown): Record<string, OverlayStyleState> | undefined {
+  const out: Record<string, OverlayStyleState> = {};
+  if (isObj(v))
+    for (const [tool, raw] of Object.entries(v).slice(0, 80)) {
+      if (!TOOL_NAMES.has(tool)) continue;
+      const st = sanitizeOverlayStyles(raw);
+      const vis = st ? visualStyles(st) : {};
+      if (Object.keys(vis).length) out[tool] = vis;
+    }
+  // Preferência antiga (só a Faixa Fixa guardava as últimas cores): vira o padrão dela.
+  if (!out.fixedRangeVolumeProfile && isObj(legacyProfileColors)) {
+    const old: OverlayStyleState = {};
+    for (const k of ["color", "buyColor", "sellColor"] as const) if (typeof legacyProfileColors[k] === "string" && COLOR.test(legacyProfileColors[k] as string)) old[k] = legacyProfileColors[k] as string;
+    if (Object.keys(old).length) out.fixedRangeVolumeProfile = old;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function sanitizeIndicatorDefaults(v: unknown): Record<string, IndicatorVisual> | undefined {
+  if (!isObj(v)) return undefined;
+  const out: Record<string, IndicatorVisual> = {};
+  for (const [name, raw] of Object.entries(v).slice(0, 80)) {
+    if (!INDICATOR_NAMES.has(name) || !isObj(raw)) continue;
+    const item: IndicatorVisual = {};
+    if (isObj(raw.styles)) {
+      const styles: NonNullable<IndicatorVisual["styles"]> = {};
+      for (const [key, line] of Object.entries(raw.styles).slice(0, 20)) {
+        if (!SERIES_KEY.test(key) || !isObj(line)) continue;
+        const ok = sanitizeLine(line);
+        if (ok && Object.keys(ok).length) styles[key] = ok;
+      }
+      if (Object.keys(styles).length) item.styles = styles;
+    }
+    for (const k of ["upColor", "downColor"] as const) if (typeof raw[k] === "string" && COLOR.test(raw[k] as string)) item[k] = raw[k] as string;
+    if (Object.keys(item).length) out[name] = item;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 /** Máximo de pares favoritos. */
 export const MAX_FAVORITE_SYMBOLS = 200;
@@ -489,6 +627,10 @@ function sanitizeOverlayStyles(v: unknown): OverlayStyleState | null {
     if (typeof v.mirror !== "boolean") return null;
     out.mirror = v.mirror;
   }
+  if (v.histWidth !== undefined) {
+    if (!Number.isInteger(v.histWidth) || (v.histWidth as number) < HIST_WIDTH_MIN || (v.histWidth as number) > HIST_WIDTH_MAX) return null;
+    out.histWidth = v.histWidth as number;
+  }
   if (v.windowFrom !== undefined || v.windowTo !== undefined) {
     const a = v.windowFrom;
     const b = v.windowTo;
@@ -531,7 +673,7 @@ function sanitizeOverlay(v: unknown): R<OverlayState> {
     if (typeof v.id !== "string" || !ID.test(v.id)) return fail("Desenho inválido");
     out.id = v.id;
   }
-  for (const k of ["visible", "locked"] as const) {
+  for (const k of ["visible", "locked", "lockX", "lockY"] as const) {
     if (v[k] === undefined) continue;
     if (!isBool(v[k])) return fail("Desenho inválido");
     out[k] = v[k] as boolean;
@@ -596,6 +738,14 @@ function sanitizePane(v: unknown): R<PaneState> {
     compares.push(r.value);
   }
   for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
+  if (v.sideWidth !== undefined && !(typeof v.sideWidth === "number" && Number.isInteger(v.sideWidth) && v.sideWidth >= SIDE_WIDTH_MIN && v.sideWidth <= SIDE_WIDTH_MAX)) return fail("Gráfico inválido");
+  let sideColors: { buy?: string; sell?: string } | undefined;
+  if (v.sideColors !== undefined) {
+    const sc = v.sideColors;
+    if (!isObj(sc) || Object.keys(sc).some((k) => k !== "buy" && k !== "sell")) return fail("Gráfico inválido");
+    for (const k of ["buy", "sell"] as const) if (sc[k] !== undefined && !(typeof sc[k] === "string" && COLOR.test(sc[k] as string))) return fail("Gráfico inválido");
+    sideColors = { ...(sc.buy === undefined ? {} : { buy: sc.buy as string }), ...(sc.sell === undefined ? {} : { sell: sc.sell as string }) };
+  }
   // Zoom salvo inválido não derruba o gráfico: só é descartado.
   const views = Array.isArray(v.views) ? v.views.slice(0, MAX_VIEWS).map(sanitizeView).filter((x): x is PaneView => !!x) : [];
   return {
@@ -613,6 +763,8 @@ function sanitizePane(v: unknown): R<PaneState> {
       ...(v.autoScale === undefined ? {} : { autoScale: v.autoScale as boolean }),
       ...(v.liqMap === undefined ? {} : { liqMap: v.liqMap as boolean }),
       ...(v.sideProfile === undefined ? {} : { sideProfile: v.sideProfile as boolean }),
+      ...(v.sideWidth === undefined ? {} : { sideWidth: v.sideWidth as number }),
+      ...(sideColors ? { sideColors } : {}),
       ...(views.length ? { views } : {}),
     },
   };
@@ -681,6 +833,11 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
   const favoriteIndicators = [...new Set(rawFav.filter((n): n is string => typeof n === "string" && INDICATOR_NAMES.has(n)))];
   // Pares favoritos: só identificadores válidos, sem repetição, até o limite.
   const favoriteSymbols = [...new Set((Array.isArray(v.favoriteSymbols) ? v.favoriteSymbols : []).filter(isInstrumentId))].slice(0, MAX_FAVORITE_SYMBOLS);
+  const styleDefaults = sanitizeStyleDefaults(v.styleDefaults, v.profileColors);
+  const indicatorDefaults = sanitizeIndicatorDefaults(v.indicatorDefaults);
+  const sideColors = isObj(v.sideColors)
+    ? Object.fromEntries((["buy", "sell"] as const).flatMap((k) => (typeof (v.sideColors as Record<string, unknown>)[k] === "string" && COLOR.test((v.sideColors as Record<string, string>)[k]) ? [[k, (v.sideColors as Record<string, string>)[k]]] : [])))
+    : {};
   // Modelo para gráficos novos: validado como um gráfico; inválido ou grande demais é descartado (o resto salva).
   const template = sanitizeTemplate(v.template);
   return {
@@ -691,6 +848,9 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
       intervals: intervals.length ? intervals : [...DEFAULT_INTERVALS],
       favoriteIndicators,
       favoriteSymbols,
+      ...(styleDefaults ? { styleDefaults } : {}),
+      ...(indicatorDefaults ? { indicatorDefaults } : {}),
+      ...(Object.keys(sideColors).length ? { sideColors: sideColors as { buy?: string; sell?: string } } : {}),
       known: CHART_TOOLS.map((t) => t.name),
       ...(template ? { template } : {}),
     },

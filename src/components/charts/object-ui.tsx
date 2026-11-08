@@ -2,8 +2,8 @@
 
 // Edição de desenhos: barra rápida (clique esquerdo), configurações completas (clique direito)
 // e lista de desenhos (para mostrar de novo os ocultos).
-import { useRef, useState } from "react";
-import { Copy, Eye, EyeOff, GripVertical, Layers, Lock, LockOpen, MoreHorizontal, Pencil, Plus, RefreshCw, Settings2, Trash2, Type } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Copy, Eye, EyeOff, GripVertical, Layers, Lock, LockOpen, MoreHorizontal, MoveHorizontal, MoveVertical, Pencil, Plus, RefreshCw, Settings2, Trash2, Type, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -30,6 +30,10 @@ import {
   type LineStyleName,
   type OverlayState,
   type OverlayStyleState,
+  HIST_WIDTH_MAX,
+  HIST_WIDTH_MIN,
+  factoryVisualStyles,
+  movableAxes,
 } from "@/lib/charts/workspace";
 import { cn } from "@/lib/utils";
 
@@ -55,13 +59,55 @@ const hex2 = (n: number) => Math.round(n).toString(16).padStart(2, "0");
 const opacityOf = (c: string) => (c.length === 9 ? Math.round((parseInt(c.slice(7), 16) / 255) * 100) : 100);
 const withOpacity = (c: string, pct: number) => (pct >= 100 ? c.slice(0, 7) : `${c.slice(0, 7)}${hex2((pct / 100) * 255)}`);
 
-export function ColorPicker({ value, onChange, label }: { value: string; onChange: (c: string) => void; label: string }) {
+/**
+ * Janelas de configuração (desenhos, indicadores, comparações): a largura de sempre quando o conteúdo cabe; se não
+ * couber, a janela cresce (até 42rem ou a tela) em vez de criar rolagem horizontal. Textos explicativos não puxam a
+ * largura (quebram linha na largura dos controles).
+ */
+export const SETTINGS_DIALOG = "sm:w-auto sm:min-w-[28rem] sm:max-w-[min(42rem,calc(100vw-2rem))]";
+export const SETTINGS_BODY = "overflow-y-auto [&_p]:w-0 [&_p]:min-w-full";
+
+/** Barra da opacidade: parte clara até a posição (0–100% do curso) e escura depois, sem degradê. */
+const opacityTrack = (pct: number) => {
+  const at = `calc(7px + (100% - 14px) * ${Math.max(0, Math.min(100, pct)) / 100})`;
+  return `linear-gradient(to right, #e4e4e7 0, #e4e4e7 ${at}, #18181b ${at}, #18181b 100%)`;
+};
+/** Marcador redondo de 14 px com contorno duplo (escuro + claro): aparece sobre a parte clara e sobre a escura. */
+const OPACITY_SLIDER = [
+  "h-1.5 flex-1 cursor-pointer appearance-none rounded-full ring-1 ring-zinc-600",
+  "[&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#8b7cf6] [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-[0_0_0_1px_#09090b]",
+  "[&::-moz-range-thumb]:size-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[#8b7cf6] [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:shadow-[0_0_0_1px_#09090b]",
+  "[&::-moz-range-track]:bg-transparent",
+].join(" ");
+
+export function ColorPicker({
+  value,
+  onChange,
+  label,
+  open,
+  onOpenChange,
+  anchorOnly,
+}: {
+  value: string;
+  onChange: (c: string) => void;
+  label: string;
+  /** Aberto por fora (ex.: clique nas barras do perfil lateral). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Sem o botão de cor visível: só um ponto de ancoragem para o painel. */
+  anchorOnly?: boolean;
+}) {
   const [custom, setCustom] = useState("");
   const opacity = opacityOf(value);
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} {...(open === undefined ? {} : { open })} {...(onOpenChange ? { onOpenChange } : {})}>
       <DropdownMenuTrigger asChild>
-        <button type="button" aria-label={label} title={label} className="grid size-8 place-items-center rounded border hover:bg-muted">
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          className={anchorOnly ? "pointer-events-none size-px opacity-0" : "grid size-8 place-items-center rounded border hover:bg-muted"}
+        >
           <span className="size-4 rounded-sm border" style={{ background: value }} />
         </button>
       </DropdownMenuTrigger>
@@ -101,7 +147,9 @@ export function ColorPicker({ value, onChange, label }: { value: string; onChang
             value={opacity}
             aria-label="Opacidade"
             onChange={(e) => onChange(withOpacity(value, Number(e.target.value)))}
-            className="flex-1"
+            // Só o visual: claro até o marcador, escuro depois (corte nítido no centro do marcador de 14 px).
+            style={{ background: opacityTrack(((opacity - 5) / 95) * 100) }}
+            className={OPACITY_SLIDER}
           />
           <span className="w-9 text-right">{opacity}%</span>
         </label>
@@ -253,6 +301,25 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
       <ToolbarButton label="Configurações" onClick={actions.settings}>
         <Settings2 />
       </ToolbarButton>
+      {/* Bloqueios por eixo: só nos eixos em que o desenho anda (o cadeado geral continua valendo por cima). */}
+      {movableAxes(object.name).x && (
+        <ToolbarButton
+          label={object.lockX ? "Desbloquear movimentação horizontal" : "Bloquear movimentação horizontal"}
+          onClick={() => actions.update({ lockX: !object.lockX })}
+          pressed={!!object.lockX}
+        >
+          <MoveHorizontal />
+        </ToolbarButton>
+      )}
+      {movableAxes(object.name).y && (
+        <ToolbarButton
+          label={object.lockY ? "Desbloquear movimentação vertical" : "Bloquear movimentação vertical"}
+          onClick={() => actions.update({ lockY: !object.lockY })}
+          pressed={!!object.lockY}
+        >
+          <MoveVertical />
+        </ToolbarButton>
+      )}
       <ToolbarButton label={object.locked ? "Desbloquear" : "Bloquear"} onClick={() => actions.update({ locked: !object.locked })} pressed={!!object.locked}>
         {object.locked ? <Lock /> : <LockOpen />}
       </ToolbarButton>
@@ -322,7 +389,7 @@ export function ObjectSettingsDialog({
 }) {
   return (
     <Dialog open={open && !!object} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={SETTINGS_DIALOG}>
         {/* Recria o formulário a cada desenho aberto (valores atuais). */}
         {object && <ObjectSettingsForm key={object.id} object={object} onClose={onClose} onApply={onApply} />}
       </DialogContent>
@@ -349,8 +416,24 @@ function ObjectSettingsForm({ object, onClose, onApply }: { object: OverlayState
   ];
   const set = (patch: Partial<OverlayStyleState>) => setSt((s) => ({ ...s, ...patch }));
   const setLevel = (i: number, patch: Partial<FibLevel>) => set({ levels: (st.levels ?? []).map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+  // Largura do histograma (Faixa Fixa): prévia no gráfico enquanto o controle é arrastado; fechar sem "Ok" desfaz.
+  const histPreview = useRef<{ original: number | undefined; applied: boolean } | null>(null);
+  const previewHist = (histWidth: number) => {
+    if (!histPreview.current) histPreview.current = { original: object.styles?.histWidth, applied: false };
+    set({ histWidth });
+    onApply({ styles: { histWidth } });
+  };
+  const revert = useRef(() => {});
+  useEffect(() => {
+    revert.current = () => {
+      const p = histPreview.current;
+      if (p && !p.applied) onApply({ styles: { histWidth: p.original } });
+    };
+  });
+  useEffect(() => () => revert.current(), []);
   const apply = () => {
     const trimmed = textValue.slice(0, 200).trim();
+    if (histPreview.current) histPreview.current.applied = true;
     onApply({ styles: st, points, visible, locked, ...(isText && trimmed ? { text: trimmed } : {}) });
     onClose();
   };
@@ -373,7 +456,7 @@ function ObjectSettingsForm({ object, onClose, onApply }: { object: OverlayState
           </button>
         ))}
       </div>
-      <div className="flex max-h-[55vh] min-h-48 flex-col gap-3 overflow-auto py-1 text-sm">
+      <div className={cn("flex max-h-[55vh] min-h-48 flex-col gap-3 py-1 text-sm", SETTINGS_BODY)}>
         {tab === "style" && (
           <>
             <Row label="Linha">
@@ -402,7 +485,7 @@ function ObjectSettingsForm({ object, onClose, onApply }: { object: OverlayState
                     aria-label="Posição dos rótulos"
                     value={st.labelPosition ?? "auto"}
                     onChange={(e) => set({ labelPosition: e.target.value as LabelPosition })}
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
+                    className="h-8 max-w-full rounded-md border bg-background px-2 text-sm"
                   >
                     {LABEL_POSITIONS.map((p) => (
                       <option key={p} value={p}>
@@ -459,6 +542,20 @@ function ObjectSettingsForm({ object, onClose, onApply }: { object: OverlayState
                 </Row>
                 <Row label="Área de valor (%)">
                   <NumberInput label="Área de valor (%)" value={st.valueArea ?? 70} min={10} max={100} step={1} onChange={(valueArea) => set({ valueArea })} />
+                </Row>
+                <Row label="Largura do histograma">
+                  {/* Só o comprimento visual das barras; pontos, intervalo, volume, POC e área de valor não mudam. */}
+                  <input
+                    type="range"
+                    min={HIST_WIDTH_MIN}
+                    max={HIST_WIDTH_MAX}
+                    step={5}
+                    value={st.histWidth ?? 100}
+                    aria-label="Largura do histograma"
+                    onChange={(e) => previewHist(Number(e.target.value))}
+                    className="w-32"
+                  />
+                  <span className="w-11 text-right text-xs text-muted-foreground">{st.histWidth ?? 100}%</span>
                 </Row>
                 <Row label="Compras / vendas">
                   <ColorPicker label="Cor das compras" value={st.buyColor ?? "#22c55e"} onChange={(buyColor) => set({ buyColor })} />
@@ -539,6 +636,11 @@ function ObjectSettingsForm({ object, onClose, onApply }: { object: OverlayState
         )}
       </div>
       <div className="flex justify-end gap-2 border-t pt-3">
+        {/* Volta o visual (aba Estilo) aos valores de fábrica; pontos, coordenadas e visibilidade não mudam. "Ok"
+            confirma (e vira o padrão do tipo); "Cancelar" descarta. */}
+        <Button variant="ghost" className="mr-auto" title="Restaurar o visual de fábrica desta ferramenta" onClick={() => setSt((s) => factoryVisualStyles(s, DEFAULT_FIB_LEVELS))}>
+          <Undo2 /> Padrão
+        </Button>
         <Button variant="outline" onClick={onClose}>
           Cancelar
         </Button>
@@ -558,7 +660,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return (
     <div className="flex items-center gap-3">
       <span className="w-32 shrink-0 text-muted-foreground">{label}</span>
-      <div className="flex flex-wrap items-center gap-1">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">{children}</div>
     </div>
   );
 }

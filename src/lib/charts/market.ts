@@ -1,6 +1,7 @@
 import type { Db } from "@/db/client";
 import { cached } from "@/lib/prices/cache";
 import { fetchCandles, fetchChartSymbols, fetchOpenInterest, type Candle, type ChartSymbol } from "@/lib/prices/binance";
+import { fetchBybitOpenInterest, BYBIT_OI_PERIOD } from "@/lib/prices/bybit";
 import { AGGREGATED, aggregateCandles, type CandleQuery } from "./params";
 
 const DAY = 86_400_000;
@@ -145,4 +146,58 @@ export async function getOpenInterest(symbol: string, interval: string, nowMs = 
   oiStore.set(key, { at: nowMs, data });
   while (oiStore.size > 200) oiStore.delete(oiStore.keys().next().value as string);
   return data;
+}
+
+// ---------- open interest histórico (mapa de liquidações) ----------
+// Bybit (desde 2020, público) para o histórico; sem ela (fora do ar, bloqueio regional, par que ela não tem), o open
+// interest da Binance Futures, que só cobre ~30 dias. Em cache por 5 min por par/período, cobrindo a data pedida.
+const PERIOD_MS: Record<string, number> = { "5min": 300_000, "15min": 900_000, "30min": 1_800_000, "1h": 3_600_000, "4h": 14_400_000, "1d": DAY };
+const MAX_POINTS = 6000;
+type HistOi = { source: "bybit" | "binance"; points: [number, number][] };
+const histStore = new Map<string, { at: number; from: number; data: HistOi }>();
+const histFailed = new Map<string, number>();
+const histInFlight = new Map<string, { from: number; job: Promise<HistOi> }>();
+
+export function resetHistoricalOpenInterestCache(): void {
+  histStore.clear();
+  histFailed.clear();
+  histInFlight.clear();
+}
+
+export async function getHistoricalOpenInterest(symbol: string, interval: string, fromMs: number, nowMs = Date.now()): Promise<HistOi> {
+  const period = BYBIT_OI_PERIOD[interval];
+  if (!period) throw new Error("Tempo inválido");
+  // No máximo ~6000 pontos (30 páginas): 1h ≈ 250 dias, 1d ≈ 16 anos.
+  const from = Math.max(fromMs, nowMs - MAX_POINTS * PERIOD_MS[period]);
+  const key = `${symbol}:${period}`;
+  const hit = histStore.get(key);
+  if (hit && nowMs - hit.at < OI_TTL && hit.from <= from + PERIOD_MS[period]) return hit.data;
+  // Pedido igual em andamento: reaproveita só se ele cobre a data pedida (senão um pedido curto, feito ao trocar de
+  // tempo, responderia no lugar do histórico longo).
+  const running = histInFlight.get(key);
+  if (running && running.from <= from + PERIOD_MS[period]) return running.job;
+  const job = (async (): Promise<HistOi> => {
+    const failedAt = histFailed.get(key);
+    if (failedAt === undefined || nowMs - failedAt >= OI_FAIL_TTL) {
+      try {
+        const points = await fetchBybitOpenInterest(symbol, period, from, nowMs);
+        if (points.length) {
+          histFailed.delete(key);
+          const data: HistOi = { source: "bybit", points };
+          histStore.set(key, { at: nowMs, from, data });
+          while (histStore.size > 100) histStore.delete(histStore.keys().next().value as string);
+          return data;
+        }
+      } catch {
+        // segue para a Binance
+      }
+      histFailed.set(key, nowMs);
+      while (histFailed.size > 200) histFailed.delete(histFailed.keys().next().value as string);
+    }
+    return { source: "binance", points: await getOpenInterest(symbol, interval, nowMs) };
+  })().finally(() => {
+    if (histInFlight.get(key)?.job === job) histInFlight.delete(key);
+  });
+  histInFlight.set(key, { from, job });
+  return job;
 }

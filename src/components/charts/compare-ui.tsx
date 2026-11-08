@@ -25,7 +25,7 @@ import {
   type CompareState,
 } from "@/lib/charts/workspace";
 import { cn } from "@/lib/utils";
-import { ColorPicker, StyleMenu, WidthMenu } from "./object-ui";
+import { ColorPicker, SETTINGS_DIALOG, StyleMenu, WidthMenu } from "./object-ui";
 
 export function compareLabel(c: CompareState): string {
   if (c.kind === "macro")
@@ -57,7 +57,7 @@ export function CompareSettingsDialog({
 }) {
   return (
     <Dialog open={!!compare} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={SETTINGS_DIALOG}>
         {compare && (
           <CompareSettingsForm
             key={`${compare.kind}-${compare.id}`}

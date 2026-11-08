@@ -65,6 +65,9 @@ import {
   type ChartType,
   type CompareState,
   type IndicatorState,
+  type OverlayStyleState,
+  indicatorVisual,
+  withIndicatorVisual,
   type OverlayState,
   type PaneState,
   type PaneTemplate,
@@ -735,6 +738,22 @@ export function ChartWorkspace({
       );
     changePrefs({ ...tools, favoriteSymbols: [...cur, id] });
   };
+  // Padrões visuais por tipo (preferência da conta): o último visual confirmado vira o dos próximos do mesmo tipo.
+  const saveStyleDefault = (tool: string, styles: OverlayStyleState) => {
+    if (JSON.stringify(tools.styleDefaults?.[tool] ?? {}) === JSON.stringify(styles)) return;
+    const next = { ...tools.styleDefaults };
+    if (Object.keys(styles).length) next[tool] = styles;
+    else delete next[tool];
+    changePrefs({ ...tools, styleDefaults: next });
+  };
+  const saveIndicatorDefault = (ind: IndicatorState) => {
+    const v = indicatorVisual(ind);
+    if (JSON.stringify(tools.indicatorDefaults?.[ind.name] ?? {}) === JSON.stringify(v)) return;
+    const next = { ...tools.indicatorDefaults };
+    if (Object.keys(v).length) next[ind.name] = v;
+    else delete next[ind.name];
+    changePrefs({ ...tools, indicatorDefaults: next });
+  };
   const toggleFavoriteIndicator = (name: string) =>
     changePrefs({
       ...tools,
@@ -1053,6 +1072,16 @@ export function ChartWorkspace({
               onAutoScaleChange={(autoScale) =>
                 updatePaneOf(tab.id, i, { autoScale })
               }
+              onSideWidthChange={(sideWidth) =>
+                updatePaneOf(tab.id, i, { sideWidth })
+              }
+              sideColorsDefault={tools.sideColors}
+              onSideColorsChange={(sideColors) => {
+                changePrefs({ ...tools, sideColors });
+                if (p.sideColors) updatePaneOf(tab.id, i, { sideColors: undefined });
+              }}
+              styleDefaults={tools.styleDefaults}
+              onStyleDefault={(tool, styles) => saveStyleDefault(tool, styles)}
               onDrawingChange={(on) =>
                 setDrawing((d) => (on ? d : d?.pane === i ? null : d))
               }
@@ -1117,7 +1146,16 @@ export function ChartWorkspace({
         pane={pane}
         favorites={tools.favoriteIndicators}
         onFavorite={toggleFavoriteIndicator}
-        onChange={(indicators) => updatePane({ indicators })}
+        onChange={(indicators) =>
+          // Indicador novo (sem estilo próprio) nasce com o padrão visual do seu tipo.
+          updatePane({
+            indicators: indicators.map((x) =>
+              pane.indicators.some((p) => p.id === x.id) || x.styles
+                ? x
+                : withIndicatorVisual(x, tools.indicatorDefaults?.[x.name]),
+            ),
+          })
+        }
         isTemplate={
           tools.template?.sourceTabId === tab.id &&
           (tools.template?.sourcePane ?? 0) === paneIndex
@@ -1227,6 +1265,7 @@ export function ChartWorkspace({
         onClose={() => setIndSettings(null)}
         onApply={(next) =>
           indSettings &&
+          (saveIndicatorDefault(next), true) &&
           updatePane(
             {
               indicators: tab.state.panes[indSettings.pane].indicators.map(

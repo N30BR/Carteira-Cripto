@@ -5,6 +5,7 @@ import { dispose, init, type Chart, type Indicator, type KLineData, type Overlay
 import type { ChartInterval } from "@/lib/charts/params";
 import { splitSymbol } from "@/lib/charts/params";
 import type { AxisRangeState, IndicatorState, OverlayState, OverlayStyleState, PaneState, PaneView, SeriesStyle } from "@/lib/charts/workspace";
+import { OVERLAY_VISUAL_KEYS, visualStyles } from "@/lib/charts/workspace";
 import { AXIS_RANGE_KEYS } from "@/lib/charts/workspace";
 import { NEO_COLORS } from "@/lib/charts/drawing";
 import { ELLIOTT_LABELS } from "@/lib/charts/workspace";
@@ -14,6 +15,9 @@ import { compareDisplay, compareScale } from "@/lib/charts/compare";
 import type { Point } from "@/lib/charts/macro-math";
 import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
+import { SIDE_WIDTH_MAX, SIDE_WIDTH_MIN } from "@/lib/charts/workspace";
+import { ColorPicker } from "./object-ui";
+import { PROFILE_BUY, PROFILE_SELL } from "./profile";
 import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqMapHit, mapTipLines, sideHit, sideTipLines } from "./liq-layers";
 import { findBarIndex } from "@/lib/charts/drawing";
 import { ema, sma } from "@/lib/charts/indicators";
@@ -43,6 +47,23 @@ const RESTORE_PAGES = 20;
 const RESTORE_LIMIT = 1000;
 /** Ferramentas cujo dado extra é o texto (as outras guardam extensão, níveis etc.). */
 const TEXT_TOOLS = new Set(["simpleAnnotation", "simpleTag"]);
+/** Duração aproximada de uma vela por tempo do gráfico (para saber se as velas já são do tempo escolhido). */
+const BAR_MS: Partial<Record<string, number>> = {
+  "1m": 60_000,
+  "5m": 300_000,
+  "15m": 900_000,
+  "30m": 1_800_000,
+  "1h": 3_600_000,
+  "4h": 14_400_000,
+  "6h": 21_600_000,
+  "12h": 43_200_000,
+  "1d": 86_400_000,
+  "2d": 172_800_000,
+  "3d": 259_200_000,
+  "1w": 604_800_000,
+};
+/** Cursor de mover durante o arraste do corpo do perfil de volume (sobrepõe o cursor da biblioteca). */
+const MOVE_CURSOR = "[&_*]:cursor-move!";
 const PRICE_ONLY = new Set(["fixedRangeVolumeProfile", "fibonacciLine", "anchoredVwap", ...Object.keys(ELLIOTT_LABELS)]);
 /** Indicadores com níveis de referência (linhas tracejadas configuráveis). */
 const LEVEL_DEFAULTS: Record<string, number[]> = { RSI: [30, 50, 70], RSI_DIV: [30, 50, 70] };
@@ -226,7 +247,12 @@ const cursorOf = (c: Chart | null) =>
   (c as unknown as { getChartStore?: () => { getCrosshair: () => { paneId?: string; realDataIndex?: number } } } | null)?.getChartStore?.().getCrosshair() ?? null;
 
 type ClickInfo = { paneId: string; overlay: { id: string } | null; figureType: string; figureIndex: number; figure: unknown };
-type OverlayStore = { getClickOverlayInfo: () => ClickInfo; setClickOverlayInfo: (i: ClickInfo, onSel: () => void, onDesel: () => void) => void };
+type OverlayStore = {
+  getClickOverlayInfo: () => ClickInfo;
+  setClickOverlayInfo: (i: ClickInfo, onSel: () => void, onDesel: () => void) => void;
+  /** Desenho sendo arrastado e por onde (figureType "point" = ponto de controle). */
+  getPressedOverlayInfo?: () => ClickInfo;
+};
 const overlayStore = (c: Chart | null) => (c as unknown as { getChartStore?: () => OverlayStore } | null)?.getChartStore?.() ?? null;
 /** Desenho que a biblioteca tem selecionado agora (API interna: é o que mostra os pontos de controle). */
 const selectedInChart = (c: Chart | null) => overlayStore(c)?.getClickOverlayInfo().overlay?.id ?? null;
@@ -272,6 +298,7 @@ const overlayExtend = (o: OverlayState): unknown =>
         labelPosition: o.styles?.labelPosition,
         shift: o.styles?.shiftBars,
         mirror: o.styles?.mirror,
+        histWidth: o.styles?.histWidth,
         windowFrom: o.styles?.windowFrom,
         windowTo: o.styles?.windowTo,
       } satisfies OverlayExtra);
@@ -344,9 +371,24 @@ export function ChartPane({
   favoriteIndicators,
   onDrawingChange,
   onViewChange,
+  onSideWidthChange,
+  onSideColorsChange,
+  sideColorsDefault,
+  styleDefaults,
+  onStyleDefault,
   handleRef,
   children,
 }: {
+  /** Largura do perfil lateral escolhida arrastando a borda dele (salva no gráfico). */
+  onSideWidthChange?: (width: number) => void;
+  /** Cores do perfil lateral escolhidas pela seleção dele (salvas na conta). */
+  onSideColorsChange?: (colors: { buy?: string; sell?: string }) => void;
+  /** Cores do perfil lateral da conta (valem quando o gráfico não tem as suas, de versões antigas). */
+  sideColorsDefault?: { buy?: string; sell?: string };
+  /** Padrão visual de cada tipo de desenho (da conta): um desenho novo nasce com o do seu tipo. */
+  styleDefaults?: Record<string, OverlayStyleState>;
+  /** O visual de um desenho mudou (configurações ou barra rápida): vira o padrão do tipo dele. */
+  onStyleDefault?: (tool: string, styles: OverlayStyleState) => void;
   /** Zoom e posição atuais (para voltar igual ao reabrir a aba, a página ou o mesmo par/tempo). */
   onViewChange?: (v: PaneView) => void;
   /** Clique nos ícones da legenda de uma comparação (ocultar, configurar, remover, mover de painel). */
@@ -377,10 +419,14 @@ export function ChartPane({
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
   const magnet = useRef<OverlayMode>("normal");
-  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange });
+  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onStyleDefault });
   useEffect(() => {
-    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange };
+    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onStyleDefault };
   });
+  const styleDefaultsRef = useRef(styleDefaults);
+  useEffect(() => {
+    styleDefaultsRef.current = styleDefaults;
+  }, [styleDefaults]);
   // Botão A/N (ver abaixo): ajuste automático da escala de preço.
   const autoScale = useRef(pane.autoScale === true);
   // ---------- Zoom e posição de cada par/tempo ----------
@@ -577,6 +623,8 @@ export function ChartPane({
         if (saved?.styles && Object.keys(saved.styles).length) item.styles = saved.styles;
         if (!o.visible) item.visible = false;
         if (o.lock) item.locked = true;
+        if (saved?.lockX) item.lockX = true;
+        if (saved?.lockY) item.lockY = true;
         meta.current.set(o.id, item);
         return item;
       });
@@ -610,11 +658,16 @@ export function ChartPane({
       if (overlay.id !== drawingId.current) cb.current.onSelect(overlay.id);
       return false;
     },
-    // Perfil de volume: arrastar o histograma (não os pontos) só o desloca na horizontal. A biblioteca move os
-    // dois pontos junto; aqui eles voltam ao lugar (faixa de preço e tempo intactos) e o movimento vira deslocamento.
+    // Perfil de volume (faixa fixa): arrastar o histograma (não os pontos). A biblioteca move os dois pontos junto;
+    // aqui eles voltam ao tempo original (a janela analisada não muda) e:
+    // - o movimento horizontal vira deslocamento da exibição (como antes);
+    // - o vertical (perfil por faixa de preço) move a FAIXA DE PREÇO analisada: a mesma variação de preço nos dois
+    //   pontos (amplitude constante, em preço, também na escala log), arredondada à precisão do par. O histograma, a
+    //   POC, a VAH e a VAL são recalculados para a nova faixa (o desenho calcula a partir dos dois preços).
     onPressedMoveStart: ({ overlay, figure }: { overlay: { id: string; name: string; extendData?: unknown }; figure?: { key?: string } }) => {
       if (overlay.name === "fixedRangeVolumeProfile" && figure?.key === "vp_body") {
         profileDrag.current = { id: overlay.id, shift: (overlay.extendData as OverlayExtra | undefined)?.shift ?? 0 };
+        el.current?.classList.add(...MOVE_CURSOR.split(" "));
       }
       return false;
     },
@@ -622,17 +675,37 @@ export function ChartPane({
       const d = profileDrag.current;
       const c = chart.current;
       const prev = (e.overlay as unknown as { _prevPressedPoints?: { timestamp?: number; value?: number; dataIndex?: number }[] })._prevPressedPoints;
+      // Bloqueios por eixo (barra rápida): no arraste do desenho inteiro (não de um ponto de controle), o eixo
+      // bloqueado volta ao valor do início do arraste.
+      const saved = meta.current.get(e.overlay.id);
+      const lockX = !!saved?.lockX;
+      const lockY = !!saved?.lockY;
+      const wholeDrag = overlayStore(c)?.getPressedOverlayInfo?.().figureType !== "point";
+      if ((!d || d.id !== e.overlay.id) && wholeDrag && (lockX || lockY) && prev?.length === e.overlay.points.length) {
+        e.overlay.points = e.overlay.points.map((p, i) => ({
+          ...p,
+          ...(lockX ? { timestamp: prev[i].timestamp, dataIndex: prev[i].dataIndex } : {}),
+          ...(lockY ? { value: prev[i].value } : {}),
+        }));
+        return false;
+      }
       if (!d || d.id !== e.overlay.id || !c || !prev?.length) return false;
       const ts = c.getDataList().map((k) => k.timestamp);
       const at = (p: { timestamp?: number; dataIndex?: number }) => (typeof p.dataIndex === "number" ? p.dataIndex : typeof p.timestamp === "number" ? findBarIndex(ts, p.timestamp) : 0);
-      const moved = at(e.overlay.points[0]) - at(prev[0]);
-      e.overlay.points = prev.map((p) => ({ ...p }));
+      const moved = lockX ? 0 : at(e.overlay.points[0]) - at(prev[0]);
+      const ex = e.overlay.extendData as OverlayExtra | undefined;
+      const band = typeof ex?.windowFrom === "number" && typeof ex?.windowTo === "number" && prev.every((p) => typeof p.value === "number");
+      const now = e.overlay.points[0]?.value;
+      const digits = Math.max(0, Math.min(12, c.getSymbol()?.pricePrecision ?? 2));
+      const dv = band && !lockY && typeof now === "number" ? Number((now - (prev[0].value as number)).toFixed(digits)) : 0;
+      e.overlay.points = prev.map((p) => ({ ...p, ...(dv ? { value: Number(((p.value as number) + dv).toFixed(digits)) } : {}) }));
       c.overrideOverlay({ id: d.id, extendData: { ...(e.overlay.extendData as object), shift: d.shift + moved } });
       return false;
     },
     onPressedMoveEnd: ({ overlay }: { overlay: { id: string; extendData?: unknown } }) => {
       const d = profileDrag.current;
       profileDrag.current = null;
+      el.current?.classList.remove(...MOVE_CURSOR.split(" "));
       if (d && d.id === overlay.id) {
         const cur = meta.current.get(d.id);
         const shift = Math.round((overlay.extendData as OverlayExtra | undefined)?.shift ?? 0);
@@ -708,7 +781,10 @@ export function ChartPane({
           const z = list[Math.max(0, Math.min(list.length - 1, r.to - 1))]?.timestamp;
           if (typeof a === "number" && typeof z === "number" && a <= z) profileWindow = { windowFrom: a, windowTo: z };
         }
-        meta.current.set(id, { id, name: tool, points: [], ...(text ? { text } : {}), ...(profileWindow ? { styles: profileWindow } : {}) });
+        // Desenho novo: nasce com o padrão visual do seu tipo (só o visual; pontos e o resto são dele).
+        const inherited = visualStyles(styleDefaultsRef.current?.[tool]);
+        const startStyles = profileWindow || Object.keys(inherited).length ? { ...inherited, ...(profileWindow ?? {}) } : null;
+        meta.current.set(id, { id, name: tool, points: [], ...(text ? { text } : {}), ...(startStyles ? { styles: startStyles } : {}) });
         drawingId.current = id;
         // A ferramenta tem prioridade: o primeiro clique marca o ponto em vez de mover o gráfico.
         c.setScrollEnabled(false);
@@ -718,7 +794,8 @@ export function ChartPane({
           id,
           name: tool,
           mode: magnet.current,
-          extendData: TEXT_TOOLS.has(tool) ? text : (profileWindow ?? {}),
+          extendData: TEXT_TOOLS.has(tool) ? text : overlayExtend(meta.current.get(id) as OverlayState),
+          ...(startStyles ? { styles: overlayStyles(startStyles) } : {}),
           zLevel: z,
           // O perfil de volume usa os preços das velas: fica sempre no gráfico de preço.
           ...(PRICE_ONLY.has(tool) ? { paneId: "candle_pane" } : {}),
@@ -762,6 +839,11 @@ export function ChartPane({
         if (!c || !cur) return;
         const next: OverlayState = { ...cur, ...patch, styles: patch.styles ? { ...cur.styles, ...patch.styles } : cur.styles };
         meta.current.set(id, next);
+        // Mudança visual confirmada (configurações "Ok" ou barra rápida) vira o padrão do tipo. A prévia da largura do
+        // histograma (só histWidth, enquanto a janela está aberta) não conta: o "Ok" é que confirma.
+        const keys = patch.styles ? Object.keys(patch.styles) : [];
+        const preview = keys.length === 1 && keys[0] === "histWidth";
+        if (!preview && keys.some((k) => (OVERLAY_VISUAL_KEYS as readonly string[]).includes(k))) cb.current.onStyleDefault?.(next.name, visualStyles(next.styles));
         c.overrideOverlay({
           id,
           ...(patch.points ? { points: patch.points } : {}),
@@ -779,7 +861,7 @@ export function ChartPane({
         const c = chart.current;
         const cur = meta.current.get(id);
         if (!c || !cur) return null;
-        const copy = createFromState(c, { ...cur, id: newId("d"), visible: true, locked: false }, c.getOverlays().length);
+        const copy = createFromState(c, { ...cur, id: newId("d"), visible: true, locked: false, lockX: false, lockY: false }, c.getOverlays().length);
         emitOverlays();
         return copy;
       },
@@ -1004,8 +1086,37 @@ export function ChartPane({
   // Camadas internas (fora da lista de indicadores e das legendas). O open interest do perpétuo é buscado uma vez por
   // par/tempo e entregue às duas. Com o perfil lateral ligado, o gráfico ganha espaço à direita (a última vela não
   // fica atrás da faixa).
-  const liqOi = useRef<{ key: string; data: { oi: [number, number][]; status?: string } } | null>(null);
+  const liqOi = useRef<{ key: string; from: number; data: { oi: [number, number][]; status?: string; source?: string } } | null>(null);
   const sideBase = useRef<number | null>(null);
+  /** Largura da faixa lateral: a salva no gráfico ou a que está sendo arrastada agora. */
+  const sideWidth = useRef(pane.sideWidth ?? SIDE_WIDTH);
+  const [sideDragging, setSideDragging] = useState(false);
+  /** Arraste da borda da faixa lateral em andamento: ponto inicial e largura inicial. */
+  const sideDrag = useRef<{ x: number; width: number } | null>(null);
+  const sideHandle = useRef<HTMLDivElement>(null);
+  /** Cores atuais do perfil lateral (as do gráfico, de versões antigas, ou as da conta), lidas pelo laço de desenho. */
+  const sideColorsNow = pane.sideColors ?? sideColorsDefault;
+  const sideColors = useRef(sideColorsNow);
+  useEffect(() => {
+    sideColors.current = sideColorsNow;
+  }, [sideColorsNow]);
+  /** Perfil lateral selecionado (clique numa barra): minibarra com as cores; `open` = seletor aberto. */
+  const [sideSelected, setSideSelected] = useState<{ open: "buy" | "sell" | null; left: number; top: number; width: number; height: number; right: number } | null>(null);
+  const sidePress = useRef<{ x: number; y: number } | null>(null);
+  const sideBar = useRef<HTMLDivElement>(null);
+  // Clicar fora do perfil e da minibarra (e fora do seletor de cor aberto) tira a seleção.
+  useEffect(() => {
+    if (!sideSelected) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t || sideBar.current?.contains(t) || t.closest?.("[role=menu]")) return;
+      const r = el.current?.getBoundingClientRect();
+      if (r && e.clientX - r.left >= sideSelected.left && el.current?.contains(t)) return;
+      setSideSelected(null);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [sideSelected]);
   const sideCanvas = useRef<HTMLCanvasElement>(null);
   /** Posição da faixa lateral dentro do gráfico (para a dica do mouse). */
   const sideBox = useRef<{ left: number; top: number } | null>(null);
@@ -1013,6 +1124,7 @@ export function ChartPane({
     const c = chart.current;
     if (!c) return;
     const MAP_ID = "bh_liq_map";
+    if (!sideDrag.current) sideWidth.current = pane.sideWidth ?? SIDE_WIDTH;
     const key = `${pane.symbol}|${pane.interval}`;
     const current = liqOi.current?.key === key ? liqOi.current.data : { oi: [], status: "Carregando..." };
     const exists = c.getIndicators({ id: MAP_ID }).length > 0;
@@ -1031,36 +1143,59 @@ export function ChartPane({
       );
     } else if (!pane.liqMap && exists) c.removeIndicator({ id: MAP_ID });
     // Espaço à direita para a faixa lateral (a última vela não fica atrás dela).
-    if (pane.sideProfile && sideBase.current === null) {
-      sideBase.current = c.getOffsetRightDistance();
-      c.setOffsetRightDistance(sideBase.current + SIDE_WIDTH);
-    } else if (!pane.sideProfile && sideBase.current !== null) {
+    if (pane.sideProfile) {
+      if (sideBase.current === null) sideBase.current = c.getOffsetRightDistance();
+      c.setOffsetRightDistance(sideBase.current + sideWidth.current);
+    } else if (sideBase.current !== null) {
       c.setOffsetRightDistance(sideBase.current);
       sideBase.current = null;
     }
     // O open interest só serve ao mapa (o perfil lateral é de volume, com as próprias velas).
     if (!pane.liqMap) return;
-    if (liqOi.current?.key === key) return;
+    // Histórico de open interest desde a 1ª vela carregada; ao rolar para trás (velas mais antigas), busca de novo.
     let cancelled = false;
-    const apply = (data: { oi: [number, number][]; status?: string }) => {
-      liqOi.current = { key, data };
+    let busy = false;
+    let failed = false;
+    const apply = (from: number, data: { oi: [number, number][]; status?: string; source?: string }) => {
+      liqOi.current = { key, from, data };
       if (c.getIndicators({ id: MAP_ID }).length) c.overrideIndicator({ id: MAP_ID, name: LIQ_MAP, extendData: data });
     };
-    fetch(`/api/open-interest?${new URLSearchParams({ symbol: pane.symbol, interval: pane.interval })}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "indisponível");
-        if (!cancelled) apply({ oi: (await res.json()) as [number, number][] });
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "indisponível";
-        apply({ oi: [], status: `Sem dados: ${msg}` });
-        cb.current.onError(`Mapa de liquidações: ${msg}`);
-      });
+    const check = () => {
+      const list = c.getDataList();
+      const first = list[0]?.timestamp;
+      if (cancelled || busy || failed || typeof first !== "number") return;
+      // Logo depois de trocar o tempo, o gráfico ainda mostra as velas do tempo anterior: espera as do tempo novo
+      // (senão o histórico seria pedido a partir da data errada).
+      const expected = BAR_MS[pane.interval];
+      const step = list.length > 2 ? list[list.length - 1].timestamp - list[list.length - 2].timestamp : NaN;
+      if (expected && Number.isFinite(step) && (step < expected * 0.5 || step > expected * 1.6)) return;
+      const have = liqOi.current?.key === key ? liqOi.current.from : null;
+      if (have !== null && have <= first) return;
+      busy = true;
+      fetch(`/api/liq-oi?${new URLSearchParams({ symbol: pane.symbol, interval: pane.interval, from: String(Math.max(Date.UTC(2017, 0, 1), first)) })}`)
+        .then(async (res) => {
+          const body = await res.json().catch(() => null);
+          if (!res.ok || !Array.isArray(body?.points)) throw new Error(body?.error ?? "indisponível");
+          if (!cancelled) apply(first, { oi: body.points as [number, number][], source: body.source === "bybit" ? "bybit" : "binance" });
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          failed = true;
+          const msg = e instanceof Error ? e.message : "indisponível";
+          apply(first, { oi: [], status: `Sem dados: ${msg}` });
+          cb.current.onError(`Mapa de liquidações: ${msg}`);
+        })
+        .finally(() => {
+          busy = false;
+        });
+    };
+    check();
+    const timer = setInterval(check, 1500);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
-  }, [pane.liqMap, pane.sideProfile, pane.symbol, pane.interval]);
+  }, [pane.liqMap, pane.sideProfile, pane.sideWidth, pane.symbol, pane.interval]);
 
   // Perfil de volume lateral: tela própria colada à direita da área do preço, por cima de tudo, com o cálculo da
   // ferramenta Faixa Fixa sobre as velas e a faixa de preço visíveis. Redesenha só quando muda algo (velas, janela
@@ -1079,7 +1214,7 @@ export function ChartPane({
       if (!c || !cv) return;
       const size = c.getSize("candle_pane", "main");
       if (!size || size.width <= 0 || size.height <= 0) return;
-      const W = Math.min(SIDE_WIDTH, size.width * 0.35);
+      const W = Math.min(sideWidth.current, size.width * 0.6);
       const H = size.height;
       const [top, bottom] = c.convertFromPixel([{ y: 0 }, { y: H }], { paneId: "candle_pane" }) as { value?: number }[];
       const hi = top?.value ?? NaN;
@@ -1090,13 +1225,20 @@ export function ChartPane({
       const range = c.getVisibleRange();
       const from = Math.max(0, range.from);
       const to = Math.min(data.length - 1, range.to - 1);
-      const key = [size.left, size.top, size.width, H, lo, hi, data.length, last?.timestamp, last?.close, from, to].join("|");
+      const colors = sideColors.current;
+      const key = [size.left, size.top, size.width, W, H, lo, hi, data.length, last?.timestamp, last?.close, from, to, colors?.buy, colors?.sell].join("|");
       if (key === lastKey) return;
       lastKey = key;
       const left = size.left + size.width - W;
       sideBox.current = { left, top: size.top };
       cv.style.left = `${left}px`;
       cv.style.top = `${size.top}px`;
+      const handle = sideHandle.current;
+      if (handle) {
+        handle.style.left = `${left - 4}px`;
+        handle.style.top = `${size.top}px`;
+        handle.style.height = `${H}px`;
+      }
       cv.style.width = `${W}px`;
       cv.style.height = `${H}px`;
       const dpr = window.devicePixelRatio || 1;
@@ -1116,6 +1258,8 @@ export function ChartPane({
         from,
         to,
         data,
+        buyColor: colors?.buy,
+        sellColor: colors?.sell,
         yOf: (price) => (c.convertToPixel({ value: price }, { paneId: "candle_pane" }) as { y?: number }).y ?? 0,
       });
     };
@@ -1486,7 +1630,7 @@ export function ChartPane({
       }}
       onMouseMove={(e) => {
         const clear = () => tip && setTip(null);
-        if ((!pane.sideProfile && !pane.liqMap) || !el.current || e.buttons) return clear();
+        if ((!pane.sideProfile && !pane.liqMap) || !el.current || e.buttons || sideDrag.current) return clear();
         const r = el.current.getBoundingClientRect();
         const x = e.clientX - r.left;
         const y = e.clientY - r.top;
@@ -1496,7 +1640,8 @@ export function ChartPane({
           const h = sideHit("bh_side", x - box.left, y - box.top);
           if (!h) return clear();
           const id = `s${h.from}`;
-          if (tip?.id !== id || Math.abs(tip.y - y) > 2) setTip({ id, x: r.width - x + 12, y, side: "right", title: "Perfil de volume", lines: sideTipLines(h) });
+          if (tip?.id !== id || Math.abs(tip.y - y) > 2)
+            setTip({ id, x: r.width - x + 12, y, side: "right", title: "Perfil de volume · clique para selecionar e mudar as cores", lines: sideTipLines(h) });
           return;
         }
         const size = pane.liqMap ? chart.current?.getSize("candle_pane", "main") : null;
@@ -1508,6 +1653,29 @@ export function ChartPane({
           setTip({ id, x: nearRight ? r.width - x + 14 : x + 14, y, side: nearRight ? "right" : "left", title: "Liquidações (estimativa)", lines: mapTipLines(h) });
       }}
       onMouseLeave={() => tip && setTip(null)}
+      // Clique (sem arrastar) numa barra do perfil lateral: seleciona o perfil e abre a cor daquela parte. Lido na
+      // captura do pointerdown/pointerup (antes do gráfico), então o arraste do gráfico não consome o clique.
+      onMouseDownCapture={(e) => {
+        sidePress.current = { x: e.clientX, y: e.clientY };
+      }}
+      onClick={(e) => {
+        const start = sidePress.current;
+        sidePress.current = null;
+        if (!pane.sideProfile || !el.current || e.button !== 0) return;
+        if (!start || Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 4) return;
+        if ((e.target as Element).closest?.("[role=separator],[role=menu],[data-side-bar],button")) return;
+        const box = sideBox.current;
+        const r = el.current.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const y = e.clientY - r.top;
+        if (!box || x < box.left) return;
+        const h = sideHit("bh_side", x - box.left, y - box.top);
+        if (!h) return;
+        setTip(null);
+        // Posição da faixa guardada no clique (para o contorno e a minibarra).
+        const height = chart.current?.getSize("candle_pane", "main")?.height ?? r.height;
+        setSideSelected({ open: h.part, left: box.left, top: box.top, width: sideWidth.current, height, right: r.width - box.left + 8 });
+      }}
       className={`relative h-full min-h-0 w-full rounded-lg border ${active ? "border-[#8b7cf6]" : "border-border"}`}
       data-testid="chart-pane"
     >
@@ -1526,7 +1694,92 @@ export function ChartPane({
         </button>
       )}
       {pane.sideProfile && <canvas ref={sideCanvas} aria-label="Perfil de volume lateral" className="pointer-events-none absolute z-[5]" />}
-      {tip && (
+      {pane.sideProfile && (
+        // Borda esquerda da faixa lateral: arrastar para a esquerda alarga, para a direita estreita (só o desenho;
+        // o cálculo do volume não muda). Fica fora da área do gráfico: os arrastes de zoom/preço não reagem a ela.
+        <div
+          ref={sideHandle}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Largura do perfil lateral"
+          aria-valuemin={SIDE_WIDTH_MIN}
+          aria-valuemax={SIDE_WIDTH_MAX}
+          aria-valuenow={pane.sideWidth ?? SIDE_WIDTH}
+          title="Arraste para ajustar a largura do perfil"
+          className="group absolute z-[6] w-2 cursor-ew-resize touch-none"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            sideDrag.current = { x: e.clientX, width: sideWidth.current };
+            setSideDragging(true);
+            setTip(null);
+          }}
+          onPointerMove={(e) => {
+            const d = sideDrag.current;
+            const c = chart.current;
+            if (!d || !c) return;
+            const paneWidth = c.getSize("candle_pane", "main")?.width ?? 0;
+            const max = Math.max(SIDE_WIDTH_MIN, Math.min(SIDE_WIDTH_MAX, Math.floor(paneWidth * 0.6)));
+            const w = Math.round(Math.max(SIDE_WIDTH_MIN, Math.min(max, d.width + (d.x - e.clientX))));
+            if (w === sideWidth.current) return;
+            sideWidth.current = w;
+            if (sideBase.current !== null) c.setOffsetRightDistance(sideBase.current + w);
+          }}
+          onPointerUp={(e) => {
+            if (!sideDrag.current) return;
+            sideDrag.current = null;
+            setSideDragging(false);
+            e.currentTarget.releasePointerCapture(e.pointerId);
+            cb.current.onSideWidthChange?.(sideWidth.current);
+          }}
+          onPointerCancel={() => {
+            sideDrag.current = null;
+            setSideDragging(false);
+          }}
+        >
+          <span className={`mx-auto block h-full w-px transition-colors ${sideDragging ? "bg-[#8b7cf6]" : "bg-transparent group-hover:bg-[#8b7cf6]/70"}`} />
+        </div>
+      )}
+      {sideSelected && pane.sideProfile && (
+        <>
+          {/* Perfil selecionado: contorno discreto em volta da faixa. */}
+          <div
+            className="pointer-events-none absolute z-[7] rounded-sm ring-1 ring-[#8b7cf6]"
+            style={{ left: sideSelected.left, top: sideSelected.top, width: sideSelected.width, height: sideSelected.height }}
+          />
+          {/* Minibarra do perfil lateral (mesmo visual da barra rápida dos desenhos): só cores; sem mover (é fixo). */}
+          <div
+            ref={sideBar}
+            data-side-bar
+            role="toolbar"
+            aria-label="Perfil de volume lateral"
+            className="absolute z-30 flex items-center gap-1 rounded-lg border bg-popover/95 px-2 py-1 shadow-lg"
+            style={{ right: sideSelected.right, top: sideSelected.top + 8 }}
+          >
+            <span className="px-1 text-xs text-muted-foreground">Perfil de volume</span>
+            <ColorPicker
+              label="Cor das barras verdes"
+              open={sideSelected.open === "buy"}
+              onOpenChange={(v) => setSideSelected((s) => s && { ...s, open: v ? "buy" : null })}
+              value={sideColorsNow?.buy ?? PROFILE_BUY}
+              onChange={(c) => cb.current.onSideColorsChange?.({ ...sideColorsNow, buy: c })}
+            />
+            <ColorPicker
+              label="Cor das barras vermelhas"
+              open={sideSelected.open === "sell"}
+              onOpenChange={(v) => setSideSelected((s) => s && { ...s, open: v ? "sell" : null })}
+              value={sideColorsNow?.sell ?? PROFILE_SELL}
+              onChange={(c) => cb.current.onSideColorsChange?.({ ...sideColorsNow, sell: c })}
+            />
+            <button type="button" aria-label="Fechar" title="Fechar" onClick={() => setSideSelected(null)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
+              ×
+            </button>
+          </div>
+        </>
+      )}
+      {tip && !sideSelected?.open && (
         <div
           role="tooltip"
           className="pointer-events-none absolute z-20 rounded-md border bg-popover/95 px-2.5 py-1.5 font-mono text-[11px] leading-5 shadow-lg"

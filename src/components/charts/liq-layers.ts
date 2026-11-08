@@ -3,10 +3,10 @@
 // nos perfis de volume existentes nem na ferramenta Perfil de Volume (Faixa Fixa).
 //
 // - LIQ_MAP: atrás das velas (zLevel negativo). Campo tempo × preço de liquidez de liquidação ESTIMADA
-//   (liquidationHeatField: open interest real da Binance Futures + alavancagens típicas), desenhado como imagem:
-//   uma coluna por vela visível e uma linha a cada 2 px, ampliada com suavização (faixas contínuas, sem milhares de
-//   retângulos). Só onde há dados: antes do 1º open interest (a Binance guarda ~30 dias) fica vazio e marcado;
-//   depois da última vela não há nada.
+//   (liquidationHeatField: open interest histórico da Bybit, desde 2020 — ou o da Binance Futures, ~30 dias, se a Bybit
+//   faltar — + alavancagens típicas), desenhado como imagem: uma coluna por vela visível e uma linha a cada 2 px,
+//   ampliada com suavização (faixas contínuas, sem milhares de retângulos). Só onde há dados: antes do 1º open
+//   interest fica vazio e marcado; depois da última vela não há nada.
 // - Perfil lateral (drawSideProfile): tela própria colada na lateral direita da área do gráfico, por cima de tudo, com
 //   o MESMO cálculo da ferramenta Perfil de Volume (Faixa Fixa) — sideProfileFor → volumeProfileBand, 24 faixas, área de
 //   valor 70% — sobre as velas visíveis e a faixa de preço visível. Só as barras de compra/venda (a parte esquerda do
@@ -20,7 +20,7 @@ export const LIQ_MAP = "LIQ_MAP";
 /** Largura da faixa lateral (px). */
 export const SIDE_WIDTH = 124;
 
-type LiqData = { oi: [number, number][]; status?: string };
+type LiqData = { oi: [number, number][]; status?: string; source?: string };
 const bars = (d: KLineData[]) => d.map((b) => ({ ...b, volume: b.volume ?? 0 }));
 const dataKey = (d: KLineData[]) => `${d.length}:${d[0]?.timestamp}:${d[d.length - 1]?.timestamp}:${d[d.length - 1]?.close}`;
 
@@ -199,7 +199,8 @@ export function registerLiqLayers(): void {
       ctx.fillStyle = "#d4d4d8";
       ctx.fillText("Alta", gx + 86, ly);
       ctx.fillStyle = "#71717a";
-      ctx.fillText("Liquidações estimadas: open interest Binance Futures (até 30 dias) + alavancagem típica", lx, ly + 13);
+      const source = indicator.extendData?.source === "bybit" ? "open interest histórico da Bybit (perpétuo USDT)" : "open interest Binance Futures (até 30 dias)";
+      ctx.fillText(`Liquidações estimadas: ${source} + alavancagem típica`, lx, ly + 13);
       ctx.restore();
       return true;
     },
@@ -209,23 +210,32 @@ export function registerLiqLayers(): void {
 // ---------- perfil lateral ----------
 
 /** Geometria do perfil desenhado por último (para a dica ao passar o mouse). */
-const sideAreas = new Map<string, { width: number; height: number; vp: VolumeProfile; yOf: (p: number) => number }>();
+const sideAreas = new Map<string, { width: number; height: number; vp: VolumeProfile; yOf: (p: number) => number; max: number; anchor: number; inner: number }>();
 
 /** O que está sob o cursor na faixa lateral (coordenadas da própria faixa); null fora das barras. */
-export function sideHit(key: string, x: number, y: number): { from: number; to: number; volume: number; buy: number; sell: number } | null {
+export type SideHit = { from: number; to: number; volume: number; buy: number; sell: number; /** Trecho sob o cursor: compras (junto à borda direita) ou vendas (à esquerda delas). */ part: "buy" | "sell" };
+export function sideHit(key: string, x: number, y: number): SideHit | null {
   const a = sideAreas.get(key);
   if (!a || x < 0 || x > a.width || y < 0 || y > a.height) return null;
+  // A linha sob o cursor; sem ela, a mais próxima até 4 px (barras finas também respondem).
+  let best: { b: (typeof a.vp.bins)[number]; d: number } | null = null;
   for (const b of a.vp.bins) {
-    const y1 = a.yOf(b.to);
-    const y2 = a.yOf(b.from);
-    // Faixa sem volume não tem barra: sem dica.
-    if (y >= Math.min(y1, y2) && y <= Math.max(y1, y2)) return b.volume > 0 ? { from: b.from, to: b.to, volume: b.volume, buy: b.buy, sell: b.sell } : null;
+    if (!(b.volume > 0)) continue;
+    const y1 = Math.min(a.yOf(b.to), a.yOf(b.from));
+    const y2 = Math.max(a.yOf(b.to), a.yOf(b.from));
+    const d = y < y1 ? y1 - y : y > y2 ? y - y2 : 0;
+    if (d <= 4 && (!best || d < best.d)) best = { b, d };
   }
-  return null;
+  if (!best) return null;
+  const b = best.b;
+  const wBuy = (b.buy / a.max) * a.inner;
+  // Compras ficam junto à borda direita; à esquerda delas (vendas e o espaço livre da linha), vendas.
+  const part = x >= a.anchor - wBuy - 3 ? "buy" : "sell";
+  return { from: b.from, to: b.to, volume: b.volume, buy: b.buy, sell: b.sell, part };
 }
 
 /** Dica do perfil, já formatada. */
-export function sideTipLines(h: { from: number; to: number; volume: number; buy: number; sell: number }): [string, string][] {
+export function sideTipLines(h: SideHit): [string, string][] {
   const n = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: v >= 100 ? 0 : 2 });
   return [
     ["Faixa de preço", `${fmtPrice(h.from)} – ${fmtPrice(h.to)}`],
@@ -242,7 +252,7 @@ export function sideTipLines(h: { from: number; to: number; volume: number; buy:
  */
 export function drawSideProfile(
   ctx: CanvasRenderingContext2D,
-  o: { key: string; width: number; height: number; lo: number; hi: number; from: number; to: number; data: KLineData[]; yOf: (price: number) => number },
+  o: { key: string; width: number; height: number; lo: number; hi: number; from: number; to: number; data: KLineData[]; yOf: (price: number) => number; buyColor?: string; sellColor?: string },
 ): void {
   const { width: W, height, yOf } = o;
   ctx.clearRect(0, 0, W, height);
@@ -259,9 +269,9 @@ export function drawSideProfile(
     ctx.fillText("Sem volume neste trecho", 8, 18);
     return;
   }
-  sideAreas.set(o.key, { width: W, height, vp, yOf });
   const anchor = W - 3;
   const inner = W - 12;
+  sideAreas.set(o.key, { width: W, height, vp, yOf, max, anchor, inner });
   vp.bins.forEach((b, i) => {
     const yTop = yOf(b.to);
     const yBottom = yOf(b.from);
@@ -271,9 +281,9 @@ export function drawSideProfile(
     const a = i === vp.pocIndex ? 1 : inValue ? 0.8 : 0.35;
     const wBuy = (b.buy / max) * inner;
     const wSell = (b.sell / max) * inner;
-    ctx.fillStyle = withAlpha(PROFILE_BUY, a);
+    ctx.fillStyle = withAlpha(o.buyColor ?? PROFILE_BUY, a);
     ctx.fillRect(anchor - wBuy, top, wBuy, h);
-    ctx.fillStyle = withAlpha(PROFILE_SELL, a);
+    ctx.fillStyle = withAlpha(o.sellColor ?? PROFILE_SELL, a);
     ctx.fillRect(anchor - wBuy - wSell, top, wSell, h);
   });
 }

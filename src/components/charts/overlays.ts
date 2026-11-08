@@ -35,6 +35,8 @@ export type OverlayExtra = {
   shift?: number;
   /** Perfil de volume espelhado na horizontal (barras para o outro lado, sem virar de ponta-cabeça). */
   mirror?: boolean;
+  /** Perfil de volume (faixa fixa): largura visual do histograma, em % do padrão (não muda o cálculo). */
+  histWidth?: number;
   /** Perfil de volume por faixa de preço: janela de tempo do cálculo (ms), guardada na inserção. */
   windowFrom?: number;
   windowTo?: number;
@@ -332,7 +334,7 @@ export function registerOverlaysAndAxes(): void {
     totalStep: 3,
     needDefaultPointFigure: true,
     needDefaultXAxisFigure: true,
-    createPointFigures: ({ chart, coordinates, overlay, xAxis, yAxis, bounding }) => {
+    createPointFigures: ({ chart, coordinates, overlay, yAxis, bounding }) => {
       if (coordinates.length < 2 || !yAxis) return [];
       const [p1, p2] = overlay.points;
       const data: KLineData[] = chart.getDataList();
@@ -352,7 +354,6 @@ export function registerOverlaysAndAxes(): void {
         ? volumeProfileBand(bars, i1, i2, p1.value as number, p2.value as number, rows, (ex.valueArea ?? 70) / 100)
         : volumeProfile(bars, i1, i2, rows, (ex.valueArea ?? 70) / 100);
       if (!vp.bins.length) return [];
-      const color = (overlay.styles?.line as { color?: string } | undefined)?.color ?? ACCENT;
       const buyColor = ex.buyColor ?? PROFILE_BUY;
       const sellColor = ex.sellColor ?? PROFILE_SELL;
       const x1 = Math.min(coordinates[0].x, coordinates[1].x);
@@ -367,22 +368,13 @@ export function registerOverlaysAndAxes(): void {
       // Como na referência (DGT): âncora no fim da faixa, barras crescendo para a esquerda (compras junto
       // à âncora, vendas em seguida) e o perfil de sentimento (compras − vendas) logo à direita.
       const anchor = vx1 + span;
-      const width = span * 0.7;
+      // Largura do histograma (configuração da ferramenta): só o comprimento visual das barras, até 90% da tela.
+      const width = Math.min(bounding.width * 0.9, span * 0.7 * Math.max(0.25, Math.min(3, (ex.histWidth ?? 100) / 100)));
       const sentiment = Math.max(12, span * 0.12);
       const max = Math.max(...vp.bins.map((b) => b.volume)) || 1;
       const maxDelta = Math.max(...vp.bins.map((b) => Math.abs(b.buy - b.sell))) || 1;
       const figures: OverlayFigure[] = [];
-      if (band && xAxis) {
-        // Faixa analisada: os preços entre os pontos, durante a janela de tempo usada no cálculo (fundo discreto).
-        const wx1 = xAxis.convertToPixel(i1);
-        const wx2 = xAxis.convertToPixel(i2);
-        const ya = yAxis.convertToPixel(p1.value as number);
-        const yb = yAxis.convertToPixel(p2.value as number);
-        figures.push({ type: "rect", attrs: { x: wx1, y: Math.min(ya, yb), width: Math.max(1, wx2 - wx1), height: Math.abs(yb - ya) }, styles: { style: "fill", color: `${color.slice(0, 7)}10` }, ignoreEvent: true });
-      } else {
-        // Faixa analisada (fundo discreto); não se arrasta por aqui.
-        figures.push({ type: "rect", attrs: { x: x1, y: 0, width: span, height: bounding.height }, styles: { style: "fill", color: `${color.slice(0, 7)}0d` }, ignoreEvent: true });
-      }
+      // Sem fundo na área analisada (o gráfico fica limpo); a seleção e o arraste usam a figura "vp_body" abaixo.
       // "Girar": espelha o histograma dentro da própria caixa (mesmo lugar, mesma altura), trocando o lado das barras.
       const boxL = anchor - width;
       const boxR = anchor + sentiment + 2;

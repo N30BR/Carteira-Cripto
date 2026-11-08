@@ -2,7 +2,7 @@
 
 // Menus e configurações dos indicadores (ícones ao lado do nome no gráfico).
 import { useState } from "react";
-import { Copy, Eye, EyeOff, Layers, MoveVertical, Settings2, Star, Trash2 } from "lucide-react";
+import { Copy, Eye, EyeOff, Layers, MoveVertical, Settings2, Star, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -26,10 +26,11 @@ import {
   type MaType,
   type PriceSource,
   type SeriesStyle,
+  factoryIndicatorVisual,
 } from "@/lib/charts/workspace";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ColorPicker, NumberInput, StyleMenu, WidthMenu } from "./object-ui";
+import { ColorPicker, NumberInput, SETTINGS_BODY, SETTINGS_DIALOG, StyleMenu, WidthMenu } from "./object-ui";
 
 export const indicatorLabel = (name: string) => CHART_INDICATORS.find((c) => c.name === name)?.label ?? name;
 
@@ -217,7 +218,7 @@ export function IndicatorSettingsDialog({
 }) {
   return (
     <Dialog open={open && !!indicator} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={SETTINGS_DIALOG}>
         {indicator && <IndicatorSettingsForm key={indicator.id} indicator={indicator} figures={figures} onClose={onClose} onApply={onApply} />}
       </DialogContent>
     </Dialog>
@@ -272,7 +273,7 @@ function IndicatorSettingsForm({
           </button>
         ))}
       </div>
-      <div className="flex max-h-[55vh] min-h-40 flex-col gap-3 overflow-auto py-1 text-sm">
+      <div className={cn("flex max-h-[55vh] min-h-40 flex-col gap-3 py-1 text-sm", SETTINGS_BODY)}>
         {current === "inputs" && LEVELS.has(draft.name) && (
           <div className="flex items-center gap-2">
             <span className="w-44 shrink-0 text-muted-foreground">Níveis de referência</span>
@@ -418,6 +419,12 @@ function IndicatorSettingsForm({
         )}
       </div>
       <div className="flex justify-end gap-2 border-t pt-3">
+        {/* Só com visual configurável: volta cores/espessuras/traços aos de fábrica (períodos e opções não mudam). */}
+        {(lines.length > 0 || !!sides) && (
+          <Button variant="ghost" className="mr-auto" title="Restaurar o visual de fábrica deste indicador" onClick={() => setDraft((d) => factoryIndicatorVisual(d))}>
+            <Undo2 /> Padrão
+          </Button>
+        )}
         <Button variant="outline" onClick={onClose}>
           Cancelar
         </Button>
