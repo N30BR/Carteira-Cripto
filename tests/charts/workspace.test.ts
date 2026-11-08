@@ -81,7 +81,7 @@ describe("preferências das ferramentas", () => {
     const known = CHART_TOOLS.map((t) => t.name);
     expect(sanitizePrefs({ visible: ["segment", "segment", "fibonacciLine", "hack"], favorites: ["fibonacciLine", "priceLine"], known })).toEqual({
       ok: true,
-      value: { visible: ["segment", "fibonacciLine", "priceLine"], favorites: ["fibonacciLine", "priceLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [], known },
+      value: { visible: ["segment", "fibonacciLine", "priceLine"], favorites: ["fibonacciLine", "priceLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [], favoriteSymbols: [], known },
     });
     expect(sanitizePrefs("x").ok).toBe(false);
   });
@@ -188,7 +188,7 @@ describe("preferências: tempos da barra e indicadores favoritos", () => {
   test("até 8 tempos conhecidos, na ordem do menor para o maior; indicadores favoritos só conhecidos", () => {
     const known = CHART_TOOLS.map((t) => t.name);
     const r = sanitizePrefs({ visible: [], favorites: [], intervals: ["1M", "1m", "1M", "6M", "x"], favoriteIndicators: ["RSI", "HACK", "RSI"], known });
-    expect(r).toEqual({ ok: true, value: { visible: [], favorites: [], intervals: ["1m", "1M", "6M"], favoriteIndicators: ["RSI"], known } });
+    expect(r).toEqual({ ok: true, value: { visible: [], favorites: [], intervals: ["1m", "1M", "6M"], favoriteIndicators: ["RSI"], favoriteSymbols: [], known } });
     const many = sanitizePrefs({ visible: [], favorites: [], intervals: ["1m", "5m", "15m", "30m", "1h", "4h", "6h", "12h", "1d"] });
     expect(many.ok && many.value.intervals).toHaveLength(8);
   });

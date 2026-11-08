@@ -9,13 +9,20 @@ const PRICES: Record<string, { last: string; change: string; from: number; to: n
   BTCUSDT: { last: "60000.00", change: "1.500", from: 50000, to: 60000 },
   USDTBRL: { last: "5.00", change: "0.000", from: 5, to: 5 },
   PAXGUSDT: { last: "2600.00", change: "0.200", from: 2400, to: 2600 },
+  // Seletor de pares (ordem por capitalização) e pares sintéticos (XLM/BTC = XLM/USDT ÷ BTC/USDT).
+  ETHUSDT: { last: "3000.00", change: "0.800", from: 2500, to: 3000 },
+  XLMUSDT: { last: "0.30", change: "1.000", from: 0.25, to: 0.3 },
+  TAOUSDT: { last: "400.00", change: "2.000", from: 300, to: 400 },
+  AAVEUSDT: { last: "150.00", change: "-1.000", from: 160, to: 150 },
+  ETHBTC: { last: "0.05", change: "0.100", from: 0.05, to: 0.05 },
 };
 
 /** Velas com fechamento indo de `from` a `to` ao longo do período. */
 function klines(pair: string, count: number, stepMs: number, endTime?: number): unknown[][] {
   const { from, to } = PRICES[pair];
   // Como a Binance: com endTime, as velas terminam nessa data (histórico mais antigo).
-  const now = endTime ?? Date.now();
+  // Como a Binance: horários alinhados ao tempo da vela (iguais em todos os pares).
+  const now = Math.floor((endTime ?? Date.now()) / stepMs) * stepMs;
   return Array.from({ length: count }, (_, i) => {
     const close = now - (count - 1 - i) * stepMs;
     const price = from + ((to - from) * i) / (count - 1);
@@ -43,6 +50,8 @@ const server = http.createServer((req, res) => {
       symbols: [
         { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING" },
         { symbol: "PAXGUSDT", baseAsset: "PAXG", quoteAsset: "USDT", status: "TRADING" },
+        ...["ETH", "XLM", "TAO", "AAVE"].map((b) => ({ symbol: `${b}USDT`, baseAsset: b, quoteAsset: "USDT", status: "TRADING" })),
+        { symbol: "ETHBTC", baseAsset: "ETH", quoteAsset: "BTC", status: "TRADING" },
       ],
     });
   }

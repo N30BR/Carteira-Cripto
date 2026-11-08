@@ -234,6 +234,11 @@ export type ToolPrefs = {
   favorites: string[];
   intervals: ChartInterval[];
   favoriteIndicators: string[];
+  /**
+   * Pares favoritos do seletor (da conta; valem para todos os gráficos). Guardados pelo identificador do instrumento —
+   * o mesmo do gráfico: par da Binance (ex.: ETHBTC), par sintético (ex.: BTCETH, XLMBTC) ou série de mercado (TOTAL3).
+   */
+  favoriteSymbols?: string[];
   /** Ferramentas que já existiam quando as preferências foram salvas (as criadas depois entram visíveis). */
   known?: string[];
   /** Modelo para gráficos novos: a configuração do gráfico de referência (1º gráfico da aba indicada). */
@@ -332,8 +337,14 @@ export const defaultPrefs = (): ToolPrefs => ({
   favorites: [...DEFAULT_FAVORITE_TOOLS],
   intervals: [...DEFAULT_INTERVALS],
   favoriteIndicators: [],
+  favoriteSymbols: [],
   known: CHART_TOOLS.map((t) => t.name),
 });
+
+/** Máximo de pares favoritos. */
+export const MAX_FAVORITE_SYMBOLS = 200;
+/** Identificador de instrumento válido (mesma regra do par de um gráfico). */
+export const isInstrumentId = (s: unknown): s is string => typeof s === "string" && (isMarketId(s) || (/^[A-Z0-9]{2,20}$/.test(s) && !!splitSymbol(s)));
 
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -668,6 +679,8 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
   const intervals = CHART_INTERVALS.filter((i) => rawIntervals.includes(i)).slice(0, MAX_BAR_INTERVALS);
   const rawFav = Array.isArray(v.favoriteIndicators) ? v.favoriteIndicators : [];
   const favoriteIndicators = [...new Set(rawFav.filter((n): n is string => typeof n === "string" && INDICATOR_NAMES.has(n)))];
+  // Pares favoritos: só identificadores válidos, sem repetição, até o limite.
+  const favoriteSymbols = [...new Set((Array.isArray(v.favoriteSymbols) ? v.favoriteSymbols : []).filter(isInstrumentId))].slice(0, MAX_FAVORITE_SYMBOLS);
   // Modelo para gráficos novos: validado como um gráfico; inválido ou grande demais é descartado (o resto salva).
   const template = sanitizeTemplate(v.template);
   return {
@@ -677,6 +690,7 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
       favorites,
       intervals: intervals.length ? intervals : [...DEFAULT_INTERVALS],
       favoriteIndicators,
+      favoriteSymbols,
       known: CHART_TOOLS.map((t) => t.name),
       ...(template ? { template } : {}),
     },

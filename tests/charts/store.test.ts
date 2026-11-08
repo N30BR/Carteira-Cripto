@@ -79,7 +79,7 @@ describe("abas de gráficos na conta", () => {
     const [tab] = listChartTabs(db(), state.userId);
     const known = CHART_TOOLS.map((t) => t.name);
     expect(await saveChartPrefsAction({ visible: ["segment"], favorites: ["fibonacciLine"], known }, tab.id)).toEqual({ ok: true });
-    expect(getChartPrefs(db(), state.userId)).toEqual({ tools: { visible: ["segment", "fibonacciLine"], favorites: ["fibonacciLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [], known }, activeTabId: tab.id });
+    expect(getChartPrefs(db(), state.userId)).toEqual({ tools: { visible: ["segment", "fibonacciLine"], favorites: ["fibonacciLine"], intervals: DEFAULT_INTERVALS, favoriteIndicators: [], favoriteSymbols: [], known }, activeTabId: tab.id });
     expect((await saveChartPrefsAction("x" as never, null)).ok).toBe(false);
     // aba de outra pessoa não vira a aba aberta
     const theirs = listChartTabs(db(), other)[0];

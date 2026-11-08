@@ -17,7 +17,7 @@ import { LOG_AXIS, type OverlayExtra } from "./overlays";
 import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqSideHit } from "./liq-layers";
 import { findBarIndex } from "@/lib/charts/drawing";
 import { ema, sma } from "@/lib/charts/indicators";
-import { invertedPair, isMarketId, marketInfo } from "@/lib/market/ids";
+import { crossPair, invertedPair, isMarketId, marketInfo, ratioCandles } from "@/lib/market/ids";
 
 const PERIOD: Record<ChartInterval, Period> = {
   "1m": { type: "minute", span: 1 },
@@ -182,6 +182,12 @@ async function loadCandles(symbol: string, interval: ChartInterval, end: number 
   if (inverted) {
     const data = await loadCandles(inverted.source, interval, end, limit);
     return data.map((k) => ({ timestamp: k.timestamp, open: 1 / k.open, high: 1 / k.low, low: 1 / k.high, close: 1 / k.close }));
+  }
+  // Par cruzado (XLM/BTC...): razão das velas reais dos dois pares em USDT, no mesmo horário.
+  const cross = crossPair(symbol);
+  if (cross) {
+    const [a, b] = await Promise.all([loadCandles(cross.numerator, interval, end, limit), loadCandles(cross.denominator, interval, end, limit)]);
+    return ratioCandles(a, b);
   }
   const q = new URLSearchParams({ symbol, interval, limit: String(limit) });
   if (end !== null) q.set("end", String(end));
@@ -871,7 +877,7 @@ export function ChartPane({
       fitOnce(c);
       // Instrumento de mercado: nome com a unidade (ex.: "TOTAL3 (US$ bi)", "BTC.D (%)").
       const info = marketInfo(symbol);
-      const ticker = info ? `${info.short} (${info.unit === "usd" ? "US$ bi" : "%"})` : (invertedPair(symbol)?.label ?? symbol);
+      const ticker = info ? `${info.short} (${info.unit === "usd" ? "US$ bi" : "%"})` : (invertedPair(symbol)?.label ?? crossPair(symbol)?.label ?? symbol);
       c.setSymbol({ ticker, pricePrecision: info ? 2 : precision, volumePrecision: 2 });
       c.setPeriod(PERIOD[interval]);
       c.setDataLoader({
@@ -1294,7 +1300,7 @@ export function ChartPane({
         } else if (cmp.kind === "pair") {
           const data = await loadCandles(cmp.id, pane.interval, null, 1000);
           points = data.map((k) => [k.timestamp, k.close]);
-          label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : (invertedPair(cmp.id)?.label ?? cmp.id);
+          label = cmp.id === "PAXGUSDT" ? "Ouro (PAXG)" : (invertedPair(cmp.id)?.label ?? crossPair(cmp.id)?.label ?? cmp.id);
         } else {
           const res = await fetch(`/api/macro?${new URLSearchParams({ id: cmp.id })}`);
           if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Dados indisponíveis");

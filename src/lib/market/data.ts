@@ -84,6 +84,17 @@ const cmcListings = (db: Db, now: Date) =>
     "CoinMarketCap indisponível no momento",
   );
 
+/**
+ * Posição por capitalização (CoinMarketCap, top 200) de cada símbolo — para ordenar o seletor de pares.
+ * Sem a fonte, devolve vazio (a lista fica em ordem alfabética).
+ */
+export async function getCoinRanks(db: Db, now = new Date()): Promise<Record<string, number>> {
+  const l = await cmcListings(db, now);
+  const out: Record<string, number> = {};
+  if (l.ok) for (const c of l.data) if (!(c.symbol in out)) out[c.symbol] = c.rank;
+  return out;
+}
+
 const altLatest = (db: Db, now: Date) =>
   part<AltseasonLatest>(db, "market:cmc:asi:latest:v1", 15 * MIN, async () => parseAltseasonLatest(await cmcGet("/v1/altcoin-season-index/latest", 100_000)), now, "Índice de altseason indisponível no momento");
 
