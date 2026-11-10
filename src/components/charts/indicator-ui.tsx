@@ -86,6 +86,8 @@ const SOURCE_LABEL: Record<PriceSource, string> = {
 const SIDE_COLORS: Record<string, { up: string; down: string; upLabel: string; downLabel: string }> = {
   DELTA: { up: "#22c55e", down: "#ef4444", upLabel: "Delta positivo", downLabel: "Delta negativo" },
   VOLUME_PROFILE: { up: "#22c55e", down: "#ef4444", upLabel: "Compras", downLabel: "Vendas" },
+  // Preenchimento entre as médias: EMA acima da SMA (alta) / abaixo (baixa). Cor e opacidade de cada área.
+  BMSB: { up: "#4ade802e", down: "#f871712e", upLabel: "Área de alta (EMA > SMA)", downLabel: "Área de baixa (EMA < SMA)" },
 };
 export type MenuTarget = { index: number; x: number; y: number };
 
@@ -347,6 +349,7 @@ function IndicatorSettingsForm({
           <>
             {sides && (
               <div className="flex flex-col gap-2">
+                {draft.name === "BMSB" && <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Preenchimento entre médias</p>}
                 <div className="flex items-center gap-2">
                   <span className="w-28 shrink-0">{sides.upLabel}</span>
                   <ColorPicker label={`Cor: ${sides.upLabel}`} value={draft.options?.upColor ?? sides.up} onChange={(upColor) => setOption({ upColor })} />

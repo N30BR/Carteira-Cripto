@@ -239,6 +239,8 @@ export type PaneState = {
   sideMarks?: boolean;
   /** Delta Horizontal: delta (compras − vendas agressoras) por faixa de preço no trecho visível. */
   deltaProfile?: boolean;
+  /** Delta Horizontal integrado ao gráfico (sem painel próprio, atrás das velas). */
+  deltaIntegrated?: boolean;
   /** Delta na barra de preço (Volume Footprint): compras e vendas agressoras por preço dentro de cada vela. */
   footprint?: boolean;
   /** Cores do perfil lateral (compras e vendas, com opacidade), escolhidas clicando nas barras. Só o desenho. */
@@ -851,7 +853,7 @@ function sanitizePane(v: unknown): R<PaneState> {
     if (!r.ok) return r;
     compares.push(r.value);
   }
-  for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile", "sideIntegrated", "sideMarks", "deltaProfile", "footprint"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
+  for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile", "sideIntegrated", "sideMarks", "deltaProfile", "deltaIntegrated", "footprint"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
   if (v.sideWidth !== undefined && !(typeof v.sideWidth === "number" && Number.isInteger(v.sideWidth) && v.sideWidth >= SIDE_WIDTH_MIN && v.sideWidth <= SIDE_WIDTH_MAX)) return fail("Gráfico inválido");
   let sideColors: { buy?: string; sell?: string } | undefined;
   if (v.sideColors !== undefined) {
@@ -881,6 +883,7 @@ function sanitizePane(v: unknown): R<PaneState> {
       ...(v.sideIntegrated === undefined ? {} : { sideIntegrated: v.sideIntegrated as boolean }),
       ...(v.sideMarks === undefined ? {} : { sideMarks: v.sideMarks as boolean }),
       ...(v.deltaProfile === undefined ? {} : { deltaProfile: v.deltaProfile as boolean }),
+      ...(v.deltaIntegrated === undefined ? {} : { deltaIntegrated: v.deltaIntegrated as boolean }),
       ...(v.footprint === undefined ? {} : { footprint: v.footprint as boolean }),
       ...(sideColors ? { sideColors } : {}),
       ...(views.length ? { views } : {}),

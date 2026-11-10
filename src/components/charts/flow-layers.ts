@@ -43,7 +43,8 @@ const dash = (style: string | undefined, size: number) => (style === "dashed" ? 
 
 // ---------- perfil lateral integrado (atrás das velas) ----------
 
-type SideIntData = { width: number; buy?: string; sell?: string };
+/** shift: largura do Delta Horizontal à direita (o perfil fica à esquerda dele). */
+type SideIntData = { width: number; buy?: string; sell?: string; shift?: number };
 
 // ---------- marcações ----------
 
@@ -51,24 +52,28 @@ type MarksData = { poc?: MarkStyle; vah?: MarkStyle; val?: MarkStyle; reserve?: 
 
 // ---------- Delta Horizontal ----------
 
-type DeltaData = { sub?: FlowBar[]; subId?: string; width?: number; pos?: string; neg?: string; reserve?: number };
+/** Delta Horizontal: faixa própria na ponta direita da área do gráfico (à direita do perfil lateral). */
+type DeltaData = { sub?: FlowBar[]; subId?: string; width?: number; pos?: string; neg?: string; integrated?: boolean };
 let deltaState: { levels: ReturnType<typeof deltaProfile>["levels"]; zeroX: number; half: number; max: number; Y: Axis; res: string } | null = null;
 
 /** Faixa do Delta Horizontal sob o cursor (coordenadas da área do gráfico). */
 export function deltaHit(x: number, y: number): { from: number; to: number; buy: number; sell: number; res: string } | null {
   const s = deltaState;
-  if (!s || x < s.zeroX - s.half - 4 || x > s.zeroX + s.half + 4) return null;
+  if (!s || x < s.zeroX - s.half - 6 || x > s.zeroX + s.half + 6) return null;
+  let best: { L: (typeof s.levels)[number]; d: number } | null = null;
   for (const L of s.levels) {
-    const y1 = s.Y.convertToPixel(L.to);
-    const y2 = s.Y.convertToPixel(L.from);
-    if (y >= Math.min(y1, y2) && y <= Math.max(y1, y2)) {
-      const d = L.buy - L.sell;
-      const len = (Math.abs(d) / s.max) * s.half;
-      const inBar = d >= 0 ? x >= s.zeroX - 4 && x <= s.zeroX + len + 4 : x <= s.zeroX + 4 && x >= s.zeroX - len - 4;
-      return inBar && L.buy + L.sell > 0 ? { from: L.from, to: L.to, buy: L.buy, sell: L.sell, res: s.res } : null;
-    }
+    if (!(L.buy + L.sell > 0)) continue;
+    const y1 = Math.min(s.Y.convertToPixel(L.to), s.Y.convertToPixel(L.from));
+    const y2 = Math.max(s.Y.convertToPixel(L.to), s.Y.convertToPixel(L.from));
+    const d = y < y1 ? y1 - y : y > y2 ? y - y2 : 0;
+    if (d <= 4 && (!best || d < best.d)) best = { L, d };
   }
-  return null;
+  if (!best) return null;
+  const L = best.L;
+  const delta = L.buy - L.sell;
+  const len = Math.max(2, (Math.abs(delta) / s.max) * s.half);
+  const inBar = delta >= 0 ? x >= s.zeroX - 6 && x <= s.zeroX + len + 6 : x <= s.zeroX + 6 && x >= s.zeroX - len - 6;
+  return inBar ? { from: L.from, to: L.to, buy: L.buy, sell: L.sell, res: s.res } : null;
 }
 
 // ---------- Footprint ----------
@@ -109,7 +114,7 @@ export function registerFlowLayers(): void {
       const { data, from, to, lo, hi, Y } = view(p as unknown as Ctx);
       const W = Math.min(e.width, bounding.width * 0.6);
       ctx.save();
-      ctx.translate(bounding.width - W, 0);
+      ctx.translate(bounding.width - (e.shift ?? 0) - W, 0);
       drawSideProfile(ctx, { key: "bh_side", width: W, height: bounding.height, lo, hi, from, to, data, yOf: (v) => Y.convertToPixel(v), buyColor: e.buy, sellColor: e.sell, integrated: true, noClear: true });
       ctx.restore();
       return true;
@@ -187,12 +192,21 @@ export function registerFlowLayers(): void {
       const { levels, used } = deltaProfile(base, lo, hi, rows);
       ctx.save();
       ctx.font = "10px Geist, sans-serif";
-      const width = e.width ?? DELTA_DEFAULTS.width;
-      const half = width / 2;
-      const zeroX = bounding.width - (e.reserve ?? 0) - half - 10;
+      const width = Math.min(e.width ?? DELTA_DEFAULTS.width, bounding.width * 0.5);
+      const x0 = bounding.width - width;
+      const half = width / 2 - 6;
+      const zeroX = x0 + width / 2;
+      // Painel isolado: fundo e borda próprios, por cima (ali não há velas). Integrado: sem fundo, atrás das velas.
+      if (!e.integrated) {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "rgba(9, 9, 11, 0.94)";
+        ctx.fillRect(x0, 0, width, bounding.height);
+        ctx.fillStyle = "rgba(139, 124, 246, 0.35)";
+        ctx.fillRect(x0, 0, 1, bounding.height);
+      }
       if (!used) {
         ctx.fillStyle = "#71717a";
-        ctx.fillText("Delta por preço: sem fluxo agressor neste instrumento", zeroX - half, 14);
+        ctx.fillText("Delta: sem fluxo agressor", x0 + 6, 14);
         ctx.restore();
         return true;
       }
@@ -217,7 +231,7 @@ export function registerFlowLayers(): void {
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#a1a1aa";
-      ctx.fillText(`Delta por preço · ${res}`, zeroX - half, 14);
+      ctx.fillText(`Delta · ${useSub ? e.subId : "velas"}`, x0 + 6, 14);
       ctx.restore();
       return true;
     },

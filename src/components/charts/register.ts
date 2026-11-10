@@ -159,9 +159,12 @@ export function registerChartExtensions(): void {
     },
   });
 
+  // Cores padrão do preenchimento da Bull Market Support Band (verde-claro / vermelho-claro, suaves no tema escuro).
+  const BMSB_UP = "#4ade802e";
+  const BMSB_DOWN = "#f871712e";
   // Bull Market Support Band: SMA de 20 semanas e EMA de 21 semanas, calculadas com velas SEMANAIS reais (o gráfico
   // entrega a série pronta em extendData.weekly, buscada à parte), com a faixa entre elas preenchida.
-  registerIndicator<Row, number, { weekly?: { t: number; sma: number | null; ema: number | null }[]; fill?: string }>({
+  registerIndicator<Row, number, { weekly?: { t: number; sma: number | null; ema: number | null }[]; upColor?: string; downColor?: string }>({
     name: "BMSB",
     shortName: "Bull Market Support Band",
     series: "price",
@@ -187,26 +190,47 @@ export function registerChartExtensions(): void {
       if (!indicator.visible) return false;
       const rows = indicator.result as Row[];
       const r = chart.getVisibleRange();
-      const top: { x: number; y: number }[] = [];
-      const bottom: { x: number; y: number }[] = [];
+      const upColor = indicator.extendData?.upColor ?? BMSB_UP;
+      const downColor = indicator.extendData?.downColor ?? BMSB_DOWN;
+      // Preenchimento entre as médias, por trecho: verde-claro com a EMA acima da SMA, vermelho-claro abaixo. Num
+      // cruzamento, o ponto de troca é onde as linhas DESENHADAS se cruzam (pixels), sem mudar os valores. Médias
+      // iguais não geram área. Atrás das velas (destination-over); as linhas do indicador vêm por cima depois.
+      ctx.save();
+      ctx.globalCompositeOperation = "destination-over";
+      const poly = (pts: { x: number; y: number }[], color: string) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.closePath();
+        ctx.fill();
+      };
+      const color = (d: number) => (d > 0 ? upColor : downColor);
+      let prev: { x: number; s: number; e: number; d: number } | null = null;
       for (let i = Math.max(0, r.from - 1); i < Math.min(rows.length, r.to + 1); i++) {
         const a = rows[i]?.sma;
         const b = rows[i]?.ema;
-        if (a == null || b == null) continue;
-        const x = xAxis.convertToPixel(i);
-        top.push({ x, y: yAxis.convertToPixel(a) });
-        bottom.push({ x, y: yAxis.convertToPixel(b) });
+        if (a == null || b == null) {
+          prev = null;
+          continue;
+        }
+        const cur = { x: xAxis.convertToPixel(i), s: yAxis.convertToPixel(a), e: yAxis.convertToPixel(b), d: b - a };
+        if (prev) {
+          if (prev.d * cur.d >= 0) {
+            const d = prev.d !== 0 ? prev.d : cur.d;
+            if (d !== 0) poly([{ x: prev.x, y: prev.s }, { x: cur.x, y: cur.s }, { x: cur.x, y: cur.e }, { x: prev.x, y: prev.e }], color(d));
+          } else {
+            // Cruzamento entre os dois pontos: onde a distância (em pixels) entre as linhas chega a zero.
+            const g0 = prev.e - prev.s;
+            const g1 = cur.e - cur.s;
+            const t = g0 / (g0 - g1);
+            const c = { x: prev.x + (cur.x - prev.x) * t, y: prev.s + (cur.s - prev.s) * t };
+            poly([{ x: prev.x, y: prev.s }, c, { x: prev.x, y: prev.e }], color(prev.d));
+            poly([c, { x: cur.x, y: cur.s }, { x: cur.x, y: cur.e }], color(cur.d));
+          }
+        }
+        prev = cur;
       }
-      if (top.length > 1) {
-        ctx.save();
-        ctx.fillStyle = (indicator.extendData as { fill?: string } | undefined)?.fill ?? "#ef444433";
-        ctx.beginPath();
-        top.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-        for (let i = bottom.length - 1; i >= 0; i--) ctx.lineTo(bottom[i].x, bottom[i].y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
+      ctx.restore();
       return false;
     },
   });

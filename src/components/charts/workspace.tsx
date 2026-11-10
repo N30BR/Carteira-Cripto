@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FLUSH_PENDING_EVENT } from "@/lib/modules";
 import {
   AlignRight,
@@ -730,15 +730,51 @@ export function ChartWorkspace({
     else if (a.action === "up") patch({ display: "main" });
   }
   // ---------- Reordenar abas (arrastar e soltar) ----------
-  const [tabDrag, setTabDrag] = useState<{ id: number; order: number[]; active: boolean } | null>(null);
+  // A aba arrastada vira uma cópia flutuante que segue o cursor; o lugar dela na barra fica vazio (prévia do destino)
+  // e as outras abas deslizam para abrir espaço. Esc cancela (volta tudo, nada é salvo).
+  const [tabDrag, setTabDrag] = useState<{ id: number; order: number[]; active: boolean; x: number; y: number; w: number; h: number } | null>(null);
   const tabDragEnd = useRef(0);
+  const tabBar = useRef<HTMLDivElement>(null);
+  const tabRects = useRef(new Map<number, DOMRect>());
   const startTabDrag = (e: React.PointerEvent, id: number) => {
     if (e.button !== 0) return;
+    const el = e.currentTarget as HTMLElement;
+    const r0 = el.getBoundingClientRect();
+    const gx = e.clientX - r0.left;
+    const gy = e.clientY - r0.top;
     const x0 = e.clientX;
     const y0 = e.clientY;
     const base = tabs.map((x) => x.id);
     let order = base;
     let active = false;
+    // Posições antes de cada mudança de ordem (para as outras abas deslizarem).
+    const snapshot = () => {
+      tabRects.current.clear();
+      tabBar.current?.querySelectorAll<HTMLElement>("[data-tab-id]").forEach((n) => tabRects.current.set(Number(n.dataset.tabId), n.getBoundingClientRect()));
+    };
+    const place = (cx: number, cy: number) => {
+      const bar = tabBar.current?.getBoundingClientRect();
+      // Segue o cursor na horizontal; na vertical fica dentro da barra (que pode ter mais de uma linha).
+      const x = bar ? Math.max(bar.left, Math.min(bar.right - r0.width, cx - gx)) : cx - gx;
+      const y = bar ? Math.max(bar.top, Math.min(bar.bottom - r0.height, cy - gy)) : r0.top;
+      return { x, y };
+    };
+    const finish = (save: boolean) => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", cancel);
+      document.removeEventListener("keydown", key, true);
+      document.body.style.cursor = "";
+      setTabDrag(null);
+      if (!active) return;
+      tabDragEnd.current = Date.now();
+      if (!save || order.join() === base.join()) return;
+      // Só a posição muda: cada aba guarda o próprio estado (identificador estável); nada é recriado.
+      setTabs((prev) => order.map((oid) => prev.find((x) => x.id === oid)).filter((x): x is (typeof prev)[number] => !!x));
+      void safeAction(() => reorderChartTabsAction(order)).then((r) => {
+        if (r && !r.ok) toast.error(r.error);
+      });
+    };
     const move = (ev: PointerEvent) => {
       if (!active) {
         if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 6) return;
@@ -754,29 +790,48 @@ export function ChartWorkspace({
         const rest = order.filter((x) => x !== id);
         const at = rest.indexOf(overId) + (ev.clientX > r.left + r.width / 2 ? 1 : 0);
         const next = [...rest.slice(0, at), id, ...rest.slice(at)];
-        if (next.join() !== order.join()) order = next;
+        if (next.join() !== order.join()) {
+          snapshot();
+          order = next;
+        }
       }
-      setTabDrag({ id, order, active: true });
+      const p = place(ev.clientX, ev.clientY);
+      setTabDrag({ id, order, active: true, x: p.x, y: p.y, w: r0.width, h: r0.height });
     };
-    const up = () => {
-      document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", up);
-      document.removeEventListener("pointercancel", up);
-      document.body.style.cursor = "";
-      setTabDrag(null);
-      if (!active) return;
-      tabDragEnd.current = Date.now();
-      if (order.join() === base.join()) return;
-      // Só a posição muda: cada aba guarda o próprio estado (identificador estável); nada é recriado.
-      setTabs((prev) => order.map((oid) => prev.find((x) => x.id === oid)).filter((x): x is (typeof prev)[number] => !!x));
-      void safeAction(() => reorderChartTabsAction(order)).then((r) => {
-        if (r && !r.ok) toast.error(r.error);
-      });
+    const up = () => finish(true);
+    const cancel = () => finish(false);
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      order = base;
+      finish(false);
     };
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", up);
-    document.addEventListener("pointercancel", up);
+    document.addEventListener("pointercancel", cancel);
+    document.addEventListener("keydown", key, true);
   };
+  // As outras abas deslizam da posição antiga para a nova (animação curta), quando a ordem da prévia muda.
+  const dragOrderKey = tabDrag?.order.join() ?? "";
+  useLayoutEffect(() => {
+    if (!tabRects.current.size || !tabBar.current) return;
+    tabBar.current.querySelectorAll<HTMLElement>("[data-tab-id]").forEach((n) => {
+      const before = tabRects.current.get(Number(n.dataset.tabId));
+      if (!before) return;
+      const now = n.getBoundingClientRect();
+      const dx = before.left - now.left;
+      const dy = before.top - now.top;
+      if (!dx && !dy) return;
+      n.style.transition = "none";
+      n.style.transform = `translate(${dx}px, ${dy}px)`;
+      requestAnimationFrame(() => {
+        n.style.transition = "transform 140ms ease-out";
+        n.style.transform = "";
+      });
+    });
+    tabRects.current.clear();
+  }, [dragOrderKey]);
   // Configurações das camadas de volume e fluxo (clique direito nos botões).
   const [layerSettings, setLayerSettings] = useState<LayerKind | null>(null);
   // Pares favoritos: preferência da conta, a mesma para todos os gráficos (só a lista muda; nenhum gráfico troca de par).
@@ -826,6 +881,7 @@ export function ChartWorkspace({
     <div ref={root} className="flex flex-col gap-2">
       {/* Abas de trabalho */}
       <div
+        ref={tabBar}
         className="flex flex-wrap items-center gap-1"
         role="tablist"
         aria-label="Abas de gráficos"
@@ -848,9 +904,10 @@ export function ChartWorkspace({
               t.id === tab.id
                 ? "border-[#8b7cf6] bg-muted font-medium"
                 : "text-muted-foreground hover:text-foreground",
+              // Lugar da aba arrastada na barra: espaço vazio (prévia do destino); a cópia segue o cursor.
               tabDrag?.active &&
                 tabDrag.id === t.id &&
-                "cursor-grabbing opacity-80 ring-1 ring-[#8b7cf6]/70",
+                "border-dashed border-[#8b7cf6]/70 bg-transparent [&>*]:invisible",
             )}
           >
             {/* Nome = par do gráfico da aba (muda na hora ao trocar o par); nome dado pela pessoa continua valendo. */}
@@ -892,6 +949,26 @@ export function ChartWorkspace({
           {tabs.length}/{LIMITS.tabs} abas
         </span>
       </div>
+      {tabDrag?.active &&
+        (() => {
+          const dragged = tabs.find((x) => x.id === tabDrag.id);
+          if (!dragged) return null;
+          return (
+            <div
+              aria-hidden
+              className={cn(
+                "pointer-events-none fixed z-50 flex cursor-grabbing items-center gap-1 rounded-md border px-2.5 py-1 text-sm shadow-lg ring-1 ring-[#8b7cf6]/70",
+                dragged.id === tab.id
+                  ? "border-[#8b7cf6] bg-muted font-medium"
+                  : "bg-background text-muted-foreground",
+              )}
+              style={{ left: tabDrag.x, top: tabDrag.y, width: tabDrag.w, height: tabDrag.h }}
+            >
+              <span className="max-w-40 truncate">{tabTitle(dragged).label}</span>
+              <X className="size-3.5 opacity-50" />
+            </div>
+          );
+        })()}
 
       {/* Barra superior (gráfico selecionado) */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-2 py-1.5">
@@ -1177,6 +1254,12 @@ export function ChartWorkspace({
               }
               sideColorsDefault={tools.sideColors}
               layerStyles={tools.layerStyles}
+              onLayerStylesChange={(layerStyles) =>
+                changePrefs({ ...tools, layerStyles })
+              }
+              onDeltaIntegratedChange={(deltaIntegrated) =>
+                updatePaneOf(tab.id, i, { deltaIntegrated })
+              }
               onSideIntegratedChange={(sideIntegrated) =>
                 updatePaneOf(tab.id, i, { sideIntegrated })
               }

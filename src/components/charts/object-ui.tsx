@@ -308,7 +308,9 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
           onClick={() => actions.update({ lockX: !object.lockX })}
           pressed={!!object.lockX}
         >
-          <MoveHorizontal />
+          <AxisIcon locked={!!object.lockX}>
+            <MoveHorizontal />
+          </AxisIcon>
         </ToolbarButton>
       )}
       {movableAxes(object.name).y && (
@@ -317,7 +319,9 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
           onClick={() => actions.update({ lockY: !object.lockY })}
           pressed={!!object.lockY}
         >
-          <MoveVertical />
+          <AxisIcon locked={!!object.lockY}>
+            <MoveVertical />
+          </AxisIcon>
         </ToolbarButton>
       )}
       <ToolbarButton label={object.locked ? "Desbloquear" : "Bloquear"} onClick={() => actions.update({ locked: !object.locked })} pressed={!!object.locked}>
@@ -354,6 +358,20 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  );
+}
+
+/** Seta do bloqueio por eixo; bloqueado: seta um pouco menor e um cadeado fechado no canto inferior direito. */
+function AxisIcon({ locked, children }: { locked: boolean; children: React.ReactNode }) {
+  return (
+    <span className={cn("relative grid size-4 place-items-center", locked && "[&>svg:first-child]:size-3.5!")}>
+      {children}
+      {locked && (
+        <span aria-hidden className="absolute -right-1.5 -bottom-1.5 grid size-3 place-items-center rounded-full bg-popover ring-1 ring-current">
+          <Lock className="size-2! stroke-[2.5]" />
+        </span>
+      )}
+    </span>
   );
 }
 

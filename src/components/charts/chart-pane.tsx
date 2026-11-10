@@ -20,6 +20,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ColorPicker } from "./object-ui";
 import { PROFILE_BUY, PROFILE_SELL } from "./profile";
 import { DELTA_PROF, FOOTPRINT, MARKS, SIDE_INT, deltaHit, fmtFlow, footHit } from "./flow-layers";
+import { DELTA_DEFAULTS } from "@/lib/charts/workspace";
 import { pickSubInterval } from "@/lib/charts/flow";
 import type { LayerStyles } from "@/lib/charts/workspace";
 import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqMapHit, mapTipLines, sideHit, sideTipLines } from "./liq-layers";
@@ -379,6 +380,8 @@ export function ChartPane({
   onSideColorsChange,
   onSideIntegratedChange,
   layerStyles,
+  onLayerStylesChange,
+  onDeltaIntegratedChange,
   sideColorsDefault,
   styleDefaults,
   onStyleDefault,
@@ -391,6 +394,10 @@ export function ChartPane({
   onSideColorsChange?: (colors: { buy?: string; sell?: string }) => void;
   /** Estilos das camadas de fluxo (marcações, Delta Horizontal, Footprint), da conta. */
   layerStyles?: LayerStyles;
+  /** Estilos das camadas mudados direto no gráfico (minibarra/largura do Delta Horizontal). */
+  onLayerStylesChange?: (next: LayerStyles) => void;
+  /** Delta Horizontal integrado ao gráfico (true) ou em painel próprio (false); salvo no gráfico. */
+  onDeltaIntegratedChange?: (integrated: boolean) => void;
   /** Perfil lateral integrado ao gráfico (true) ou em painel próprio (false); salvo no gráfico. */
   onSideIntegratedChange?: (integrated: boolean) => void;
   /** Cores do perfil lateral da conta (valem quando o gráfico não tem as suas, de versões antigas). */
@@ -429,9 +436,9 @@ export function ChartPane({
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
   const magnet = useRef<OverlayMode>("normal");
-  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault });
+  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault, onLayerStylesChange, onDeltaIntegratedChange });
   useEffect(() => {
-    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault };
+    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault, onLayerStylesChange, onDeltaIntegratedChange };
   });
   const styleDefaultsRef = useRef(styleDefaults);
   useEffect(() => {
@@ -1120,6 +1127,23 @@ export function ChartPane({
   const [sideSelected, setSideSelected] = useState<{ open: "buy" | "sell" | null; left: number; top: number; width: number; height: number; right: number } | null>(null);
   const sidePress = useRef<{ x: number; y: number } | null>(null);
   const sideBar = useRef<HTMLDivElement>(null);
+  /** Delta Horizontal selecionado (clique numa barra): minibarra com cores, encaixe e largura. */
+  const [deltaSelected, setDeltaSelected] = useState<{ open: "pos" | "neg" | null; left: number; top: number; width: number; height: number; right: number } | null>(null);
+  const deltaBar = useRef<HTMLDivElement>(null);
+  const deltaHandle = useRef<HTMLDivElement>(null);
+  const [deltaDragging, setDeltaDragging] = useState(false);
+  useEffect(() => {
+    if (!deltaSelected) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t || deltaBar.current?.contains(t) || deltaHandle.current?.contains(t) || t.closest?.("[role=menu]")) return;
+      const r = el.current?.getBoundingClientRect();
+      if (r && e.clientX - r.left >= deltaSelected.left && el.current?.contains(t)) return;
+      setDeltaSelected(null);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [deltaSelected]);
   // Clicar fora do perfil e da minibarra (e fora do seletor de cor aberto) tira a seleção.
   useEffect(() => {
     if (!sideSelected) return;
@@ -1158,15 +1182,6 @@ export function ChartPane({
         true,
       );
     } else if (!pane.liqMap && exists) c.removeIndicator({ id: MAP_ID });
-    // Espaço à direita para a faixa lateral (a última vela não fica atrás dela). Integrada ao gráfico: sem espaço
-    // reservado (as barras ficam sobre a borda direita do gráfico).
-    if (pane.sideProfile && !pane.sideIntegrated) {
-      if (sideBase.current === null) sideBase.current = c.getOffsetRightDistance();
-      c.setOffsetRightDistance(sideBase.current + sideWidth.current);
-    } else if (sideBase.current !== null) {
-      c.setOffsetRightDistance(sideBase.current);
-      sideBase.current = null;
-    }
     // O open interest só serve ao mapa (o perfil lateral é de volume, com as próprias velas).
     if (!pane.liqMap) return;
     // Histórico de open interest desde a 1ª vela carregada; ao rolar para trás (velas mais antigas), busca de novo.
@@ -1214,6 +1229,39 @@ export function ChartPane({
     };
   }, [pane.liqMap, pane.sideProfile, pane.sideWidth, pane.sideIntegrated, pane.symbol, pane.interval]);
 
+  // ---------- Espaço à direita: perfil lateral e Delta Horizontal ----------
+  // Ordem: gráfico → perfil lateral → Delta Horizontal → eixo de preço. Isolado = painel próprio (o gráfico reserva o
+  // espaço, a última vela não fica atrás dele); integrado = barras sobre a borda direita do gráfico, atrás das velas.
+  // Perfil isolado com Delta integrado: o espaço do Delta também fica reservado (ele não pode ficar entre o painel do
+  // perfil e o eixo por cima das velas), mas sem fundo.
+  const deltaW = layerStyles?.delta?.width ?? DELTA_DEFAULTS.width;
+  const deltaWidth = useRef(deltaW);
+  const deltaDrag = useRef<{ x: number; width: number } | null>(null);
+  const deltaOn = useRef(!!pane.deltaProfile);
+  const reserveFor = useRef((vpW: number, dW: number) => vpW * 0 + dW * 0);
+  useEffect(() => {
+    deltaOn.current = !!pane.deltaProfile;
+    if (!deltaDrag.current) deltaWidth.current = deltaW;
+    reserveFor.current = (vpW: number, dW: number) => {
+      const vpIso = !!pane.sideProfile && !pane.sideIntegrated;
+      return (vpIso ? vpW : 0) + (pane.deltaProfile && (!pane.deltaIntegrated || vpIso) ? dW : 0);
+    };
+  });
+  const applyReserve = (c: Chart, vpW: number, dW: number) => {
+    const r = reserveFor.current(vpW, dW);
+    if (r > 0) {
+      if (sideBase.current === null) sideBase.current = c.getOffsetRightDistance();
+      c.setOffsetRightDistance(sideBase.current + r);
+    } else if (sideBase.current !== null) {
+      c.setOffsetRightDistance(sideBase.current);
+      sideBase.current = null;
+    }
+  };
+  useEffect(() => {
+    const c = chart.current;
+    if (c) applyReserve(c, sideWidth.current, deltaWidth.current);
+  }, [pane.sideProfile, pane.sideIntegrated, pane.deltaProfile, pane.deltaIntegrated, pane.sideWidth, deltaW]);
+
   // ---------- Camadas de volume e fluxo (botões próprios, independentes) ----------
   const flowSub = useRef<{ key: string; subId: string; bars: KLineData[]; from: number; to: number; at: number } | null>(null);
   useEffect(() => {
@@ -1227,12 +1275,13 @@ export function ChartPane({
     };
     // Atrás das velas: perfil integrado (mais ao fundo) e Delta Horizontal. Por cima: marcações e Footprint.
     const z: Record<string, number> = { [SIDE_INT]: -3, [DELTA_PROF]: -2, [MARKS]: 900, [FOOTPRINT]: 800 };
-    const reserve = pane.sideProfile ? (pane.sideWidth ?? SIDE_WIDTH) : 0;
+    const dW = pane.deltaProfile ? deltaWidth.current : 0;
+    const reserve = (pane.sideProfile ? (pane.sideWidth ?? SIDE_WIDTH) : 0) + dW;
     const extend = (name: string): Record<string, unknown> => {
       const sub = flowSub.current?.key === `${pane.symbol}|${pane.interval}` ? flowSub.current : null;
-      if (name === SIDE_INT) return { width: pane.sideWidth ?? SIDE_WIDTH, buy: sideColorsNow?.buy, sell: sideColorsNow?.sell };
+      if (name === SIDE_INT) return { width: pane.sideWidth ?? SIDE_WIDTH, buy: sideColorsNow?.buy, sell: sideColorsNow?.sell, shift: dW };
       if (name === MARKS) return { ...layerStyles?.marks, reserve };
-      if (name === DELTA_PROF) return { ...layerStyles?.delta, reserve, sub: sub?.bars, subId: sub?.subId };
+      if (name === DELTA_PROF) return { ...layerStyles?.delta, width: deltaWidth.current, integrated: !!pane.deltaIntegrated && !(pane.sideProfile && !pane.sideIntegrated), sub: sub?.bars, subId: sub?.subId };
       return { style: layerStyles?.footprint, sub: sub?.bars, subId: sub?.subId, barMs: BAR_MS[pane.interval] };
     };
     for (const name of [SIDE_INT, MARKS, DELTA_PROF, FOOTPRINT]) {
@@ -1303,7 +1352,7 @@ export function ChartPane({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [pane.sideProfile, pane.sideIntegrated, pane.sideMarks, pane.deltaProfile, pane.footprint, pane.sideWidth, pane.symbol, pane.interval, layerStyles, sideColorsNow]);
+  }, [pane.sideProfile, pane.sideIntegrated, pane.sideMarks, pane.deltaProfile, pane.deltaIntegrated, pane.footprint, pane.sideWidth, pane.symbol, pane.interval, layerStyles, sideColorsNow]);
 
   // Perfil de volume lateral: tela própria colada à direita da área do preço, por cima de tudo, com o cálculo da
   // ferramenta Faixa Fixa sobre as velas e a faixa de preço visíveis. Redesenha só quando muda algo (velas, janela
@@ -1334,11 +1383,18 @@ export function ChartPane({
       const from = Math.max(0, range.from);
       const to = Math.min(data.length - 1, range.to - 1);
       const colors = sideColors.current;
-      const key = [size.left, size.top, size.width, W, H, lo, hi, data.length, last?.timestamp, last?.close, from, to, colors?.buy, colors?.sell, sideIntegratedRef.current].join("|");
+      const key = [deltaOn.current ? deltaWidth.current : 0, size.left, size.top, size.width, W, H, lo, hi, data.length, last?.timestamp, last?.close, from, to, colors?.buy, colors?.sell, sideIntegratedRef.current].join("|");
       if (key === lastKey) return;
       lastKey = key;
-      const left = size.left + size.width - W;
+      const dEff = deltaOn.current ? deltaWidth.current : 0;
+      const left = size.left + size.width - dEff - W;
       sideBox.current = { left, top: size.top };
+      const dh = deltaHandle.current;
+      if (dh) {
+        dh.style.left = `${size.left + size.width - dEff - 4}px`;
+        dh.style.top = `${size.top}px`;
+        dh.style.height = `${H}px`;
+      }
       const handleEl = sideHandle.current;
       if (handleEl) {
         handleEl.style.left = `${left - 4}px`;
@@ -1506,9 +1562,10 @@ export function ChartPane({
             const a = sma(closes, Math.round(pA));
             const b = weekly ? ema(closes, Math.round(pB)) : sma(closes, Math.round(pB)).map((v) => (v === null ? null : v * 2));
             const series = k.map((bar, i) => ({ t: bar.timestamp + step, x: a[i], y: b[i] }));
+            // Junta com as opções do indicador (ex.: cores das áreas da Bull Market Support Band), sem perdê-las.
             const extendData = weekly
-              ? { weekly: series.map((s) => ({ t: s.t, sma: s.x, ema: s.y })) }
-              : { daily: series.map((s) => ({ t: s.t, fast: s.x, slow: s.y })) };
+              ? { ...indicatorExtend(ind), weekly: series.map((s) => ({ t: s.t, sma: s.x, ema: s.y })) }
+              : { ...indicatorExtend(ind), daily: series.map((s) => ({ t: s.t, fast: s.x, slow: s.y })) };
             chart.current?.overrideIndicator({ id: created, name: ind.name, extendData });
           })
           .catch((e) => cb.current.onError(`${ind.name === "BMSB" ? "Bull Market Support Band" : "Pi Cycle"}: ${e instanceof Error ? e.message : "indisponível"}`));
@@ -1757,7 +1814,7 @@ export function ChartPane({
         const y = e.clientY - r.top;
         const box = sideBox.current;
         // Sobre a faixa lateral: só a dica do perfil.
-        if (pane.sideProfile && box && x >= box.left) {
+        if (pane.sideProfile && box && x >= box.left && x < box.left + sideWidth.current) {
           const h = sideHit("bh_side", x - box.left, y - box.top);
           if (!h) return clear();
           const id = `s${h.from}`;
@@ -1831,12 +1888,24 @@ export function ChartPane({
         const r = el.current.getBoundingClientRect();
         const x = e.clientX - r.left;
         const y = e.clientY - r.top;
-        if (!box || x < box.left) return;
+        const area = chart.current?.getSize("candle_pane", "main");
+        if (pane.deltaProfile && area) {
+          const dh = deltaHit(x - area.left, y - area.top);
+          if (dh) {
+            setTip(null);
+            setSideSelected(null);
+            const left = area.left + area.width - deltaWidth.current;
+            setDeltaSelected({ open: null, left, top: area.top, width: deltaWidth.current, height: area.height, right: r.width - left + 8 });
+            return;
+          }
+        }
+        if (!box || x < box.left || x >= box.left + sideWidth.current) return;
         const h = sideHit("bh_side", x - box.left, y - box.top);
         if (!h) return;
         setTip(null);
         // Posição da faixa guardada no clique (para o contorno e a minibarra).
         const height = chart.current?.getSize("candle_pane", "main")?.height ?? r.height;
+        setDeltaSelected(null);
         setSideSelected({ open: h.part, left: box.left, top: box.top, width: sideWidth.current, height, right: r.width - box.left + 8 });
       }}
       className={`relative h-full min-h-0 w-full rounded-lg border ${active ? "border-[#8b7cf6]" : "border-border"}`}
@@ -1888,7 +1957,7 @@ export function ChartPane({
             const w = Math.round(Math.max(SIDE_WIDTH_MIN, Math.min(max, d.width + (d.x - e.clientX))));
             if (w === sideWidth.current) return;
             sideWidth.current = w;
-            if (sideBase.current !== null && !sideIntegratedRef.current) c.setOffsetRightDistance(sideBase.current + w);
+            applyReserve(c, w, deltaWidth.current);
           }}
           onPointerUp={(e) => {
             if (!sideDrag.current) return;
@@ -1950,6 +2019,101 @@ export function ChartPane({
               {pane.sideIntegrated ? <ChevronRight /> : <ChevronLeft />}
             </button>
             <button type="button" aria-label="Fechar" title="Fechar" onClick={() => setSideSelected(null)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
+              ×
+            </button>
+          </div>
+        </>
+      )}
+      {pane.deltaProfile && (
+        // Borda esquerda do Delta Horizontal: arrastar muda só a largura do desenho (o cálculo não muda).
+        <div
+          ref={deltaHandle}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Largura do Delta Horizontal"
+          aria-valuenow={Math.round(deltaW)}
+          title="Arraste para ajustar a largura do Delta Horizontal"
+          className="group absolute z-[6] w-2 cursor-ew-resize touch-none"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            deltaDrag.current = { x: e.clientX, width: deltaWidth.current };
+            setDeltaDragging(true);
+            setTip(null);
+          }}
+          onPointerMove={(e) => {
+            const d = deltaDrag.current;
+            const c = chart.current;
+            if (!d || !c) return;
+            const paneWidth = c.getSize("candle_pane", "main")?.width ?? 0;
+            const w = Math.round(Math.max(60, Math.min(600, paneWidth * 0.5, d.width + (d.x - e.clientX))));
+            if (w === deltaWidth.current) return;
+            deltaWidth.current = w;
+            applyReserve(c, sideWidth.current, w);
+            const id = `bh_${DELTA_PROF}`;
+            const cur = c.getIndicators({ id })[0];
+            if (cur) c.overrideIndicator({ id, name: DELTA_PROF, extendData: { ...(cur.extendData as object), width: w } });
+          }}
+          onPointerUp={(e) => {
+            if (!deltaDrag.current) return;
+            deltaDrag.current = null;
+            setDeltaDragging(false);
+            e.currentTarget.releasePointerCapture(e.pointerId);
+            cb.current.onLayerStylesChange?.({ ...layerStyles, delta: { ...layerStyles?.delta, width: deltaWidth.current } });
+          }}
+          onPointerCancel={() => {
+            deltaDrag.current = null;
+            setDeltaDragging(false);
+          }}
+        >
+          <span className={`mx-auto block h-full w-px transition-colors ${deltaDragging ? "bg-[#8b7cf6]" : "bg-transparent group-hover:bg-[#8b7cf6]/70"}`} />
+        </div>
+      )}
+      {deltaSelected && pane.deltaProfile && (
+        <>
+          <div
+            className="pointer-events-none absolute z-[7] rounded-sm ring-1 ring-[#8b7cf6]"
+            style={{ left: deltaSelected.left, top: deltaSelected.top, width: deltaSelected.width, height: deltaSelected.height }}
+          />
+          {/* Minibarra do Delta Horizontal (mesmo visual da do perfil lateral). */}
+          <div
+            ref={deltaBar}
+            data-side-bar
+            role="toolbar"
+            aria-label="Delta Horizontal"
+            className="absolute z-30 flex items-center gap-1 rounded-lg border bg-popover/95 px-2 py-1 shadow-lg"
+            style={{ right: deltaSelected.right, top: deltaSelected.top + 8 }}
+          >
+            <span className="px-1 text-xs text-muted-foreground">Delta Horizontal</span>
+            <ColorPicker
+              label="Cor do delta positivo"
+              open={deltaSelected.open === "pos"}
+              onOpenChange={(v) => setDeltaSelected((s) => s && { ...s, open: v ? "pos" : null })}
+              value={layerStyles?.delta?.pos ?? DELTA_DEFAULTS.pos}
+              onChange={(pos) => cb.current.onLayerStylesChange?.({ ...layerStyles, delta: { ...layerStyles?.delta, pos } })}
+            />
+            <ColorPicker
+              label="Cor do delta negativo"
+              open={deltaSelected.open === "neg"}
+              onOpenChange={(v) => setDeltaSelected((s) => s && { ...s, open: v ? "neg" : null })}
+              value={layerStyles?.delta?.neg ?? DELTA_DEFAULTS.neg}
+              onChange={(neg) => cb.current.onLayerStylesChange?.({ ...layerStyles, delta: { ...layerStyles?.delta, neg } })}
+            />
+            <button
+              type="button"
+              aria-label={pane.deltaIntegrated ? "Voltar para painel lateral" : "Integrar ao gráfico"}
+              title={pane.deltaIntegrated ? "Voltar para painel lateral" : "Integrar ao gráfico"}
+              onClick={() => {
+                cb.current.onDeltaIntegratedChange?.(!pane.deltaIntegrated);
+                setDeltaSelected(null);
+              }}
+              className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-4"
+            >
+              {pane.deltaIntegrated ? <ChevronRight /> : <ChevronLeft />}
+            </button>
+            <button type="button" aria-label="Fechar" title="Fechar" onClick={() => setDeltaSelected(null)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
               ×
             </button>
           </div>
