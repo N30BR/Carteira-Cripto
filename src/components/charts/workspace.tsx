@@ -5,16 +5,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FLUSH_PENDING_EVENT } from "@/lib/modules";
 import {
   AlignRight,
+  ArrowLeftRight,
   ArrowDown,
   ArrowUp,
   Eye,
   EyeOff,
   Flame,
+  Grid3x3,
   LayoutGrid,
   ListTree,
   Magnet,
   Plus,
   Search,
+  SeparatorHorizontal,
   Settings2,
   Star,
   Trash2,
@@ -32,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import {
   createChartTabAction,
   deleteChartTabAction,
+  reorderChartTabsAction,
   renameChartTabAction,
   saveChartPrefsAction,
   saveChartTabAction,
@@ -82,6 +86,7 @@ import { matches } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import type { CompareAction, IndicatorAction, PaneHandle } from "./chart-pane";
 import { CompareSettingsDialog, compareLabel } from "./compare-ui";
+import { LayerSettingsDialog, type LayerKind } from "./layer-settings";
 import { compareDisplay } from "@/lib/charts/compare";
 import {
   IndicatorMenu,
@@ -724,6 +729,56 @@ export function ChartWorkspace({
     else if (a.action === "down") patch({ display: "sub" });
     else if (a.action === "up") patch({ display: "main" });
   }
+  // ---------- Reordenar abas (arrastar e soltar) ----------
+  const [tabDrag, setTabDrag] = useState<{ id: number; order: number[]; active: boolean } | null>(null);
+  const tabDragEnd = useRef(0);
+  const startTabDrag = (e: React.PointerEvent, id: number) => {
+    if (e.button !== 0) return;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const base = tabs.map((x) => x.id);
+    let order = base;
+    let active = false;
+    const move = (ev: PointerEvent) => {
+      if (!active) {
+        if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 6) return;
+        active = true;
+        document.body.style.cursor = "grabbing";
+      }
+      ev.preventDefault();
+      // Aba sob o cursor: entra antes ou depois dela, conforme a metade em que o cursor está.
+      const over = (document.elementFromPoint(ev.clientX, ev.clientY) as Element | null)?.closest?.("[data-tab-id]");
+      const overId = over ? Number(over.getAttribute("data-tab-id")) : NaN;
+      if (Number.isFinite(overId) && overId !== id) {
+        const r = over!.getBoundingClientRect();
+        const rest = order.filter((x) => x !== id);
+        const at = rest.indexOf(overId) + (ev.clientX > r.left + r.width / 2 ? 1 : 0);
+        const next = [...rest.slice(0, at), id, ...rest.slice(at)];
+        if (next.join() !== order.join()) order = next;
+      }
+      setTabDrag({ id, order, active: true });
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      document.body.style.cursor = "";
+      setTabDrag(null);
+      if (!active) return;
+      tabDragEnd.current = Date.now();
+      if (order.join() === base.join()) return;
+      // Só a posição muda: cada aba guarda o próprio estado (identificador estável); nada é recriado.
+      setTabs((prev) => order.map((oid) => prev.find((x) => x.id === oid)).filter((x): x is (typeof prev)[number] => !!x));
+      void safeAction(() => reorderChartTabsAction(order)).then((r) => {
+        if (r && !r.ok) toast.error(r.error);
+      });
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  };
+  // Configurações das camadas de volume e fluxo (clique direito nos botões).
+  const [layerSettings, setLayerSettings] = useState<LayerKind | null>(null);
   // Pares favoritos: preferência da conta, a mesma para todos os gráficos (só a lista muda; nenhum gráfico troca de par).
   const toggleFavoriteSymbol = (id: string) => {
     const cur = tools.favoriteSymbols ?? [];
@@ -775,22 +830,37 @@ export function ChartWorkspace({
         role="tablist"
         aria-label="Abas de gráficos"
       >
-        {tabs.map((t) => (
+        {(tabDrag?.order
+          ? tabDrag.order
+              .map((id) => tabs.find((x) => x.id === id))
+              .filter((x): x is (typeof tabs)[number] => !!x)
+          : tabs
+        ).map((t) => (
           <div
             key={t.id}
             role="tab"
             aria-selected={t.id === tab.id}
+            data-tab-id={t.id}
+            // Arrastar para reordenar (só depois de alguns pixels: o clique continua abrindo a aba; o X não arrasta).
+            onPointerDown={(e) => startTabDrag(e, t.id)}
             className={cn(
-              "group flex items-center gap-1 rounded-md border px-2.5 py-1 text-sm",
+              "group flex touch-none items-center gap-1 rounded-md border px-2.5 py-1 text-sm select-none",
               t.id === tab.id
                 ? "border-[#8b7cf6] bg-muted font-medium"
                 : "text-muted-foreground hover:text-foreground",
+              tabDrag?.active &&
+                tabDrag.id === t.id &&
+                "cursor-grabbing opacity-80 ring-1 ring-[#8b7cf6]/70",
             )}
           >
             {/* Nome = par do gráfico da aba (muda na hora ao trocar o par); nome dado pela pessoa continua valendo. */}
             <button
               type="button"
-              onClick={() => selectTab(t.id)}
+              onClick={() => {
+                // Fim de um arraste: não conta como clique.
+                if (Date.now() - tabDragEnd.current < 250) return;
+                selectTab(t.id);
+              }}
               onDoubleClick={() => renameTab(t)}
               title={`${tabTitle(t).full} — clique duas vezes para renomear`}
               className="max-w-40 truncate"
@@ -800,6 +870,7 @@ export function ChartWorkspace({
             <button
               type="button"
               aria-label={`Fechar ${tabTitle(t).label}`}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={() => closeTab(t)}
               className="opacity-50 hover:opacity-100"
             >
@@ -869,6 +940,25 @@ export function ChartWorkspace({
         <FavoritesBar prefs={tools} activeTool={activeTool} onDraw={draw} />
         <div className="ml-auto flex items-center gap-1.5">
           {/* Mapa de liquidações e perfil lateral de liquidez (independentes; valem para o gráfico selecionado). */}
+          {/* Volume e fluxo, nesta ordem (independentes): perfil lateral, marcações POC/VAH/VAL, mapa de liquidações,
+              Delta Horizontal e Footprint. Clique direito nos três novos: configurações. */}
+          <LayerToggle
+            on={!!pane.sideProfile}
+            onToggle={() => updatePane({ sideProfile: !pane.sideProfile })}
+            labelOn="Ocultar perfil lateral"
+            labelOff="Mostrar perfil lateral"
+          >
+            <AlignRight />
+          </LayerToggle>
+          <LayerToggle
+            on={!!pane.sideMarks}
+            onToggle={() => updatePane({ sideMarks: !pane.sideMarks })}
+            onSettings={() => setLayerSettings("marks")}
+            labelOn="Ocultar marcações POC/VAH/VAL"
+            labelOff="Mostrar marcações POC/VAH/VAL"
+          >
+            <SeparatorHorizontal />
+          </LayerToggle>
           <LayerToggle
             on={!!pane.liqMap}
             onToggle={() => updatePane({ liqMap: !pane.liqMap })}
@@ -878,12 +968,22 @@ export function ChartWorkspace({
             <Flame />
           </LayerToggle>
           <LayerToggle
-            on={!!pane.sideProfile}
-            onToggle={() => updatePane({ sideProfile: !pane.sideProfile })}
-            labelOn="Ocultar perfil lateral"
-            labelOff="Mostrar perfil lateral"
+            on={!!pane.deltaProfile}
+            onToggle={() => updatePane({ deltaProfile: !pane.deltaProfile })}
+            onSettings={() => setLayerSettings("delta")}
+            labelOn="Ocultar Delta Horizontal"
+            labelOff="Mostrar Delta Horizontal"
           >
-            <AlignRight />
+            <ArrowLeftRight />
+          </LayerToggle>
+          <LayerToggle
+            on={!!pane.footprint}
+            onToggle={() => updatePane({ footprint: !pane.footprint })}
+            onSettings={() => setLayerSettings("footprint")}
+            labelOn="Ocultar delta na barra de preço (Footprint)"
+            labelOff="Mostrar delta na barra de preço (Footprint)"
+          >
+            <Grid3x3 />
           </LayerToggle>
           {/* Botão A/N do gráfico selecionado: A = ajuste automático da escala de preço; N = enquadramento manual. */}
           <button
@@ -1076,6 +1176,7 @@ export function ChartWorkspace({
                 updatePaneOf(tab.id, i, { sideWidth })
               }
               sideColorsDefault={tools.sideColors}
+              layerStyles={tools.layerStyles}
               onSideIntegratedChange={(sideIntegrated) =>
                 updatePaneOf(tab.id, i, { sideIntegrated })
               }
@@ -1142,6 +1243,12 @@ export function ChartWorkspace({
         favorites={tools.favoriteSymbols ?? []}
         onFavorite={toggleFavoriteSymbol}
         onPick={(symbol) => (updatePane({ symbol }), setDialog(null))}
+      />
+      <LayerSettingsDialog
+        kind={layerSettings}
+        styles={tools.layerStyles}
+        onClose={() => setLayerSettings(null)}
+        onApply={(layerStyles) => changePrefs({ ...tools, layerStyles })}
       />
       <IndicatorsDialog
         open={dialog === "indicators"}
@@ -1309,12 +1416,15 @@ const QUOTE_TABS = [...CHART_QUOTES, "Mercado"] as const;
 function LayerToggle({
   on,
   onToggle,
+  onSettings,
   labelOn,
   labelOff,
   children,
 }: {
   on: boolean;
   onToggle: () => void;
+  /** Clique direito: configurações da camada. */
+  onSettings?: () => void;
   labelOn: string;
   labelOff: string;
   children: React.ReactNode;
@@ -1325,6 +1435,14 @@ function LayerToggle({
       <button
         type="button"
         onClick={onToggle}
+        onContextMenu={
+          onSettings
+            ? (e) => {
+                e.preventDefault();
+                onSettings();
+              }
+            : undefined
+        }
         aria-pressed={on}
         aria-label={label}
         className={cn(
@@ -1341,6 +1459,9 @@ function LayerToggle({
         className="pointer-events-none absolute top-full left-1/2 z-40 mt-1.5 hidden -translate-x-1/2 rounded-md border border-border bg-zinc-800/95 px-2 py-1 text-xs whitespace-nowrap text-zinc-100 shadow-lg group-focus-within:block group-hover:block"
       >
         {label}
+        {onSettings && (
+          <span className="ml-1 text-zinc-400">· clique direito: configurações</span>
+        )}
       </span>
     </span>
   );

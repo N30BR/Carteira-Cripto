@@ -19,6 +19,9 @@ import { SIDE_WIDTH_MAX, SIDE_WIDTH_MIN } from "@/lib/charts/workspace";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ColorPicker } from "./object-ui";
 import { PROFILE_BUY, PROFILE_SELL } from "./profile";
+import { DELTA_PROF, FOOTPRINT, MARKS, SIDE_INT, deltaHit, fmtFlow, footHit } from "./flow-layers";
+import { pickSubInterval } from "@/lib/charts/flow";
+import type { LayerStyles } from "@/lib/charts/workspace";
 import { LIQ_MAP, SIDE_WIDTH, drawSideProfile, liqMapHit, mapTipLines, sideHit, sideTipLines } from "./liq-layers";
 import { findBarIndex } from "@/lib/charts/drawing";
 import { ema, sma } from "@/lib/charts/indicators";
@@ -375,6 +378,7 @@ export function ChartPane({
   onSideWidthChange,
   onSideColorsChange,
   onSideIntegratedChange,
+  layerStyles,
   sideColorsDefault,
   styleDefaults,
   onStyleDefault,
@@ -385,6 +389,8 @@ export function ChartPane({
   onSideWidthChange?: (width: number) => void;
   /** Cores do perfil lateral escolhidas pela seleção dele (salvas na conta). */
   onSideColorsChange?: (colors: { buy?: string; sell?: string }) => void;
+  /** Estilos das camadas de fluxo (marcações, Delta Horizontal, Footprint), da conta. */
+  layerStyles?: LayerStyles;
   /** Perfil lateral integrado ao gráfico (true) ou em painel próprio (false); salvo no gráfico. */
   onSideIntegratedChange?: (integrated: boolean) => void;
   /** Cores do perfil lateral da conta (valem quando o gráfico não tem as suas, de versões antigas). */
@@ -1027,7 +1033,8 @@ export function ChartPane({
     if (!c) return;
     // Instrumentos de mercado só têm um valor por dia: sempre linha/área (velas seriam inventadas).
     const lineOnly = isMarketId(pane.symbol);
-    const type = lineOnly ? "area" : pane.chartType === "candle" ? "candle_solid" : pane.chartType === "ohlc" ? "ohlc" : "area";
+    // Footprint ligado: vela vazada (contorno e pavio), para o fluxo por preço aparecer dentro dela.
+    const type = lineOnly ? "area" : pane.chartType === "candle" ? (pane.footprint ? "candle_stroke" : "candle_solid") : pane.chartType === "ohlc" ? "ohlc" : "area";
     c.setStyles({
       candle: {
         type,
@@ -1037,7 +1044,7 @@ export function ChartPane({
     c.overrideYAxis({ paneId: "candle_pane", name: pane.scale === "logarithm" ? LOG_AXIS : pane.scale });
     fitOnce(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.chartType, pane.scale, pane.symbol]);
+  }, [pane.chartType, pane.scale, pane.symbol, pane.footprint]);
 
   // Botão A/N: A liga o ajuste automático na hora (reenquadra os dados visíveis); N congela o enquadramento atual.
   useEffect(() => {
@@ -1207,6 +1214,97 @@ export function ChartPane({
     };
   }, [pane.liqMap, pane.sideProfile, pane.sideWidth, pane.sideIntegrated, pane.symbol, pane.interval]);
 
+  // ---------- Camadas de volume e fluxo (botões próprios, independentes) ----------
+  const flowSub = useRef<{ key: string; subId: string; bars: KLineData[]; from: number; to: number; at: number } | null>(null);
+  useEffect(() => {
+    const c = chart.current;
+    if (!c) return;
+    const want: Record<string, boolean> = {
+      [SIDE_INT]: !!pane.sideProfile && !!pane.sideIntegrated,
+      [MARKS]: !!pane.sideMarks,
+      [DELTA_PROF]: !!pane.deltaProfile,
+      [FOOTPRINT]: !!pane.footprint,
+    };
+    // Atrás das velas: perfil integrado (mais ao fundo) e Delta Horizontal. Por cima: marcações e Footprint.
+    const z: Record<string, number> = { [SIDE_INT]: -3, [DELTA_PROF]: -2, [MARKS]: 900, [FOOTPRINT]: 800 };
+    const reserve = pane.sideProfile ? (pane.sideWidth ?? SIDE_WIDTH) : 0;
+    const extend = (name: string): Record<string, unknown> => {
+      const sub = flowSub.current?.key === `${pane.symbol}|${pane.interval}` ? flowSub.current : null;
+      if (name === SIDE_INT) return { width: pane.sideWidth ?? SIDE_WIDTH, buy: sideColorsNow?.buy, sell: sideColorsNow?.sell };
+      if (name === MARKS) return { ...layerStyles?.marks, reserve };
+      if (name === DELTA_PROF) return { ...layerStyles?.delta, reserve, sub: sub?.bars, subId: sub?.subId };
+      return { style: layerStyles?.footprint, sub: sub?.bars, subId: sub?.subId, barMs: BAR_MS[pane.interval] };
+    };
+    for (const name of [SIDE_INT, MARKS, DELTA_PROF, FOOTPRINT]) {
+      const id = `bh_${name}`;
+      const exists = c.getIndicators({ id }).length > 0;
+      if (want[name] && !exists)
+        c.createIndicator({ id, name, zLevel: z[name], paneId: "candle_pane", extendData: extend(name), createTooltipDataSource: () => ({ name: "", calcParamsText: "", legends: [], features: [] }) } as never, true);
+      else if (want[name]) c.overrideIndicator({ id, name, extendData: extend(name) });
+      else if (exists) c.removeIndicator({ id });
+    }
+    if (!pane.deltaProfile && !pane.footprint) return;
+    // Velas menores do trecho visível (compras/vendas agressoras reais), pedidas aos poucos e guardadas por par/tempo.
+    let cancelled = false;
+    let busy = false;
+    const key = `${pane.symbol}|${pane.interval}`;
+    const barMs = BAR_MS[pane.interval];
+    const push = () => {
+      for (const name of [DELTA_PROF, FOOTPRINT]) {
+        const id = `bh_${name}`;
+        if (c.getIndicators({ id }).length) c.overrideIndicator({ id, name, extendData: extend(name) });
+      }
+    };
+    const check = async () => {
+      if (cancelled || busy || !barMs) return;
+      const list = c.getDataList();
+      if (list.length < 2) return;
+      const step = list[list.length - 1].timestamp - list[list.length - 2].timestamp;
+      if (step < barMs * 0.5 || step > barMs * 1.6) return;
+      const r = c.getVisibleRange();
+      const a = list[Math.max(0, r.from)]?.timestamp;
+      const zIdx = Math.min(list.length - 1, r.to - 1);
+      const zTs = list[zIdx]?.timestamp;
+      if (typeof a !== "number" || typeof zTs !== "number") return;
+      const sub = pickSubInterval(barMs, zTs + barMs - a);
+      if (!sub) {
+        flowSub.current = { key, subId: "none", bars: [], from: a, to: zTs, at: Date.now() };
+        return push();
+      }
+      const cur = flowSub.current?.key === key && flowSub.current.subId === sub.id ? flowSub.current : null;
+      const live = zIdx >= list.length - 1;
+      // Já cobre o trecho nas duas pontas (e, no fim do gráfico, foi atualizado há menos de 30 s): nada a fazer.
+      if (cur && cur.from <= a && cur.to >= zTs && (!live || Date.now() - cur.at < 30_000)) return;
+      busy = true;
+      try {
+        const bars = new Map<number, KLineData>((cur?.bars ?? []).map((b) => [b.timestamp, b]));
+        let end: number | null = live ? null : zTs + barMs;
+        for (let page = 0; page < 6; page++) {
+          const got = await loadCandles(pane.symbol, sub.id as ChartInterval, end, 1000);
+          if (cancelled) return;
+          for (const b of got) bars.set(b.timestamp, b);
+          const oldest = got[0]?.timestamp;
+          if (!got.length || typeof oldest !== "number" || oldest <= a || (cur && cur.from <= a && oldest <= cur.to)) break;
+          end = oldest - 1;
+        }
+        const sorted = [...bars.values()].sort((x, y) => x.timestamp - y.timestamp).slice(-12000);
+        flowSub.current = { key, subId: sub.id, bars: sorted, from: Math.max(sorted[0]?.timestamp ?? a, Math.min(a, cur?.from ?? a)), to: Math.max(zTs, cur?.to ?? zTs), at: Date.now() };
+        push();
+      } catch (e) {
+        if (!cancelled) cb.current.onError(`Fluxo por preço: ${e instanceof Error ? e.message : "indisponível"}`);
+        cancelled = true;
+      } finally {
+        busy = false;
+      }
+    };
+    void check();
+    const timer = setInterval(() => void check(), 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pane.sideProfile, pane.sideIntegrated, pane.sideMarks, pane.deltaProfile, pane.footprint, pane.sideWidth, pane.symbol, pane.interval, layerStyles, sideColorsNow]);
+
   // Perfil de volume lateral: tela própria colada à direita da área do preço, por cima de tudo, com o cálculo da
   // ferramenta Faixa Fixa sobre as velas e a faixa de preço visíveis. Redesenha só quando muda algo (velas, janela
   // visível, escala de preço ou tamanho).
@@ -1221,7 +1319,7 @@ export function ChartPane({
       raf = requestAnimationFrame(loop);
       const c = chart.current;
       const cv = sideCanvas.current;
-      if (!c || !cv) return;
+      if (!c) return;
       const size = c.getSize("candle_pane", "main");
       if (!size || size.width <= 0 || size.height <= 0) return;
       const W = Math.min(sideWidth.current, size.width * 0.6);
@@ -1241,6 +1339,18 @@ export function ChartPane({
       lastKey = key;
       const left = size.left + size.width - W;
       sideBox.current = { left, top: size.top };
+      const handleEl = sideHandle.current;
+      if (handleEl) {
+        handleEl.style.left = `${left - 4}px`;
+        handleEl.style.top = `${size.top}px`;
+        handleEl.style.height = `${H}px`;
+      }
+      // Integrado: a camada de dentro do gráfico desenha (atrás das velas); a tela própria fica vazia.
+      if (!cv) return;
+      if (sideIntegratedRef.current) {
+        cv.getContext("2d")?.clearRect(0, 0, cv.width, cv.height);
+        return;
+      }
       cv.style.left = `${left}px`;
       cv.style.top = `${size.top}px`;
       const handle = sideHandle.current;
@@ -1641,7 +1751,7 @@ export function ChartPane({
       }}
       onMouseMove={(e) => {
         const clear = () => tip && setTip(null);
-        if ((!pane.sideProfile && !pane.liqMap) || !el.current || e.buttons || sideDrag.current) return clear();
+        if ((!pane.sideProfile && !pane.liqMap && !pane.deltaProfile && !pane.footprint) || !el.current || e.buttons || sideDrag.current) return clear();
         const r = el.current.getBoundingClientRect();
         const x = e.clientX - r.left;
         const y = e.clientY - r.top;
@@ -1655,7 +1765,49 @@ export function ChartPane({
             setTip({ id, x: r.width - x + 12, y, side: "right", title: "Perfil de volume · clique para selecionar e mudar as cores", lines: sideTipLines(h) });
           return;
         }
-        const size = pane.liqMap ? chart.current?.getSize("candle_pane", "main") : null;
+        const area = chart.current?.getSize("candle_pane", "main");
+        if (area && (pane.footprint || pane.deltaProfile)) {
+          const fx = x - area.left;
+          const fy = y - area.top;
+          const fh = pane.footprint ? footHit(fx, fy) : null;
+          if (fh) {
+            const id = `f${fh.time}|${fh.from}`;
+            if (tip?.id !== id)
+              setTip({
+                id,
+                x: x > r.width - 280 ? r.width - x + 14 : x + 14,
+                y,
+                side: x > r.width - 280 ? "right" : "left",
+                title: "Footprint (aproximado)",
+                lines: [
+                  ["Faixa", `${fh.from.toLocaleString("pt-BR")} – ${fh.to.toLocaleString("pt-BR")}`],
+                  ["Compras · vendas agressoras", `${fmtFlow(fh.buy)} · ${fmtFlow(fh.sell)}`],
+                  ["Delta do nível", fmtFlow(fh.buy - fh.sell)],
+                  ["Vela: delta · volume", `${fmtFlow(fh.candle.delta)} · ${fmtFlow(fh.candle.volume)}`],
+                ],
+              });
+            return;
+          }
+          const dh = pane.deltaProfile ? deltaHit(fx, fy) : null;
+          if (dh) {
+            const id = `d${dh.from}`;
+            if (tip?.id !== id || Math.abs(tip.y - y) > 2)
+              setTip({
+                id,
+                x: r.width - x + 14,
+                y,
+                side: "right",
+                title: `Delta por preço (${dh.res})`,
+                lines: [
+                  ["Faixa", `${dh.from.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} – ${dh.to.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}`],
+                  ["Compras · vendas agressoras", `${fmtFlow(dh.buy)} · ${fmtFlow(dh.sell)}`],
+                  ["Delta", fmtFlow(dh.buy - dh.sell)],
+                ],
+              });
+            return;
+          }
+        }
+        const size = pane.liqMap ? area : null;
         const h = size ? liqMapHit(x - size.left, y - size.top) : null;
         if (!h) return clear();
         const id = `m${h.time}|${h.from}`;

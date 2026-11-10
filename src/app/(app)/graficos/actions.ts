@@ -3,7 +3,7 @@
 import { getDb } from "@/db/client";
 import { requireModule } from "@/lib/auth/modules";
 import { allowChartChange } from "@/lib/charts/limit";
-import { createChartTab, deleteChartTab, renameChartTab, saveChartPrefs, saveChartTab, type Result } from "@/lib/charts/store";
+import { createChartTab, deleteChartTab, renameChartTab, reorderChartTabs, saveChartPrefs, saveChartTab, type Result } from "@/lib/charts/store";
 import { LIMITS } from "@/lib/charts/workspace";
 import { validateLabel } from "@/lib/validation";
 
@@ -48,6 +48,13 @@ export async function deleteChartTabAction(id: number): Promise<Result> {
   if ("ok" in u) return u;
   if (!Number.isInteger(id)) return NOT_FOUND;
   return deleteChartTab(getDb(), u.id, id);
+}
+
+/** Nova ordem das abas (arrastar e soltar). */
+export async function reorderChartTabsAction(ids: unknown): Promise<Result> {
+  const u = await begin();
+  if ("ok" in u) return u;
+  return reorderChartTabs(getDb(), u.id, ids);
 }
 
 export async function saveChartPrefsAction(tools: unknown, activeTabId: number | null): Promise<Result> {

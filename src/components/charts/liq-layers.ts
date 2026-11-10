@@ -260,10 +260,11 @@ export function sideTipLines(h: SideHit): [string, string][] {
  */
 export function drawSideProfile(
   ctx: CanvasRenderingContext2D,
-  o: { key: string; width: number; height: number; lo: number; hi: number; from: number; to: number; data: KLineData[]; yOf: (price: number) => number; buyColor?: string; sellColor?: string; integrated?: boolean },
+  o: { key: string; width: number; height: number; lo: number; hi: number; from: number; to: number; data: KLineData[]; yOf: (price: number) => number; buyColor?: string; sellColor?: string; integrated?: boolean; noClear?: boolean },
 ): void {
   const { width: W, height, yOf } = o;
-  ctx.clearRect(0, 0, W, height);
+  // Desenhando dentro do gráfico (integrado, atrás das velas): não apaga o que já está ali.
+  if (!o.noClear) ctx.clearRect(0, 0, W, height);
   // Painel isolado: fundo e borda próprios. Integrado ao gráfico: sem fundo (as barras ficam sobre o gráfico).
   if (!o.integrated) {
     ctx.fillStyle = "rgba(9, 9, 11, 0.94)";

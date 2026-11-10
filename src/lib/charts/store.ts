@@ -67,6 +67,21 @@ export function deleteChartTab(db: Db, userId: number, id: number): Result {
   return { ok: true };
 }
 
+/**
+ * Nova ordem das abas (arrastar e soltar): a lista precisa ter exatamente as abas da pessoa (sem repetir, sem faltar,
+ * sem abas de outra conta). Só a posição muda; o conteúdo de cada aba fica como está.
+ */
+export function reorderChartTabs(db: Db, userId: number, ids: unknown): Result {
+  if (!Array.isArray(ids) || ids.length > LIMITS.tabs || !ids.every((x) => Number.isInteger(x))) return { ok: false, error: "Ordem inválida" };
+  const mine = db.select({ id: chartTabs.id }).from(chartTabs).where(eq(chartTabs.userId, userId)).all().map((r) => r.id);
+  const wanted = ids as number[];
+  if (wanted.length !== mine.length || new Set(wanted).size !== wanted.length || !wanted.every((id) => mine.includes(id))) return { ok: false, error: "Ordem inválida" };
+  db.transaction((tx) => {
+    wanted.forEach((id, position) => tx.update(chartTabs).set({ position }).where(eq(chartTabs.id, id)).run());
+  });
+  return { ok: true };
+}
+
 export function getChartPrefs(db: Db, userId: number): { tools: ToolPrefs; activeTabId: number | null } {
   const row = db.select().from(chartPrefs).where(eq(chartPrefs.userId, userId)).get();
   if (!row) return { tools: defaultPrefs(), activeTabId: null };

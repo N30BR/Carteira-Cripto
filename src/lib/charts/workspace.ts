@@ -235,6 +235,12 @@ export type PaneState = {
   sideWidth?: number;
   /** Perfil lateral integrado ao gráfico (sem painel próprio: barras sobre a borda direita do gráfico). */
   sideIntegrated?: boolean;
+  /** Linhas POC, VAH e VAL do perfil lateral (independentes do histograma estar visível). */
+  sideMarks?: boolean;
+  /** Delta Horizontal: delta (compras − vendas agressoras) por faixa de preço no trecho visível. */
+  deltaProfile?: boolean;
+  /** Delta na barra de preço (Volume Footprint): compras e vendas agressoras por preço dentro de cada vela. */
+  footprint?: boolean;
   /** Cores do perfil lateral (compras e vendas, com opacidade), escolhidas clicando nas barras. Só o desenho. */
   sideColors?: { buy?: string; sell?: string };
   /** Zoom e posição salvos por par e tempo (voltam ao reabrir a aba, a página ou o mesmo par). Mais recente primeiro. */
@@ -269,6 +275,8 @@ export type ToolPrefs = {
   indicatorDefaults?: Record<string, IndicatorVisual>;
   /** Cores do perfil lateral (barras verdes/compras e vermelhas/vendas, com opacidade): da conta, em todos os gráficos. */
   sideColors?: { buy?: string; sell?: string };
+  /** Estilos das camadas de fluxo (marcações, Delta Horizontal, Footprint): da conta. */
+  layerStyles?: LayerStyles;
   /** Ferramentas que já existiam quando as preferências foram salvas (as criadas depois entram visíveis). */
   known?: string[];
   /** Modelo para gráficos novos: a configuração do gráfico de referência (1º gráfico da aba indicada). */
@@ -477,6 +485,110 @@ function sanitizeIndicatorDefaults(v: unknown): Record<string, IndicatorVisual> 
     }
     for (const k of ["upColor", "downColor"] as const) if (typeof raw[k] === "string" && COLOR.test(raw[k] as string)) item[k] = raw[k] as string;
     if (Object.keys(item).length) out[name] = item;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Estilo de uma linha de marcação (POC/VAH/VAL). */
+export type MarkStyle = { color?: string; size?: number; style?: LineStyleName; label?: boolean };
+export type FootprintStyle = {
+  rowMode?: "auto" | "atr" | "count";
+  levels?: number;
+  atrPeriod?: number;
+  mode?: "bidask" | "delta" | "volume";
+  gradient?: boolean;
+  buyColor?: string;
+  sellColor?: string;
+  textColor?: string;
+  imbColor?: string;
+  showValueArea?: boolean;
+  valueAreaPct?: number;
+  showPoc?: boolean;
+  showImbalance?: boolean;
+  imbalancePct?: number;
+  imbalanceMin?: number;
+  stackedMin?: number;
+  minVolume?: number;
+  hideZeros?: boolean;
+  summary?: boolean;
+};
+export type LayerStyles = {
+  marks?: { poc?: MarkStyle; vah?: MarkStyle; val?: MarkStyle };
+  delta?: { width?: number; pos?: string; neg?: string };
+  footprint?: FootprintStyle;
+};
+export const FOOTPRINT_DEFAULTS: Required<FootprintStyle> = {
+  rowMode: "auto",
+  levels: 12,
+  atrPeriod: 14,
+  mode: "bidask",
+  gradient: true,
+  buyColor: "#14b8a6",
+  sellColor: "#ef4444",
+  textColor: "#e4e4e7",
+  imbColor: "#facc15",
+  showValueArea: true,
+  valueAreaPct: 70,
+  showPoc: true,
+  showImbalance: true,
+  imbalancePct: 300,
+  imbalanceMin: 0,
+  stackedMin: 3,
+  minVolume: 0,
+  hideZeros: true,
+  summary: true,
+};
+export const MARK_DEFAULTS: Record<"poc" | "vah" | "val", Required<MarkStyle>> = {
+  poc: { color: "#facc15", size: 1, style: "dashed", label: true },
+  vah: { color: "#60a5fa", size: 1, style: "dashed", label: true },
+  val: { color: "#60a5fa", size: 1, style: "dashed", label: true },
+};
+export const DELTA_DEFAULTS = { width: 160, pos: "#14b8a6cc", neg: "#ef4444cc" };
+
+function sanitizeLayerStyles(v: unknown): LayerStyles | undefined {
+  if (!isObj(v)) return undefined;
+  const out: LayerStyles = {};
+  const color = (x: unknown) => (typeof x === "string" && COLOR.test(x) ? x : undefined);
+  const num = (x: unknown, lo: number, hi: number) => (typeof x === "number" && Number.isFinite(x) && x >= lo && x <= hi ? x : undefined);
+  const clean = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== undefined)) as T;
+  if (isObj(v.marks)) {
+    const marks: NonNullable<LayerStyles["marks"]> = {};
+    for (const k of ["poc", "vah", "val"] as const) {
+      const m = (v.marks as Record<string, unknown>)[k];
+      if (!isObj(m)) continue;
+      const st = clean({ color: color(m.color), size: num(m.size, 0.5, 6), style: oneOf(LINE_STYLES, m.style) ? m.style : undefined, label: isBool(m.label) ? m.label : undefined });
+      if (Object.keys(st).length) marks[k] = st;
+    }
+    if (Object.keys(marks).length) out.marks = marks;
+  }
+  if (isObj(v.delta)) {
+    const d = clean({ width: num(v.delta.width, 60, 600), pos: color(v.delta.pos), neg: color(v.delta.neg) });
+    if (Object.keys(d).length) out.delta = d;
+  }
+  if (isObj(v.footprint)) {
+    const p = v.footprint;
+    const fp = clean<FootprintStyle>({
+      rowMode: oneOf(["auto", "atr", "count"] as const, p.rowMode) ? p.rowMode : undefined,
+      levels: num(p.levels, 2, 60),
+      atrPeriod: num(p.atrPeriod, 2, 200),
+      mode: oneOf(["bidask", "delta", "volume"] as const, p.mode) ? p.mode : undefined,
+      gradient: isBool(p.gradient) ? p.gradient : undefined,
+      buyColor: color(p.buyColor),
+      sellColor: color(p.sellColor),
+      textColor: color(p.textColor),
+      imbColor: color(p.imbColor),
+      showValueArea: isBool(p.showValueArea) ? p.showValueArea : undefined,
+      valueAreaPct: num(p.valueAreaPct, 10, 100),
+      showPoc: isBool(p.showPoc) ? p.showPoc : undefined,
+      showImbalance: isBool(p.showImbalance) ? p.showImbalance : undefined,
+      imbalancePct: num(p.imbalancePct, 100, 2000),
+      imbalanceMin: num(p.imbalanceMin, 0, 1e12),
+      stackedMin: num(p.stackedMin, 2, 20),
+      minVolume: num(p.minVolume, 0, 1e12),
+      hideZeros: isBool(p.hideZeros) ? p.hideZeros : undefined,
+      summary: isBool(p.summary) ? p.summary : undefined,
+    });
+    if (Object.keys(fp).length) out.footprint = fp;
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -739,7 +851,7 @@ function sanitizePane(v: unknown): R<PaneState> {
     if (!r.ok) return r;
     compares.push(r.value);
   }
-  for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile", "sideIntegrated"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
+  for (const k of ["legendCollapsed", "showOhlc", "autoScale", "liqMap", "sideProfile", "sideIntegrated", "sideMarks", "deltaProfile", "footprint"] as const) if (v[k] !== undefined && !isBool(v[k])) return fail("Gráfico inválido");
   if (v.sideWidth !== undefined && !(typeof v.sideWidth === "number" && Number.isInteger(v.sideWidth) && v.sideWidth >= SIDE_WIDTH_MIN && v.sideWidth <= SIDE_WIDTH_MAX)) return fail("Gráfico inválido");
   let sideColors: { buy?: string; sell?: string } | undefined;
   if (v.sideColors !== undefined) {
@@ -767,6 +879,9 @@ function sanitizePane(v: unknown): R<PaneState> {
       ...(v.sideProfile === undefined ? {} : { sideProfile: v.sideProfile as boolean }),
       ...(v.sideWidth === undefined ? {} : { sideWidth: v.sideWidth as number }),
       ...(v.sideIntegrated === undefined ? {} : { sideIntegrated: v.sideIntegrated as boolean }),
+      ...(v.sideMarks === undefined ? {} : { sideMarks: v.sideMarks as boolean }),
+      ...(v.deltaProfile === undefined ? {} : { deltaProfile: v.deltaProfile as boolean }),
+      ...(v.footprint === undefined ? {} : { footprint: v.footprint as boolean }),
       ...(sideColors ? { sideColors } : {}),
       ...(views.length ? { views } : {}),
     },
@@ -838,6 +953,7 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
   const favoriteSymbols = [...new Set((Array.isArray(v.favoriteSymbols) ? v.favoriteSymbols : []).filter(isInstrumentId))].slice(0, MAX_FAVORITE_SYMBOLS);
   const styleDefaults = sanitizeStyleDefaults(v.styleDefaults, v.profileColors);
   const indicatorDefaults = sanitizeIndicatorDefaults(v.indicatorDefaults);
+  const layerStyles = sanitizeLayerStyles(v.layerStyles);
   const sideColors = isObj(v.sideColors)
     ? Object.fromEntries((["buy", "sell"] as const).flatMap((k) => (typeof (v.sideColors as Record<string, unknown>)[k] === "string" && COLOR.test((v.sideColors as Record<string, string>)[k]) ? [[k, (v.sideColors as Record<string, string>)[k]]] : [])))
     : {};
@@ -853,6 +969,7 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
       favoriteSymbols,
       ...(styleDefaults ? { styleDefaults } : {}),
       ...(indicatorDefaults ? { indicatorDefaults } : {}),
+      ...(layerStyles ? { layerStyles } : {}),
       ...(Object.keys(sideColors).length ? { sideColors: sideColors as { buy?: string; sell?: string } } : {}),
       known: CHART_TOOLS.map((t) => t.name),
       ...(template ? { template } : {}),
