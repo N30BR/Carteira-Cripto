@@ -7,7 +7,7 @@ import { createCardAccount, deleteCardAccount, setCardClosingDay, setCardDueDay,
 import { createCategory, deleteCategory, renameCategory, type Result } from "@/lib/cards/categories";
 import { planFromForm } from "@/lib/cards/installments";
 import { parseMonth } from "@/lib/cards/months";
-import { closeMonth, createExpense, deleteExpense, previewMonthClose, setInstallmentPaid, setInstallmentSettled, updateExpense, type MonthClosePreview } from "@/lib/cards/store";
+import { closeMonth, countAllExpenses, createExpense, deleteAllExpenses, deleteExpense, previewMonthClose, setInstallmentPaid, setInstallmentSettled, updateExpense, type MonthClosePreview } from "@/lib/cards/store";
 import { allowFiatChange } from "@/lib/fiat/limit";
 import { appTimeZone, brlToCents, cleanNotes, parseBalanceDate, todayIn, validateLabel } from "@/lib/validation";
 
@@ -221,4 +221,23 @@ export async function setCardClosingDayAction(id: number, day: number | null): P
   const r = setCardClosingDay(getDb(), user.id, id, day);
   refresh();
   return r;
+}
+
+/**
+ * Exclui todas as faturas da conta logada (não só o mês ou os filtros da tela). Exige a palavra "EXCLUIR"
+ * também aqui no servidor, além da janela de confirmação.
+ */
+export async function deleteAllExpensesAction(confirmWord: string): Promise<Result & { expenses?: number; installments?: number }> {
+  const user = await requireModule("invoices");
+  if (confirmWord !== "EXCLUIR") return { ok: false, error: "Confirmação inválida" };
+  if (!allowFiatChange(user.id)) return TOO_MANY;
+  if (countAllExpenses(getDb(), user.id).expenses === 0) return { ok: false, error: "Não há faturas para excluir" };
+  try {
+    const r = deleteAllExpenses(getDb(), user.id);
+    refresh();
+    return r;
+  } catch {
+    // A transação desfaz tudo: nada foi excluído.
+    return { ok: false, error: "Não foi possível excluir as faturas. Nada foi alterado; tente de novo." };
+  }
 }

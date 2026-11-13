@@ -17,6 +17,7 @@ import {
   deleteCardAccountAction,
   deleteCategoryAction,
   deleteExpenseAction,
+  deleteAllExpensesAction,
   renameCategoryAction,
   saveExpenseAction,
   setCardClosingDayAction,
@@ -167,5 +168,20 @@ describe("lançamentos", () => {
   test("limite de alterações por minuto", async () => {
     for (let i = 0; i < 60; i++) await createCategoryAction(`C${i}`);
     expect(await createCategoryAction("Extra")).toEqual({ ok: false, error: "Muitas alterações seguidas. Aguarde um minuto." });
+  });
+});
+
+describe("Excluir todas (ação)", () => {
+  test("exige EXCLUIR, apaga só as faturas da pessoa logada e recusa quando não há nenhuma", async () => {
+    await saveExpenseAction(null, form());
+    state.userId = other;
+    await saveExpenseAction(null, form({ accountId: 3 }));
+    state.userId = other - 1;
+    expect(await deleteAllExpensesAction("excluir")).toEqual({ ok: false, error: "Confirmação inválida" });
+    expect(mine()).toHaveLength(12);
+    expect(await deleteAllExpensesAction("EXCLUIR")).toEqual({ ok: true, expenses: 1, installments: 12 });
+    expect(mine()).toEqual([]);
+    expect(listInstallments(state.db as Db, other, "2000-01", "2099-12")).toHaveLength(12);
+    expect(await deleteAllExpensesAction("EXCLUIR")).toEqual({ ok: false, error: "Não há faturas para excluir" });
   });
 });

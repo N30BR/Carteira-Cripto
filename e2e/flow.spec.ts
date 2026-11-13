@@ -163,12 +163,15 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Excluir a conta escolhida no formulário: ele volta para a primeira conta
   await page.selectOption("#exp-account", { label: "Nubank" });
   await page.getByRole("button", { name: "Gerenciar contas" }).click();
-  page.once("dialog", (d) => d.accept());
   await page.getByRole("listitem").filter({ has: page.getByLabel("Nome da conta Nubank") }).getByRole("button", { name: "Excluir" }).click();
+  // Confirmação na janela do dashboard (não mais a caixa do navegador)
+  await page.getByRole("dialog", { name: "Excluir conta?" }).getByRole("button", { name: "Excluir" }).click();
+  await expect(page.getByRole("dialog", { name: "Excluir conta?" })).toHaveCount(0);
   await expect(page.getByLabel("Nome da conta Nubank")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("#exp-account option:checked")).toHaveText("Cartão PF");
-  await page.getByRole("button", { name: "Cancelar" }).click();
+  await expect(page.getByRole("dialog", { name: "Cartões / contas" })).toHaveCount(0);
+  await page.getByRole("dialog", { name: "Nova Fatura" }).getByRole("button", { name: "Cancelar" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // Lançamento de Transações: uma entrada e uma saída, na conta "Conta PF" do R$ (o saldo dela muda)
@@ -303,7 +306,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Trocar a cor e clicar fora UMA vez fecha o seletor (antes eram 2 ou 3 cliques)
   await page.getByTestId("object-toolbar").getByRole("button", { name: "Cor da linha" }).click();
   await page.getByRole("button", { name: "Cor #f23645" }).click();
-  await page.getByText(/\d+\/10 abas/).click();
+  await page.getByText(/\d+\/15 abas/).click();
   await expect(page.locator('[role="menu"][data-state="open"]')).toHaveCount(0);
   await page.keyboard.press("Control+d");
   await page.getByRole("button", { name: "Lista de desenhos" }).click();
@@ -439,6 +442,7 @@ test("login, cripto, fiduciário, moeda de referência e sair", async ({ page })
   // Sair
   await page.getByRole("button", { name: /admin/ }).click();
   await page.getByRole("menuitem", { name: "Sair" }).click();
+  await page.getByRole("dialog", { name: "Sair da conta?" }).getByRole("button", { name: "Sair da conta" }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/fiduciario");
   await expect(page).toHaveURL(/\/login$/);

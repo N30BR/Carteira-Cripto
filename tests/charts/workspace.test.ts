@@ -240,3 +240,18 @@ describe("comparações on-chain e aparência das comparações", () => {
     expect(cmp({ kind: "pair", id: "ETHUSDT", visible: "x" }).ok).toBe(false);
   });
 });
+
+describe("gráficos guardados além do layout", () => {
+  test("layout 1 guarda o 2º gráfico com o par e o tempo dele; ao voltar para 2, ele volta igual", () => {
+    const two = [
+      { ...defaultPane(), symbol: "XLMUSDT", interval: "1w" },
+      { ...defaultPane(), symbol: "XLMUSDT", interval: "1d" },
+    ];
+    const one = sanitizeTabState({ layout: 1, panes: two });
+    expect(one.ok && one.value.panes.map((p) => `${p.symbol}·${p.interval}`)).toEqual(["XLMUSDT·1w", "XLMUSDT·1d"]);
+    const back = sanitizeTabState({ layout: 2, panes: one.ok ? one.value.panes : [] });
+    expect(back.ok && back.value.panes.map((p) => p.interval)).toEqual(["1w", "1d"]);
+    // Gráficos guardados também são validados.
+    expect(sanitizeTabState({ layout: 1, panes: [two[0], { ...two[1], interval: "7x" }] }).ok).toBe(false);
+  });
+});

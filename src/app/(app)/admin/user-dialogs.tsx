@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import type { Result } from "@/lib/admin/users";
 import { safeAction } from "@/lib/safe-action";
 import { createUserAction, deleteUserAction, resetPasswordAction, unlockUserAction } from "./actions";
+import { confirmAction } from "@/components/confirm-dialog";
 
 function useResultForm(action: (fd: FormData) => Promise<Result>, success: string) {
   const [open, setOpen] = useState(false);
@@ -131,8 +132,8 @@ export function DeleteUserButton({ userId, username }: { userId: number; usernam
       variant="destructive"
       size="sm"
       disabled={pending}
-      onClick={() => {
-        if (!confirm(`Remover ${username}? A carteira dessa pessoa também será apagada.`)) return;
+      onClick={async () => {
+        if (!(await confirmAction({ title: "Remover usuário?", message: `Remover ${username}? A carteira dessa pessoa também será apagada.`, confirmLabel: "Remover" }))) return;
         start(async () => {
           const r = await safeAction(() => deleteUserAction(userId));
           if (r.ok) toast.success("Usuário removido");

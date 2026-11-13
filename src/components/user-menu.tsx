@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { logoutAction } from "@/app/(app)/actions";
+import { confirmAction } from "@/components/confirm-dialog";
 
 export function UserMenu({ username }: { username: string }) {
   return (
@@ -42,7 +43,17 @@ export function UserMenu({ username }: { username: string }) {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => logoutAction()}>
+        <DropdownMenuItem
+          onSelect={async () => {
+            const ok = await confirmAction({
+              title: "Sair da conta?",
+              message: "Tem certeza de que deseja sair do BlackHole Dashboard?",
+              confirmLabel: "Sair da conta",
+              destructive: false,
+            });
+            if (ok) await logoutAction();
+          }}
+        >
           <LogOut /> Sair
         </DropdownMenuItem>
       </DropdownMenuContent>

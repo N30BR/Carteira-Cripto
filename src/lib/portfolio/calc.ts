@@ -45,15 +45,23 @@ export function computePortfolio(holdings: Holding[], prices: Record<string, Cur
 
 export type Period = "1D" | "1S" | "1M" | "3M" | "6M" | "1A";
 export const PERIOD_OPTIONS: readonly Period[] = ["1D", "1S", "1M", "3M", "6M", "1A"];
+/** Só o gráfico do Portfólio tem também 2 anos (as outras abas seguem com PERIOD_OPTIONS). */
+export type PortfolioPeriod = Period | "2A";
+export const PORTFOLIO_PERIOD_OPTIONS: readonly PortfolioPeriod[] = [...PERIOD_OPTIONS, "2A"];
+export function parsePortfolioPeriod(raw: unknown): PortfolioPeriod {
+  return raw === "2A" ? "2A" : parsePeriod(raw);
+}
 
 const HOUR = 3600_000;
-export const PERIODS: Record<Period, { days: number; stepMs: number; sourceDays: 30 | 365 }> = {
+export const PERIODS: Record<PortfolioPeriod, { days: number; stepMs: number; sourceDays: 30 | 365 | 1000 }> = {
   "1D": { days: 1, stepMs: HOUR, sourceDays: 30 },
   "1S": { days: 7, stepMs: HOUR, sourceDays: 30 },
   "1M": { days: 30, stepMs: 4 * HOUR, sourceDays: 30 },
   "3M": { days: 90, stepMs: 24 * HOUR, sourceDays: 365 },
   "6M": { days: 182, stepMs: 24 * HOUR, sourceDays: 365 },
   "1A": { days: 365, stepMs: 24 * HOUR, sourceDays: 365 },
+  // 2 anos: velas diárias (o histórico de 1000 dias da Binance cobre os 730 dias).
+  "2A": { days: 730, stepMs: 24 * HOUR, sourceDays: 1000 },
 };
 
 /** Aceita também os nomes antigos (7D, 30D) de links salvos. */
@@ -70,7 +78,7 @@ export function buildCurve(
   holdings: Holding[],
   history: Record<string, PricePoint[]>,
   current: Record<string, CurrentPrice>,
-  period: Period,
+  period: PortfolioPeriod,
   now = new Date(),
 ): { points: { t: number; value: number }[]; missingHistory: string[] } {
   const priced = holdings.filter((h) => current[h.coinId]);

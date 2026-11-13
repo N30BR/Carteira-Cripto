@@ -4,7 +4,7 @@ import { ModulesEmpty } from "@/components/modules-empty";
 import { ensureDefaultAccounts, listCardAccounts } from "@/lib/cards/accounts";
 import { ensureDefaultCategories, listCategories } from "@/lib/cards/categories";
 import { parseMonth } from "@/lib/cards/months";
-import { listInstallments } from "@/lib/cards/store";
+import { countAllExpenses, listInstallments } from "@/lib/cards/store";
 import { openPurchases } from "@/lib/cards/summary";
 import { monthRange } from "@/lib/transactions/period";
 import { listTransactions } from "@/lib/transactions/store";
@@ -42,6 +42,7 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/lancame
         month={month}
         today={today}
         rows={showInvoices ? listInstallments(db, user.id, month, month) : []}
+        allInvoices={showInvoices ? countAllExpenses(db, user.id) : { expenses: 0, installments: 0 }}
         categories={showInvoices ? listCategories(db, user.id) : []}
         accounts={showInvoices ? listCardAccounts(db, user.id) : []}
         transactions={showTransactions ? listTransactions(db, user.id, from, to) : []}

@@ -136,7 +136,7 @@ export async function fetchTickers(ids: string[]): Promise<Record<string, Curren
  * Pede 2 velas a mais que o período: a primeira fecha um intervalo depois de abrir e a última ainda está aberta,
  * e sem essa folga o começo da curva ficaria sem preço (pico em zero no primeiro ponto).
  */
-export async function fetchKlines(id: string, days: 30 | 365): Promise<PricePoint[]> {
+export async function fetchKlines(id: string, days: 30 | 365 | 1000): Promise<PricePoint[]> {
   return fetchPairKlines(id + QUOTE, days);
 }
 

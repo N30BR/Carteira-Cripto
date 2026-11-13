@@ -9,6 +9,7 @@ import type { QuickNote } from "@/lib/todos/store";
 import { cn } from "@/lib/utils";
 import { convertQuickNoteAction, createQuickNoteAction, deleteQuickNoteAction, pinQuickNoteAction, updateQuickNoteAction } from "./actions";
 import { useRun } from "./ui";
+import { confirmAction } from "@/components/confirm-dialog";
 
 /** Notas rápidas independentes: criar, editar, fixar, excluir e virar tarefa. */
 export function QuickNotesPanel({ notes }: { notes: QuickNote[] }) {
@@ -91,7 +92,7 @@ export function QuickNotesPanel({ notes }: { notes: QuickNote[] }) {
                     size="icon-xs"
                     className="text-destructive"
                     aria-label="Excluir nota"
-                    onClick={() => confirm("Excluir esta nota?") && run(() => deleteQuickNoteAction(n.id), "Nota excluída")}
+                    onClick={async () => (await confirmAction({ title: "Excluir nota?", message: "Excluir esta nota?", confirmLabel: "Excluir" })) && run(() => deleteQuickNoteAction(n.id), "Nota excluída")}
                   >
                     <Trash2 />
                   </Button>

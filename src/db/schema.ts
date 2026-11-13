@@ -364,7 +364,7 @@ export const accountMovements = sqliteTable(
   (t) => [uniqueIndex("account_movements_source").on(t.source, t.sourceId), index("account_movements_account").on(t.accountId)],
 );
 
-/** Abas da aba Gráficos (até 10 por pessoa): layout e estado de cada divisão, em JSON validado. */
+/** Abas da aba Gráficos (até 15 por pessoa): layout e estado de cada divisão, em JSON validado. */
 export const chartTabs = sqliteTable(
   "chart_tabs",
   {

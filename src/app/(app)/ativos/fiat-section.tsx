@@ -20,6 +20,7 @@ import { Priv } from "@/components/priv";
 import type { FiatAccount, Result } from "@/lib/fiat/accounts";
 import { safeAction } from "@/lib/safe-action";
 import { createAccountAction, deleteAccountAction, renameAccountAction, setBalanceAction } from "./fiat-actions";
+import { confirmAction } from "@/components/confirm-dialog";
 
 function formatDate(d: string): string {
   if (!d) return "—";
@@ -123,8 +124,8 @@ export function FiatSection({ accounts, today }: { accounts: FiatAccount[]; toda
   const [pending, start] = useTransition();
   const dateField: Field = { name: "date", label: "Data do saldo", type: "date", initial: today, min: "2000-01-01", max: today };
 
-  function remove(a: FiatAccount) {
-    if (!confirm(`Remover a conta "${a.name}"? O histórico de saldos dela também será apagado.`)) return;
+  async function remove(a: FiatAccount) {
+    if (!(await confirmAction({ title: "Remover conta?", message: `Remover a conta "${a.name}"? O histórico de saldos dela também será apagado.`, confirmLabel: "Remover" }))) return;
     start(async () => {
       const r = await safeAction(() => deleteAccountAction(a.id));
       if (r.ok) toast.success(`${a.name} removida`);

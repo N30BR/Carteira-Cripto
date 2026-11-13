@@ -13,7 +13,7 @@ export const CHART_LAYOUTS = [1, 2, 4, 8] as const;
 export type ChartLayout = (typeof CHART_LAYOUTS)[number];
 
 export const LIMITS = {
-  tabs: 10,
+  tabs: 15,
   tabName: 30,
   indicatorsPerPane: 50,
   paramsPerIndicator: 10,
@@ -241,6 +241,8 @@ export type PaneState = {
   deltaProfile?: boolean;
   /** Delta Horizontal integrado ao gráfico (sem painel próprio, atrás das velas). */
   deltaIntegrated?: boolean;
+  /** Ordem dos dois perfis da direita (da esquerda para a direita): perfil de volume → Delta, ou o contrário. */
+  profileOrder?: "vp-delta" | "delta-vp";
   /** Delta na barra de preço (Volume Footprint): compras e vendas agressoras por preço dentro de cada vela. */
   footprint?: boolean;
   /** Cores do perfil lateral (compras e vendas, com opacidade), escolhidas clicando nas barras. Só o desenho. */
@@ -279,6 +281,8 @@ export type ToolPrefs = {
   sideColors?: { buy?: string; sell?: string };
   /** Estilos das camadas de fluxo (marcações, Delta Horizontal, Footprint): da conta. */
   layerStyles?: LayerStyles;
+  /** Barra flutuante de favoritos: visível e posição (px dentro da área dos gráficos). */
+  floatingFavorites?: { on: boolean; x: number; y: number };
   /** Ferramentas que já existiam quando as preferências foram salvas (as criadas depois entram visíveis). */
   known?: string[];
   /** Modelo para gráficos novos: a configuração do gráfico de referência (1º gráfico da aba indicada). */
@@ -884,6 +888,7 @@ function sanitizePane(v: unknown): R<PaneState> {
       ...(v.sideMarks === undefined ? {} : { sideMarks: v.sideMarks as boolean }),
       ...(v.deltaProfile === undefined ? {} : { deltaProfile: v.deltaProfile as boolean }),
       ...(v.deltaIntegrated === undefined ? {} : { deltaIntegrated: v.deltaIntegrated as boolean }),
+      ...(v.profileOrder === "delta-vp" || v.profileOrder === "vp-delta" ? { profileOrder: v.profileOrder } : {}),
       ...(v.footprint === undefined ? {} : { footprint: v.footprint as boolean }),
       ...(sideColors ? { sideColors } : {}),
       ...(views.length ? { views } : {}),
@@ -921,14 +926,18 @@ export function sanitizeView(v: unknown): PaneView | undefined {
   return { symbol: v.symbol, interval: v.interval as ChartInterval, barSpace, to, ...(toX === undefined ? {} : { toX }), ...(y ? { y } : {}) };
 }
 
-/** Valida o estado de uma aba; completa com gráficos padrão até o número do layout (e corta os que sobrarem). */
+/**
+ * Valida o estado de uma aba; completa com gráficos padrão até o número do layout. Gráficos além do layout (até 8)
+ * são GUARDADOS: ao reduzir de 2 para 1 gráfico e voltar, o 2º volta com o par, o tempo, os indicadores e os desenhos
+ * dele (antes era cortado e recriado com o padrão).
+ */
 export function sanitizeTabState(v: unknown): R<TabState> {
   if (!isObj(v)) return fail("Dados inválidos");
   if (!(CHART_LAYOUTS as readonly unknown[]).includes(v.layout)) return fail("Layout inválido");
   const layout = v.layout as ChartLayout;
   if (!Array.isArray(v.panes) || v.panes.length > 8) return fail("Gráficos inválidos");
   const panes: PaneState[] = [];
-  for (const p of v.panes.slice(0, layout)) {
+  for (const p of v.panes) {
     const r = sanitizePane(p);
     if (!r.ok) return r;
     panes.push(r.value);
@@ -957,6 +966,11 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
   const styleDefaults = sanitizeStyleDefaults(v.styleDefaults, v.profileColors);
   const indicatorDefaults = sanitizeIndicatorDefaults(v.indicatorDefaults);
   const layerStyles = sanitizeLayerStyles(v.layerStyles);
+  const ff = v.floatingFavorites;
+  const floatingFavorites =
+    isObj(ff) && isBool(ff.on) && typeof ff.x === "number" && typeof ff.y === "number" && Number.isFinite(ff.x) && Number.isFinite(ff.y)
+      ? { on: ff.on, x: Math.max(0, Math.min(10_000, Math.round(ff.x))), y: Math.max(0, Math.min(10_000, Math.round(ff.y))) }
+      : undefined;
   const sideColors = isObj(v.sideColors)
     ? Object.fromEntries((["buy", "sell"] as const).flatMap((k) => (typeof (v.sideColors as Record<string, unknown>)[k] === "string" && COLOR.test((v.sideColors as Record<string, string>)[k]) ? [[k, (v.sideColors as Record<string, string>)[k]]] : [])))
     : {};
@@ -973,6 +987,7 @@ export function sanitizePrefs(v: unknown): R<ToolPrefs> {
       ...(styleDefaults ? { styleDefaults } : {}),
       ...(indicatorDefaults ? { indicatorDefaults } : {}),
       ...(layerStyles ? { layerStyles } : {}),
+      ...(floatingFavorites ? { floatingFavorites } : {}),
       ...(Object.keys(sideColors).length ? { sideColors: sideColors as { buy?: string; sell?: string } } : {}),
       known: CHART_TOOLS.map((t) => t.name),
       ...(template ? { template } : {}),

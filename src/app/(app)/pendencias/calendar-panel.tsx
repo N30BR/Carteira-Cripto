@@ -13,6 +13,7 @@ import type { Group } from "@/lib/todos/store";
 import { cn } from "@/lib/utils";
 import { createEventAction, deleteEventAction, updateEventAction } from "./actions";
 import { formatDay, selectClass, useRun } from "./ui";
+import { confirmAction } from "@/components/confirm-dialog";
 
 type EventFull = EventView & { categoryId: number | null; description: string };
 
@@ -107,7 +108,7 @@ export function CalendarPanel({
                 </button>
               ))}
               {eventsOn(day).map((e) => (
-                <EventLine key={`e${e.id}`} event={e} onEdit={() => setEditing(e)} onDelete={() => confirm(`Excluir "${e.title}"?`) && run(() => deleteEventAction(e.id), "Compromisso excluído")} />
+                <EventLine key={`e${e.id}`} event={e} onEdit={() => setEditing(e)} onDelete={async () => (await confirmAction({ title: "Excluir compromisso?", message: `Excluir "${e.title}"?`, confirmLabel: "Excluir" })) && run(() => deleteEventAction(e.id), "Compromisso excluído")} />
               ))}
             </div>
           )}

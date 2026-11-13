@@ -1,5 +1,5 @@
 import type { Db } from "@/db/client";
-import { PERIODS, type CurrentPrice, type Period, type PricePoint } from "@/lib/portfolio/calc";
+import { PERIODS, type CurrentPrice, type PortfolioPeriod, type PricePoint } from "@/lib/portfolio/calc";
 import { normalizeSearch } from "@/lib/validation";
 import { cached, readCache, writeCache } from "./cache";
 import { BinanceError, QUOTE, fetchKlines, fetchTickers, fetchUsdtAssets } from "./binance";
@@ -85,7 +85,7 @@ export async function getCurrentPrices(
 export async function getHistory(
   db: Db,
   ids: string[],
-  period: Period,
+  period: PortfolioPeriod,
   now = new Date(),
 ): Promise<{ history: Record<string, PricePoint[]>; oldestFetchedAt: Date | null; stale: boolean }> {
   const days = PERIODS[period].sourceDays;

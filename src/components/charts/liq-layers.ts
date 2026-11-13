@@ -94,6 +94,15 @@ export function registerLiqLayers(): void {
       const data = chart.getDataList();
       const oi = indicator.extendData?.oi ?? [];
       mapState = null;
+      // Sem dados ainda: o aviso (carregando / erro) fica no gráfico, no lugar do mapa.
+      if (indicator.visible && !oi.length && indicator.extendData?.status) {
+        ctx.save();
+        ctx.globalCompositeOperation = "source-over";
+        ctx.font = "11px Geist, sans-serif";
+        ctx.fillStyle = "#a1a1aa";
+        ctx.fillText(indicator.extendData.status, 10, bounding.height - 44);
+        ctx.restore();
+      }
       if (!indicator.visible || !oi.length || data.length < 2) return true;
       const field = fieldFor(data, oi);
       if (field.start < 0) return true;

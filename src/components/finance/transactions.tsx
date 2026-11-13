@@ -14,6 +14,7 @@ import { safeAction } from "@/lib/safe-action";
 import { CURRENCY_SYMBOL, type RefCurrency } from "@/lib/currency";
 import type { Transaction } from "@/lib/transactions/store";
 import { FilterTabs, KindBadge, SignedMoney, dateBr } from "./ui";
+import { confirmAction } from "@/components/confirm-dialog";
 
 const selectClass =
   "h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:bg-input/30";
@@ -232,8 +233,8 @@ export function TransactionsTable({
   const current = Math.min(page, pages - 1);
   const visible = pageSize ? filtered.slice(current * pageSize, (current + 1) * pageSize) : filtered;
 
-  function remove(t: Transaction) {
-    if (!confirm(`Excluir "${t.description}" (${dateBr(t.date)})? Essa ação não pode ser desfeita.`)) return;
+  async function remove(t: Transaction) {
+    if (!(await confirmAction({ title: "Excluir transação?", message: `Excluir "${t.description}" (${dateBr(t.date)})? Essa ação não pode ser desfeita.`, confirmLabel: "Excluir" }))) return;
     start(async () => {
       const r = await safeAction(() => deleteTransactionAction(t.id));
       if (r.ok) toast.success("Transação excluída");

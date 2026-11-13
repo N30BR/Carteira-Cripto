@@ -6,7 +6,7 @@ import { adjustChange, pickCurrency } from "@/lib/currency";
 import { resolveCurrency } from "@/lib/currency-view";
 import { listHoldings } from "@/lib/holdings/holdings";
 import { getCurrentPrices, getHistory } from "@/lib/prices";
-import { PERIODS, PERIOD_OPTIONS, buildCurve, computePortfolio, parsePeriod, periodChanges, totalChange } from "@/lib/portfolio/calc";
+import { PERIODS, PORTFOLIO_PERIOD_OPTIONS, buildCurve, computePortfolio, parsePortfolioPeriod, periodChanges, totalChange } from "@/lib/portfolio/calc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AllocationDonut } from "@/components/dashboard/allocation-donut";
@@ -25,7 +25,7 @@ const DAY = 86_400_000;
 export default async function CryptoDashboardPage({ searchParams }: PageProps<"/">) {
   const user = await requireModule("crypto");
   const params = await searchParams;
-  const period = parsePeriod(params.periodo);
+  const period = parsePortfolioPeriod(params.periodo);
   const requested = pickCurrency(params.moeda, (await cookies()).get(COOKIE)?.value, "USDT");
   const db = getDb();
   const holdings = listHoldings(db, user.id);
@@ -55,10 +55,13 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   // Com a referência em BTC, o mesmo preço do BTC da carteira entra na conversão (BTC vale exatamente ₿ 1).
   const btcPrice =
     requested === "BTC" ? (current.prices.BTC ?? (await getCurrentPrices(db, ["BTC"], now)).prices.BTC) : undefined;
-  const [hist30, hist365, view] = await Promise.all([
+  // 2A: também o histórico diário de 1000 dias (só buscado com 2A escolhido) e a cotação da moeda de 2 anos atrás.
+  const long = period === "2A";
+  const [hist30, hist365, hist1000, view] = await Promise.all([
     getHistory(db, priced, "1M", now),
     getHistory(db, priced, "1A", now),
-    resolveCurrency(db, "USDT", requested, "USDT", now, { btcUsdt: btcPrice, historyDays: 365 }),
+    long ? getHistory(db, priced, "2A", now) : null,
+    resolveCurrency(db, "USDT", requested, "USDT", now, { btcUsdt: btcPrice, historyDays: long ? 1000 : 365 }),
   ]);
   const portfolio = computePortfolio(holdings, current.prices);
   const changes = periodChanges(ids, current.prices, hist30.history, hist365.history, now);
@@ -86,7 +89,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
   const changeAbs = total !== null && pastTotal !== null ? total - pastTotal : 0;
   const changePct = portfolio.change24hPct !== null && pastTotal && pastTotal > 0 ? (changeAbs / pastTotal) * 100 : null;
 
-  const hist = PERIODS[period].sourceDays === 365 ? hist365 : hist30;
+  const hist = hist1000 ?? (PERIODS[period].sourceDays === 365 ? hist365 : hist30);
   // Variação do saldo no período escolhido: 1D pela variação de 24 h; os demais com as mesmas moedas,
   // preço de agora × preço de então, cada um pela cotação da sua época.
   const longChange = (label: string, days: number, fPast: number): BalanceChange => {
@@ -110,6 +113,7 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
       current.stale && current.fetchedAt,
       hist30.stale && hist30.oldestFetchedAt,
       hist365.stale && hist365.oldestFetchedAt,
+      hist1000?.stale && hist1000.oldestFetchedAt,
       view.staleSince,
     ]
       .filter((d): d is Date => d instanceof Date)
@@ -131,8 +135,8 @@ export default async function CryptoDashboardPage({ searchParams }: PageProps<"/
               changes={balanceChanges}
               currency={view.currency}
             />
-            <div className="flex items-center gap-2">
-              <PeriodSelector options={PERIOD_OPTIONS} current={period} path="/" query={{ moeda: requested }} />
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <PeriodSelector options={PORTFOLIO_PERIOD_OPTIONS} current={period} path="/" query={{ moeda: requested }} />
               <CurrencyMenu current={view.currency} cookieName={COOKIE} />
             </div>
           </div>

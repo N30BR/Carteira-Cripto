@@ -53,7 +53,8 @@ type MarksData = { poc?: MarkStyle; vah?: MarkStyle; val?: MarkStyle; reserve?: 
 // ---------- Delta Horizontal ----------
 
 /** Delta Horizontal: faixa própria na ponta direita da área do gráfico (à direita do perfil lateral). */
-type DeltaData = { sub?: FlowBar[]; subId?: string; width?: number; pos?: string; neg?: string; integrated?: boolean };
+/** right: distância até a borda direita (o outro perfil pode estar à direita dele); period: tempo do gráfico. */
+type DeltaData = { sub?: FlowBar[]; subId?: string; barMs?: number; width?: number; right?: number; period?: string; pos?: string; neg?: string; integrated?: boolean };
 let deltaState: { levels: ReturnType<typeof deltaProfile>["levels"]; zeroX: number; half: number; max: number; Y: Axis; res: string } | null = null;
 
 /** Faixa do Delta Horizontal sob o cursor (coordenadas da área do gráfico). */
@@ -185,7 +186,12 @@ export function registerFlowLayers(): void {
       const t0 = data[from].timestamp;
       const t1 = data[to].timestamp;
       // Velas menores do trecho visível; sem elas (ainda carregando ou fora do alcance), as próprias velas do gráfico.
-      const sub = (e.sub ?? []).filter((b) => b.timestamp >= t0 && b.timestamp <= t1 + 1);
+      // Velas menores só quando cobrem o trecho visível inteiro (senão o delta mostraria só uma parte dele); até lá,
+      // as próprias velas do gráfico.
+      const all = e.sub ?? [];
+      // Folga de uma vela no começo: o histórico menor pode começar dias depois da 1ª vela (ex.: mensal x diário).
+      const covers = all.length > 0 && all[0].timestamp <= t0 + (e.barMs ?? 0) && all[all.length - 1].timestamp >= t1;
+      const sub = covers ? all.filter((b) => b.timestamp >= t0 && b.timestamp <= t1 + 1) : [];
       const useSub = sub.length > 0;
       const base = useSub ? sub : (data.slice(from, to + 1) as FlowBar[]);
       const rows = Math.max(12, Math.min(80, Math.round(bounding.height / 10)));
@@ -193,7 +199,7 @@ export function registerFlowLayers(): void {
       ctx.save();
       ctx.font = "10px Geist, sans-serif";
       const width = Math.min(e.width ?? DELTA_DEFAULTS.width, bounding.width * 0.5);
-      const x0 = bounding.width - width;
+      const x0 = bounding.width - (e.right ?? 0) - width;
       const half = width / 2 - 6;
       const zeroX = x0 + width / 2;
       // Painel isolado: fundo e borda próprios, por cima (ali não há velas). Integrado: sem fundo, atrás das velas.
@@ -231,7 +237,12 @@ export function registerFlowLayers(): void {
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#a1a1aa";
-      ctx.fillText(`Delta · ${useSub ? e.subId : "velas"}`, x0 + 6, 14);
+      // Período = o do gráfico (os totais são os das velas do gráfico); a base menor é só a resolução por preço.
+      ctx.fillText(`Delta · ${e.period ?? ""}`, x0 + 6, 14);
+      if (useSub) {
+        ctx.fillStyle = "#71717a";
+        ctx.fillText(`resolução ${e.subId}`, x0 + 6, 26);
+      }
       ctx.restore();
       return true;
     },

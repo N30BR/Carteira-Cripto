@@ -330,6 +330,16 @@ export function ObjectToolbar({ object, actions }: { object: OverlayState; actio
       <ToolbarButton label="Excluir (Delete)" onClick={actions.remove}>
         <Trash2 />
       </ToolbarButton>
+      {/* Ocultar/mostrar (antes do menu "…"): só a visibilidade; nada é apagado. Oculto, volta pela lista de desenhos. */}
+      {object.visible === false ? (
+        <ToolbarButton label="Mostrar elemento" onClick={() => actions.update({ visible: true })} pressed>
+          <EyeOff />
+        </ToolbarButton>
+      ) : (
+        <ToolbarButton label="Ocultar elemento" onClick={actions.hide}>
+          <Eye />
+        </ToolbarButton>
+      )}
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <button type="button" aria-label="Mais opções" title="Mais opções" className="grid size-8 place-items-center rounded hover:bg-muted [&_svg]:size-4">

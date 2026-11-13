@@ -10,6 +10,7 @@ import { Priv } from "@/components/priv";
 import type { Holding } from "@/lib/holdings/holdings";
 import { safeAction } from "@/lib/safe-action";
 import { deleteHoldingAction, updateHoldingAction } from "./actions";
+import { confirmAction } from "@/components/confirm-dialog";
 
 export function HoldingRow({ h }: { h: Holding }) {
   const [editing, setEditing] = useState(false);
@@ -29,8 +30,8 @@ export function HoldingRow({ h }: { h: Holding }) {
     });
   }
 
-  function remove() {
-    if (!confirm(`Remover ${h.name} da carteira?`)) return;
+  async function remove() {
+    if (!(await confirmAction({ title: "Remover ativo?", message: `Remover ${h.name} da carteira?`, confirmLabel: "Remover" }))) return;
     start(async () => {
       const r = await safeAction(() => deleteHoldingAction(h.id));
       if (r.ok) toast.success(`${h.name} removido`);

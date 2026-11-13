@@ -18,6 +18,7 @@ import {
   MessageSquare,
   MoveDiagonal,
   MoveUpRight,
+  PictureInPicture2,
   Rows3,
   ChevronsRight,
   Ruler,
@@ -235,7 +236,20 @@ function MenuRowItem({ onSelect, children }: { onSelect: () => void; children: R
 }
 
 /** Barra compacta de favoritos (atalhos para as ferramentas; não duplica nada). */
-export function FavoritesBar({ prefs, activeTool, onDraw }: { prefs: ToolPrefs; activeTool: string | null; onDraw: (tool: string) => void }) {
+export function FavoritesBar({
+  prefs,
+  activeTool,
+  onDraw,
+  floatingOn,
+  onToggleFloating,
+}: {
+  prefs: ToolPrefs;
+  activeTool: string | null;
+  onDraw: (tool: string) => void;
+  /** Barra flutuante (mesmos favoritos, sobre o gráfico) ligada? */
+  floatingOn?: boolean;
+  onToggleFloating?: () => void;
+}) {
   const favorites = prefs.favorites.filter((t) => prefs.visible.includes(t));
   if (!favorites.length) return null;
   return (
@@ -247,6 +261,103 @@ export function FavoritesBar({ prefs, activeTool, onDraw }: { prefs: ToolPrefs; 
           type="button"
           title={toolLabel(t)}
           aria-label={`Favorita: ${toolLabel(t)}`}
+          aria-pressed={activeTool === t}
+          onClick={() => onDraw(t)}
+          className={cn("grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground", activeTool === t && "bg-[#8b7cf6]/25 text-foreground")}
+        >
+          <ToolIcon tool={t} className="size-3.5" />
+        </button>
+      ))}
+      {onToggleFloating && (
+        // Botão quadrado no fim da barra: mostra/oculta a barra flutuante com estes mesmos favoritos.
+        <button
+          type="button"
+          title={floatingOn ? "Ocultar barra flutuante de favoritos" : "Mostrar barra flutuante de favoritos"}
+          aria-label={floatingOn ? "Ocultar barra flutuante de favoritos" : "Mostrar barra flutuante de favoritos"}
+          aria-pressed={!!floatingOn}
+          onClick={onToggleFloating}
+          className={cn(
+            "ml-0.5 grid size-7 cursor-pointer place-items-center rounded-md border transition-colors [&_svg]:size-3.5",
+            floatingOn ? "border-[#8b7cf6] bg-[#8b7cf6]/20 text-white hover:bg-[#8b7cf6]/30" : "border-border bg-zinc-900 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200",
+          )}
+        >
+          <PictureInPicture2 />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Barra flutuante de favoritos: as mesmas ferramentas da barra de favoritos (mesma lista e mesma ação de desenhar),
+ * sobre a área dos gráficos. Arrasta-se pela alça (os ícones só escolhem a ferramenta); fica sempre dentro da área.
+ */
+export function FloatingFavorites({
+  prefs,
+  activeTool,
+  onDraw,
+  pos,
+  bounds,
+  onMove,
+}: {
+  prefs: ToolPrefs;
+  activeTool: string | null;
+  onDraw: (tool: string) => void;
+  pos: { x: number; y: number };
+  /** Tamanho da área dos gráficos (px), para não sair dela. */
+  bounds: { width: number; height: number };
+  onMove: (pos: { x: number; y: number }) => void;
+}) {
+  const favorites = prefs.favorites.filter((t) => prefs.visible.includes(t));
+  const [drag, setDrag] = useState<{ x: number; y: number; px: number; py: number } | null>(null);
+  const [live, setLive] = useState<{ x: number; y: number } | null>(null);
+  const barW = 22 + favorites.length * 30 + 8;
+  const clamp = (p: { x: number; y: number }) => ({ x: Math.max(0, Math.min(Math.max(0, bounds.width - barW), p.x)), y: Math.max(0, Math.min(Math.max(0, bounds.height - 36), p.y)) });
+  const at = clamp(live ?? pos);
+  if (!favorites.length) return null;
+  return (
+    <div
+      role="toolbar"
+      aria-label="Barra flutuante de favoritos"
+      className="absolute z-20 flex items-center gap-0.5 rounded-lg border bg-popover/95 px-1 py-1 shadow-lg"
+      style={{ left: at.x, top: at.y }}
+    >
+      <span
+        role="separator"
+        aria-label="Arrastar a barra de favoritos"
+        title="Arrastar"
+        className="grid h-7 w-4 cursor-grab touch-none place-items-center text-muted-foreground hover:text-foreground active:cursor-grabbing [&_svg]:size-3.5"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDrag({ x: e.clientX, y: e.clientY, px: at.x, py: at.y });
+        }}
+        onPointerMove={(e) => {
+          if (!drag) return;
+          setLive(clamp({ x: drag.px + e.clientX - drag.x, y: drag.py + e.clientY - drag.y }));
+        }}
+        onPointerUp={(e) => {
+          if (!drag) return;
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          const p = clamp({ x: drag.px + e.clientX - drag.x, y: drag.py + e.clientY - drag.y });
+          setDrag(null);
+          setLive(null);
+          onMove(p);
+        }}
+        onPointerCancel={() => {
+          setDrag(null);
+          setLive(null);
+        }}
+      >
+        <GripVertical />
+      </span>
+      {favorites.map((t) => (
+        <button
+          key={t}
+          type="button"
+          title={toolLabel(t)}
+          aria-label={`Flutuante: ${toolLabel(t)}`}
           aria-pressed={activeTool === t}
           onClick={() => onDraw(t)}
           className={cn("grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground", activeTool === t && "bg-[#8b7cf6]/25 text-foreground")}

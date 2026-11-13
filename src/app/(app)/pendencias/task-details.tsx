@@ -24,6 +24,7 @@ import {
   updateTaskAction,
 } from "./actions";
 import { ProgressBar, Stars, formatDay, selectClass, useRun } from "./ui";
+import { confirmAction } from "@/components/confirm-dialog";
 
 const STATUS_LABEL: Record<TaskStatus, string> = { pending: "Pendente", in_progress: "Em andamento", done: "Concluída" };
 const textareaClass =
@@ -107,8 +108,8 @@ export function TaskDetails({ task, groups, today }: { task: TaskView | null; gr
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-destructive"
-              onSelect={() => {
-                if (confirm(`Excluir "${task.title}" com o checklist e as notas?`)) run(() => deleteTaskAction(task.id), "Tarefa excluída");
+              onSelect={async () => {
+                if (await confirmAction({ title: "Excluir tarefa?", message: `Excluir "${task.title}" com o checklist e as notas?`, confirmLabel: "Excluir" })) run(() => deleteTaskAction(task.id), "Tarefa excluída");
               }}
             >
               Excluir tarefa

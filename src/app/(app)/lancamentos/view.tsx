@@ -13,6 +13,7 @@ import { IconBox, SectionTitle, StatCard, TotalChip, TotalsBar, accountColors, b
 import { Pager, TransactionFormRow, TransactionsTable, emptyDraft, type TxAccount } from "@/components/finance/transactions";
 import { MonthPicker } from "@/components/month-picker";
 import { Priv } from "@/components/priv";
+import { ConfirmDialog, confirmAction } from "@/components/confirm-dialog";
 import type { CardAccount } from "@/lib/cards/accounts";
 import { MAX_CARD_ACCOUNTS, type Side } from "@/lib/cards/account-limits";
 import type { Category } from "@/lib/cards/categories";
@@ -29,6 +30,7 @@ import {
   deleteCardAccountAction,
   deleteCategoryAction,
   deleteExpenseAction,
+  deleteAllExpensesAction,
   renameCategoryAction,
   saveExpenseAction,
   toggleInstallmentAction,
@@ -101,7 +103,10 @@ export function LaunchesView({
   txAccounts,
   open,
   overdue,
+  allInvoices,
 }: {
+  /** Todas as faturas da conta (qualquer mês): o que "Excluir todas" apaga. */
+  allInvoices: { expenses: number; installments: number };
   /** Contas do R$ (compartilhadas): de onde sai / para onde vai cada transação. */
   txAccounts: TxAccount[];
   showInvoices: boolean;
@@ -153,9 +158,9 @@ export function LaunchesView({
     });
   }
 
-  function remove(r: InstallmentRow) {
+  async function remove(r: InstallmentRow) {
     const what = r.installments > 1 ? `"${r.description}" e todas as ${r.installments} parcelas` : `"${r.description}"`;
-    if (!confirm(`Excluir ${what}? Essa ação não pode ser desfeita.`)) return;
+    if (!(await confirmAction({ title: "Excluir lançamento?", message: `Excluir ${what}? Essa ação não pode ser desfeita.`, confirmLabel: "Excluir" }))) return;
     start(async () => {
       const res = await safeAction(() => deleteExpenseAction(r.expenseId));
       if (res.ok) toast.success("Lançamento excluído");
@@ -178,6 +183,7 @@ export function LaunchesView({
   const txOut = transactions.filter((t) => t.kind === "out").reduce((s, t) => s + t.amountCents, 0);
   const resetPage = () => setInvoicePage(0);
   const editingRow = invoiceDialog?.row ?? null;
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-6">
@@ -205,9 +211,20 @@ export function LaunchesView({
               title="Faturas"
               subtitle="Visualize e gerencie as faturas registradas no mês selecionado."
               right={
-                <Button onClick={() => setInvoiceDialog({ row: null })}>
-                  <Plus /> Nova Fatura
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={allInvoices.expenses === 0}
+                    title={allInvoices.expenses === 0 ? "Não há faturas cadastradas" : "Excluir todas as faturas"}
+                    onClick={() => setDeleteAllOpen(true)}
+                    className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  >
+                    <Trash2 /> Excluir todas
+                  </Button>
+                  <Button onClick={() => setInvoiceDialog({ row: null })}>
+                    <Plus /> Nova Fatura
+                  </Button>
+                </div>
               }
             />
 
@@ -459,6 +476,38 @@ export function LaunchesView({
         </Card>
       )}
 
+      {/* Excluir todas: todas as faturas da conta, de qualquer mês, cartão ou situação (não só o que está na tela). */}
+      <ConfirmDialog
+        open={deleteAllOpen}
+        onOpenChange={setDeleteAllOpen}
+        title="Excluir todas as faturas?"
+        message={
+          <>
+            <p>
+              Esta ação excluirá permanentemente todas as faturas cadastradas, incluindo parcelas pagas, pendentes e futuras, de todos os cartões
+              e meses.
+            </p>
+            <p className="mt-2">Esta ação não poderá ser desfeita.</p>
+            <p className="mt-3 rounded-md border px-3 py-2 text-foreground" data-testid="delete-all-count">
+              {allInvoices.expenses} {allInvoices.expenses === 1 ? "compra" : "compras"} · {allInvoices.installments}{" "}
+              {allInvoices.installments === 1 ? "parcela" : "parcelas"} serão excluídas.
+            </p>
+            <p className="mt-2 text-xs">
+              Os descontos que parcelas pagas fizeram nas contas do R$ são estornados, como na exclusão individual. Cartões, categorias e
+              transações não são alterados.
+            </p>
+          </>
+        }
+        confirmLabel="Excluir todas"
+        typeToConfirm="EXCLUIR"
+        onConfirm={async () => {
+          const res = await safeAction(() => deleteAllExpensesAction("EXCLUIR"));
+          if (!res.ok) throw new Error(res.error);
+          setInvoicePage(0);
+          toast.success("Todas as faturas foram excluídas com sucesso.");
+        }}
+      />
+
       {/* Nova fatura / editar fatura: o formulário completo, na mesma janela. */}
       <Dialog open={invoiceDialog !== null} onOpenChange={(v) => !v && setInvoiceDialog(null)}>
         <DialogContent className="sm:max-w-3xl">
@@ -589,7 +638,7 @@ function AccountsDialog({ accounts }: { accounts: CardAccount[] }) {
                   size="sm"
                   variant="destructive"
                   disabled={pending}
-                  onClick={() => confirm(`Excluir "${a.name}"?`) && run(() => deleteCardAccountAction(a.id), "Conta excluída")}
+                  onClick={async () => (await confirmAction({ title: "Excluir conta?", message: `Excluir "${a.name}"?`, confirmLabel: "Excluir" })) && run(() => deleteCardAccountAction(a.id), "Conta excluída")}
                 >
                   Excluir
                 </Button>
@@ -672,8 +721,8 @@ function CategoriesDialog({ categories }: { categories: Category[] }) {
                 size="sm"
                 variant="destructive"
                 disabled={pending}
-                onClick={() => {
-                  if (confirm(`Excluir "${c.name}"? Os lançamentos dela ficam "${NO_CATEGORY}".`)) {
+                onClick={async () => {
+                  if (await confirmAction({ title: "Excluir categoria?", message: `Excluir "${c.name}"? Os lançamentos dela ficam "${NO_CATEGORY}".`, confirmLabel: "Excluir" })) {
                     run(() => deleteCategoryAction(c.id), "Categoria excluída");
                   }
                 }}

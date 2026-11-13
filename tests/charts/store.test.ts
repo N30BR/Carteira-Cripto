@@ -44,7 +44,7 @@ describe("abas de gráficos na conta", () => {
     expect(listChartTabs(db(), state.userId)).toHaveLength(1);
   });
 
-  test("até 10 abas; a última não pode ser apagada", async () => {
+  test("até 15 abas; a última não pode ser apagada", async () => {
     listChartTabs(db(), state.userId); // abre a tela: cria "Gráfico 1"
     for (let i = 0; i < LIMITS.tabs - 1; i++) expect((await createChartTabAction(`A${i}`)).ok).toBe(true);
     expect(await createChartTabAction("Demais")).toEqual({ ok: false, error: `Limite de ${LIMITS.tabs} abas` });

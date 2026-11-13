@@ -1,4 +1,4 @@
-import { and, asc, between, count, eq } from "drizzle-orm";
+import { and, asc, between, count, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { cardAccounts, cardCategories, cardExpenses, cardInstallments } from "@/db/schema";
 import { getCardAccount, type Side } from "./accounts";
@@ -339,4 +339,35 @@ export function listInstallments(
     .orderBy(asc(cardInstallments.invoiceMonth), asc(cardExpenses.description), asc(cardInstallments.number))
     .all();
   return rows.map((r) => ({ ...r, accountId: r.accountId ?? 0, accountName: r.accountName ?? NO_ACCOUNT })) as InstallmentRow[];
+}
+
+/** Quantas compras e parcelas a pessoa tem registradas (todas as épocas, pagas ou não, PF e PJ). */
+export function countAllExpenses(db: Db, userId: number): { expenses: number; installments: number } {
+  const e = db.select({ n: count() }).from(cardExpenses).where(eq(cardExpenses.userId, userId)).get();
+  const i = db
+    .select({ n: count() })
+    .from(cardInstallments)
+    .innerJoin(cardExpenses, eq(cardExpenses.id, cardInstallments.expenseId))
+    .where(eq(cardExpenses.userId, userId))
+    .get();
+  return { expenses: e?.n ?? 0, installments: i?.n ?? 0 };
+}
+
+/**
+ * Exclui TODAS as faturas (compras e parcelas) da pessoa, numa transação: ou tudo, ou nada. Mesma regra da
+ * exclusão individual: os descontos que as parcelas pagas fizeram nas contas do R$ são estornados (só as
+ * movimentações de parcela "inst:*" desta pessoa). Cartões, categorias, transações e contas ficam intactos.
+ */
+export function deleteAllExpenses(db: Db, userId: number): { ok: true; expenses: number; installments: number } {
+  return db.transaction((tx) => {
+    const t = tx as unknown as Db;
+    const counts = countAllExpenses(t, userId);
+    const ids = t.select({ id: cardExpenses.id }).from(cardExpenses).where(eq(cardExpenses.userId, userId)).all();
+    for (const { id } of ids) deleteMovementsOfSource(t, installmentSource(id, 0).source);
+    if (ids.length) {
+      t.delete(cardInstallments).where(inArray(cardInstallments.expenseId, ids.map((r) => r.id))).run();
+      t.delete(cardExpenses).where(eq(cardExpenses.userId, userId)).run();
+    }
+    return { ok: true as const, ...counts };
+  });
 }

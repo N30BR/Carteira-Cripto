@@ -8,6 +8,7 @@ import type { AxisRangeState, IndicatorState, OverlayState, OverlayStyleState, P
 import { OVERLAY_VISUAL_KEYS, visualStyles } from "@/lib/charts/workspace";
 import { AXIS_RANGE_KEYS } from "@/lib/charts/workspace";
 import { NEO_COLORS } from "@/lib/charts/drawing";
+import { candleChange } from "@/lib/charts/candle-change";
 import { ELLIOTT_LABELS } from "@/lib/charts/workspace";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
 import { onchainInfo } from "@/lib/charts/onchain-ids";
@@ -16,7 +17,8 @@ import type { Point } from "@/lib/charts/macro-math";
 import { COMPARE_COLORS, registerChartExtensions } from "./register";
 import { LOG_AXIS, type OverlayExtra } from "./overlays";
 import { SIDE_WIDTH_MAX, SIDE_WIDTH_MIN } from "@/lib/charts/workspace";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeftToLine, ArrowRightToLine, ChevronLeft, ChevronRight } from "lucide-react";
+import { INTERVAL_LABEL } from "./toolbar";
 import { ColorPicker } from "./object-ui";
 import { PROFILE_BUY, PROFILE_SELL } from "./profile";
 import { DELTA_PROF, FOOTPRINT, MARKS, SIDE_INT, deltaHit, fmtFlow, footHit } from "./flow-layers";
@@ -66,6 +68,10 @@ const BAR_MS: Partial<Record<string, number>> = {
   "2d": 172_800_000,
   "3d": 259_200_000,
   "1w": 604_800_000,
+  // Mensal e maiores: duração média (as velas variam alguns dias; a conferência abaixo tem folga).
+  "1M": 2_629_800_000,
+  "6M": 15_778_800_000,
+  "1y": 31_557_600_000,
 };
 /** Cursor de mover durante o arraste do corpo do perfil de volume (sobrepõe o cursor da biblioteca). */
 const MOVE_CURSOR = "[&_*]:cursor-move!";
@@ -87,6 +93,13 @@ const dashOf = (style: string | undefined) => (style === "dashed" ? [6, 4] : sty
 const ARROW_PATHS = { down: "M6 1 L6 11 M2 7 L6 11 L10 7", up: "M6 11 L6 1 M2 5 L6 1 L10 5" };
 const CHEVRON = { up: "M2 8 L6 4 L10 8", down: "M2 4 L6 8 L10 4" };
 const EMPTY = "Ø";
+/** Ferramentas que também podem ser desenhadas arrastando (clicar, segurar e soltar no 2º ponto). */
+const DRAG_TOOLS = new Set(["fibonacciLine"]);
+/** Distância mínima (px) para um clique virar arraste. */
+const DRAG_MIN = 5;
+type DragPoint = { timestamp?: number; dataIndex?: number; value?: number };
+/** Margem padrão da biblioteca entre a última vela e o eixo de preço (px). */
+const BASE_RIGHT = 80;
 
 // Tema escuro do app (fonte do app em todos os textos do gráfico).
 const FONT = "Geist, ui-sans-serif, system-ui, sans-serif";
@@ -382,6 +395,7 @@ export function ChartPane({
   layerStyles,
   onLayerStylesChange,
   onDeltaIntegratedChange,
+  onProfileOrderChange,
   sideColorsDefault,
   styleDefaults,
   onStyleDefault,
@@ -398,6 +412,8 @@ export function ChartPane({
   onLayerStylesChange?: (next: LayerStyles) => void;
   /** Delta Horizontal integrado ao gráfico (true) ou em painel próprio (false); salvo no gráfico. */
   onDeltaIntegratedChange?: (integrated: boolean) => void;
+  /** Ordem dos dois perfis da direita; salva no gráfico. */
+  onProfileOrderChange?: (order: "vp-delta" | "delta-vp") => void;
   /** Perfil lateral integrado ao gráfico (true) ou em painel próprio (false); salvo no gráfico. */
   onSideIntegratedChange?: (integrated: boolean) => void;
   /** Cores do perfil lateral da conta (valem quando o gráfico não tem as suas, de versões antigas). */
@@ -436,9 +452,9 @@ export function ChartPane({
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
   const magnet = useRef<OverlayMode>("normal");
-  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault, onLayerStylesChange, onDeltaIntegratedChange });
+  const cb = useRef({ onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault, onLayerStylesChange, onDeltaIntegratedChange, onProfileOrderChange });
   useEffect(() => {
-    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault, onLayerStylesChange, onDeltaIntegratedChange };
+    cb.current = { onOverlays, onError, onSelect, onObjectSettings, onIndicatorAction, onCompareAction, onLegendCollapse, onAutoScaleChange, onDrawingChange, onViewChange, onSideWidthChange, onSideColorsChange, onSideIntegratedChange, onStyleDefault, onLayerStylesChange, onDeltaIntegratedChange, onProfileOrderChange };
   });
   const styleDefaultsRef = useRef(styleDefaults);
   useEffect(() => {
@@ -548,6 +564,8 @@ export function ChartPane({
   // Estado salvo de cada desenho (estilo no nosso formato), por id.
   const meta = useRef(new Map<string, OverlayState>());
   const drawingId = useRef<string | null>(null);
+  /** Desenho por arraste (Fibonacci): como recriar o desenho com pontos, e o ponto onde o botão foi pressionado. */
+  const dragDraw = useRef<{ id: string; make: (points?: DragPoint[]) => unknown; press: { x: number; y: number; p1: DragPoint; started: boolean } | null; rebuilding?: boolean } | null>(null);
   const mouse = useRef({ x: 0, y: 0 });
   const pressAt = useRef<{ x: number; y: number } | null>(null);
   // Navegação: arraste na escala de tempo (desloca o gráfico) e arraste no preço (livre já no 1º gesto).
@@ -650,10 +668,25 @@ export function ChartPane({
 
   const finishDrawing = () => {
     drawingId.current = null;
+    if (!dragDraw.current?.press?.started) dragDraw.current = null;
     chart.current?.setScrollEnabled(true);
     cb.current.onDrawingChange(false);
   };
 
+  /** Conclusão do desenho por arraste: igual ao fim normal (salva e deixa selecionado). */
+  const finishRef = useRef((id: string) => void id);
+  useEffect(() => {
+    finishRef.current = (id: string) => {
+      finishDrawing();
+      emitOverlays();
+      // Selecionado também na biblioteca (pontos de controle visíveis), como no fim de um desenho por cliques;
+      // senão a sincronização do "soltar" fecharia a barra rápida.
+      const c = chart.current;
+      const o = c?.getOverlays({ id })[0] as ({ id: string; paneId: string } | undefined);
+      if (o) overlayStore(c)?.setClickOverlayInfo({ paneId: o.paneId, overlay: o, figureType: "none", figureIndex: -1, figure: null }, () => {}, () => {});
+      cb.current.onSelect(id);
+    };
+  });
   // Eventos de cada desenho: seleção, configurações (clique direito) e salvamento.
   const overlayEvents = {
     // Ao terminar, o desenho fica selecionado (a biblioteca já o marca), com a barra rápida.
@@ -733,6 +766,7 @@ export function ChartPane({
     },
     // onRemoved chega antes de a biblioteca tirar o desenho da lista: espera ela terminar.
     onRemoved: ({ overlay }: { overlay: { id: string } }) => {
+      if (dragDraw.current?.rebuilding && overlay.id === dragDraw.current.id) return false; // prévia do arraste
       if (overlay.id === drawingId.current) finishDrawing();
       meta.current.delete(overlay.id);
       setTimeout(emitOverlays, 0);
@@ -807,19 +841,24 @@ export function ChartPane({
         c.setScrollEnabled(false);
         cb.current.onDrawingChange(true);
         const z = c.getOverlays().length;
-        c.createOverlay({
-          id,
-          name: tool,
-          mode: magnet.current,
-          extendData: TEXT_TOOLS.has(tool) ? text : overlayExtend(meta.current.get(id) as OverlayState),
-          ...(startStyles ? { styles: overlayStyles(startStyles) } : {}),
-          zLevel: z,
-          // O perfil de volume usa os preços das velas: fica sempre no gráfico de preço.
-          ...(PRICE_ONLY.has(tool) ? { paneId: "candle_pane" } : {}),
-          ...overlayEvents,
-        } as OverlayCreate);
+        const make = (points?: DragPoint[]) =>
+          c.createOverlay({
+            id,
+            name: tool,
+            mode: magnet.current,
+            extendData: TEXT_TOOLS.has(tool) ? text : overlayExtend(meta.current.get(id) as OverlayState),
+            ...(startStyles ? { styles: overlayStyles(startStyles) } : {}),
+            zLevel: z,
+            // O perfil de volume usa os preços das velas: fica sempre no gráfico de preço.
+            ...(PRICE_ONLY.has(tool) ? { paneId: "candle_pane" } : {}),
+            ...(points ? { points } : {}),
+            ...overlayEvents,
+          } as OverlayCreate);
+        make();
+        dragDraw.current = DRAG_TOOLS.has(tool) ? { id, make, press: null } : null;
       },
       cancelDraw: () => {
+        dragDraw.current = null;
         const c = chart.current;
         const id = drawingId.current;
         if (!c || !id) return false;
@@ -1092,6 +1131,8 @@ export function ChartPane({
                 { title: "Low: ", value: num(k?.low) },
                 { title: "Close: ", value: num(k?.close) },
                 { title: "Volume: ", value: inside && typeof k?.volume === "number" ? formatValue(k.volume, 2, true) : EMPTY },
+                // Variação da vela (fechamento x abertura; na vela em formação, o último preço).
+                { title: "Variação: ", value: (inside && candleChange(k?.open, k?.close)) || EMPTY },
               ];
             },
           },
@@ -1185,17 +1226,24 @@ export function ChartPane({
     // O open interest só serve ao mapa (o perfil lateral é de volume, com as próprias velas).
     if (!pane.liqMap) return;
     // Histórico de open interest desde a 1ª vela carregada; ao rolar para trás (velas mais antigas), busca de novo.
+    // Falha não trava: tenta de novo após 5, 10 e 20 s (pedido lento da 1ª vez, limite de pedidos...). Só para de vez
+    // quando o par não tem contrato perpétuo (erro permanente). Enquanto carrega, o mapa avisa no gráfico.
     let cancelled = false;
     let busy = false;
-    let failed = false;
+    let stopped = false;
+    let tries = 0;
+    let retryAt = 0;
+    const show = (data: { oi: [number, number][]; status?: string; source?: string }) => {
+      if (c.getIndicators({ id: MAP_ID }).length) c.overrideIndicator({ id: MAP_ID, name: LIQ_MAP, extendData: data });
+    };
     const apply = (from: number, data: { oi: [number, number][]; status?: string; source?: string }) => {
       liqOi.current = { key, from, data };
-      if (c.getIndicators({ id: MAP_ID }).length) c.overrideIndicator({ id: MAP_ID, name: LIQ_MAP, extendData: data });
+      show(data);
     };
     const check = () => {
       const list = c.getDataList();
       const first = list[0]?.timestamp;
-      if (cancelled || busy || failed || typeof first !== "number") return;
+      if (cancelled || busy || stopped || Date.now() < retryAt || typeof first !== "number") return;
       // Logo depois de trocar o tempo, o gráfico ainda mostra as velas do tempo anterior: espera as do tempo novo
       // (senão o histórico seria pedido a partir da data errada).
       const expected = BAR_MS[pane.interval];
@@ -1204,18 +1252,28 @@ export function ChartPane({
       const have = liqOi.current?.key === key ? liqOi.current.from : null;
       if (have !== null && have <= first) return;
       busy = true;
+      if (have === null) show({ oi: [], status: "Carregando mapa de liquidações..." });
       fetch(`/api/liq-oi?${new URLSearchParams({ symbol: pane.symbol, interval: pane.interval, from: String(Math.max(Date.UTC(2017, 0, 1), first)) })}`)
         .then(async (res) => {
           const body = await res.json().catch(() => null);
-          if (!res.ok || !Array.isArray(body?.points)) throw new Error(body?.error ?? "indisponível");
-          if (!cancelled) apply(first, { oi: body.points as [number, number][], source: body.source === "bybit" ? "bybit" : "binance" });
+          if (!res.ok || !Array.isArray(body?.points)) throw Object.assign(new Error(body?.error ?? "indisponível"), { permanent: res.status === 404 || res.status === 400 });
+          if (cancelled) return;
+          tries = 0;
+          apply(first, { oi: body.points as [number, number][], source: body.source === "bybit" ? "bybit" : "binance" });
         })
         .catch((e) => {
           if (cancelled) return;
-          failed = true;
           const msg = e instanceof Error ? e.message : "indisponível";
-          apply(first, { oi: [], status: `Sem dados: ${msg}` });
-          cb.current.onError(`Mapa de liquidações: ${msg}`);
+          const permanent = !!(e as { permanent?: boolean }).permanent || tries >= 3;
+          if (permanent) {
+            stopped = true;
+            if (have === null) show({ oi: [], status: `Mapa de liquidações: ${msg}` });
+            cb.current.onError(`Mapa de liquidações: ${msg}`);
+            return;
+          }
+          retryAt = Date.now() + 5000 * 2 ** tries;
+          tries++;
+          if (have === null) show({ oi: [], status: `Mapa de liquidações: ${msg} — tentando de novo...` });
         })
         .finally(() => {
           busy = false;
@@ -1238,29 +1296,151 @@ export function ChartPane({
   const deltaWidth = useRef(deltaW);
   const deltaDrag = useRef<{ x: number; width: number } | null>(null);
   const deltaOn = useRef(!!pane.deltaProfile);
-  const reserveFor = useRef((vpW: number, dW: number) => vpW * 0 + dW * 0);
+  /**
+   * Arranjo dos dois perfis da direita: distância de cada um até a borda direita da área do gráfico e o espaço
+   * reservado. Os ISOLADOS ficam colados ao eixo (o gráfico reserva o espaço deles); os INTEGRADOS logo à esquerda,
+   * sobre o gráfico (atrás das velas). Dentro de cada grupo, a ordem escolhida (perfil → Delta ou Delta → perfil).
+   */
+  const profileLayout = (vpW: number, dW: number) => {
+    const order: ("vp" | "delta")[] = pane.profileOrder === "delta-vp" ? ["delta", "vp"] : ["vp", "delta"];
+    const on = { vp: !!pane.sideProfile, delta: !!pane.deltaProfile };
+    const integ = { vp: !!pane.sideIntegrated, delta: !!pane.deltaIntegrated };
+    const w = { vp: vpW, delta: dW };
+    const out = { vp: 0, delta: 0, reserve: 0, total: 0 };
+    let off = 0;
+    for (const group of [false, true])
+      for (const k of [...order].reverse())
+        if (on[k] && integ[k] === group) {
+          out[k] = off;
+          off += w[k];
+          if (!group) out.reserve = off;
+        }
+    out.total = off;
+    return out;
+  };
+  const layoutNow = useRef(profileLayout);
   useEffect(() => {
     deltaOn.current = !!pane.deltaProfile;
     if (!deltaDrag.current) deltaWidth.current = deltaW;
-    reserveFor.current = (vpW: number, dW: number) => {
-      const vpIso = !!pane.sideProfile && !pane.sideIntegrated;
-      return (vpIso ? vpW : 0) + (pane.deltaProfile && (!pane.deltaIntegrated || vpIso) ? dW : 0);
-    };
+    layoutNow.current = profileLayout;
   });
+  // Espaço à direita da última vela = margem padrão + painéis isolados. (Antes a base era lida com
+  // getOffsetRightDistance(), que devolve a posição de rolagem do momento e não a margem: depois de um zoom ou
+  // arraste a reserva ficava errada e as últimas velas iam parar atrás dos painéis.)
   const applyReserve = (c: Chart, vpW: number, dW: number) => {
-    const r = reserveFor.current(vpW, dW);
-    if (r > 0) {
-      if (sideBase.current === null) sideBase.current = c.getOffsetRightDistance();
-      c.setOffsetRightDistance(sideBase.current + r);
-    } else if (sideBase.current !== null) {
-      c.setOffsetRightDistance(sideBase.current);
-      sideBase.current = null;
-    }
+    const r = layoutNow.current(vpW, dW).reserve;
+    if (r === sideBase.current) return;
+    if (r > 0 || sideBase.current !== null) c.setOffsetRightDistance(BASE_RIGHT + r);
+    sideBase.current = r > 0 ? r : null;
   };
+  // Fibonacci por arraste: com a ferramenta escolhida, pressionar marca o 1º ponto, arrastar mostra a prévia e soltar
+  // conclui. Um clique simples (sem arrastar) continua no modo de dois cliques da biblioteca. Esc cancela (cancelDraw).
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    const toPoint = (e: PointerEvent): DragPoint | null => {
+      const c = chart.current;
+      const size = c?.getSize("candle_pane", "main");
+      if (!c || !size) return null;
+      const r = node.getBoundingClientRect();
+      const x = e.clientX - r.left - size.left;
+      const y = e.clientY - r.top - size.top;
+      if (x < 0 || y < 0 || x > size.width || y > size.height) return null;
+      const [p] = c.convertFromPixel([{ x, y }], { paneId: "candle_pane" }) as DragPoint[];
+      return p && typeof p.value === "number" ? { timestamp: p.timestamp, dataIndex: p.dataIndex, value: p.value } : null;
+    };
+    const down = (e: PointerEvent) => {
+      const d = dragDraw.current;
+      const c = chart.current;
+      if (!d || !c || e.button !== 0 || drawingId.current !== d.id) return;
+      // Só no primeiro ponto (depois de um clique, o 2º ponto segue o modo de cliques).
+      const o = c.getOverlays({ id: d.id })[0] as { currentStep?: number } | undefined;
+      if (!o || o.currentStep !== 1) return;
+      const p1 = toPoint(e);
+      if (p1) d.press = { x: e.clientX, y: e.clientY, p1, started: false };
+    };
+    const move = (e: PointerEvent) => {
+      const d = dragDraw.current;
+      const c = chart.current;
+      const press = d?.press;
+      if (!d || !c || !press) return;
+      if (!(e.buttons & 1)) {
+        d.press = null;
+        return;
+      }
+      const p2 = toPoint(e);
+      if (!p2) return;
+      if (!press.started) {
+        if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < DRAG_MIN) return;
+        press.started = true;
+        // O desenho em andamento vira um desenho com os 2 pontos (a prévia), mantendo id, estilo e dados.
+        // (Sem avisar "desenho terminado": o desenho continua em andamento até soltar, e o Esc ainda cancela.)
+        const m = meta.current.get(d.id);
+        d.rebuilding = true;
+        c.removeOverlay({ id: d.id });
+        d.rebuilding = false;
+        if (m) meta.current.set(d.id, m);
+        d.make([press.p1, p2]);
+      } else c.overrideOverlay({ id: d.id, points: [press.p1, p2] });
+    };
+    const up = () => {
+      const d = dragDraw.current;
+      if (!d?.press) return;
+      const started = d.press.started;
+      d.press = null;
+      if (!started) return;
+      dragDraw.current = null;
+      finishRef.current(d.id);
+    };
+    node.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", up, true);
+    return () => {
+      node.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", up, true);
+    };
+  }, []);
+  // Zoom, arraste ou vista restaurada podem empurrar a última vela para baixo dos painéis isolados: ela volta para
+  // a esquerda deles (com o botão do mouse solto, para não brigar com o arraste). Vendo o histórico (última vela
+  // fora da tela), nada muda.
+  const pressed = useRef(false);
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    const down = () => (pressed.current = true);
+    const up = () => (pressed.current = false);
+    node.addEventListener("pointerdown", down);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    let raf = 0;
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const c = chart.current;
+      if (!c || pressed.current) return;
+      const r = layoutNow.current(sideWidth.current, deltaWidth.current).reserve;
+      if (r <= 0) return;
+      const size = c.getSize("candle_pane", "main");
+      const n = c.getDataList().length;
+      if (!size || size.width <= 0 || !n) return;
+      const x = (c.convertToPixel({ dataIndex: n - 1 }, { paneId: "candle_pane" }) as { x?: number }).x;
+      if (typeof x !== "number" || !Number.isFinite(x)) return;
+      const bar = c.getBarSpace().bar;
+      const limit = size.width - r - Math.max(4, bar);
+      if (x > limit && x < size.width + bar) c.scrollByDistance(limit - x);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(raf);
+      node.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, []);
   useEffect(() => {
     const c = chart.current;
     if (c) applyReserve(c, sideWidth.current, deltaWidth.current);
-  }, [pane.sideProfile, pane.sideIntegrated, pane.deltaProfile, pane.deltaIntegrated, pane.sideWidth, deltaW]);
+  }, [pane.sideProfile, pane.sideIntegrated, pane.deltaProfile, pane.deltaIntegrated, pane.profileOrder, pane.sideWidth, deltaW]);
 
   // ---------- Camadas de volume e fluxo (botões próprios, independentes) ----------
   const flowSub = useRef<{ key: string; subId: string; bars: KLineData[]; from: number; to: number; at: number } | null>(null);
@@ -1275,14 +1455,14 @@ export function ChartPane({
     };
     // Atrás das velas: perfil integrado (mais ao fundo) e Delta Horizontal. Por cima: marcações e Footprint.
     const z: Record<string, number> = { [SIDE_INT]: -3, [DELTA_PROF]: -2, [MARKS]: 900, [FOOTPRINT]: 800 };
-    const dW = pane.deltaProfile ? deltaWidth.current : 0;
-    const reserve = (pane.sideProfile ? (pane.sideWidth ?? SIDE_WIDTH) : 0) + dW;
+    const lay = layoutNow.current(pane.sideWidth ?? SIDE_WIDTH, deltaWidth.current);
+    const reserve = lay.total;
     const extend = (name: string): Record<string, unknown> => {
       const sub = flowSub.current?.key === `${pane.symbol}|${pane.interval}` ? flowSub.current : null;
-      if (name === SIDE_INT) return { width: pane.sideWidth ?? SIDE_WIDTH, buy: sideColorsNow?.buy, sell: sideColorsNow?.sell, shift: dW };
+      if (name === SIDE_INT) return { width: pane.sideWidth ?? SIDE_WIDTH, buy: sideColorsNow?.buy, sell: sideColorsNow?.sell, shift: lay.vp };
       if (name === MARKS) return { ...layerStyles?.marks, reserve };
-      if (name === DELTA_PROF) return { ...layerStyles?.delta, width: deltaWidth.current, integrated: !!pane.deltaIntegrated && !(pane.sideProfile && !pane.sideIntegrated), sub: sub?.bars, subId: sub?.subId };
-      return { style: layerStyles?.footprint, sub: sub?.bars, subId: sub?.subId, barMs: BAR_MS[pane.interval] };
+      if (name === DELTA_PROF) return { ...layerStyles?.delta, width: deltaWidth.current, right: lay.delta, integrated: !!pane.deltaIntegrated, period: INTERVAL_LABEL[pane.interval], sub: sub?.bars ?? [], subId: sub?.subId ?? "", barMs: BAR_MS[pane.interval] };
+      return { style: layerStyles?.footprint, sub: sub?.bars ?? [], subId: sub?.subId ?? "", barMs: BAR_MS[pane.interval] };
     };
     for (const name of [SIDE_INT, MARKS, DELTA_PROF, FOOTPRINT]) {
       const id = `bh_${name}`;
@@ -1328,16 +1508,21 @@ export function ChartPane({
       try {
         const bars = new Map<number, KLineData>((cur?.bars ?? []).map((b) => [b.timestamp, b]));
         let end: number | null = live ? null : zTs + barMs;
+        // Chegou ao começo do histórico da Binance (página incompleta): o trecho conta como coberto desde "a"
+        // (não há velas mais antigas para buscar; sem isso, pediria de novo sem parar).
+        let exhausted = false;
         for (let page = 0; page < 6; page++) {
           const got = await loadCandles(pane.symbol, sub.id as ChartInterval, end, 1000);
           if (cancelled) return;
           for (const b of got) bars.set(b.timestamp, b);
           const oldest = got[0]?.timestamp;
-          if (!got.length || typeof oldest !== "number" || oldest <= a || (cur && cur.from <= a && oldest <= cur.to)) break;
+          if (got.length < 1000) exhausted = true;
+          if (!got.length || typeof oldest !== "number" || oldest <= a || got.length < 1000 || (cur && cur.from <= a && oldest <= cur.to)) break;
           end = oldest - 1;
         }
         const sorted = [...bars.values()].sort((x, y) => x.timestamp - y.timestamp).slice(-12000);
-        flowSub.current = { key, subId: sub.id, bars: sorted, from: Math.max(sorted[0]?.timestamp ?? a, Math.min(a, cur?.from ?? a)), to: Math.max(zTs, cur?.to ?? zTs), at: Date.now() };
+        const first = sorted[0]?.timestamp ?? a;
+        flowSub.current = { key, subId: sub.id, bars: sorted, from: exhausted ? Math.min(a, first) : Math.max(first, Math.min(a, cur?.from ?? a)), to: Math.max(zTs, cur?.to ?? zTs), at: Date.now() };
         push();
       } catch (e) {
         if (!cancelled) cb.current.onError(`Fluxo por preço: ${e instanceof Error ? e.message : "indisponível"}`);
@@ -1352,7 +1537,7 @@ export function ChartPane({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [pane.sideProfile, pane.sideIntegrated, pane.sideMarks, pane.deltaProfile, pane.deltaIntegrated, pane.footprint, pane.sideWidth, pane.symbol, pane.interval, layerStyles, sideColorsNow]);
+  }, [pane.sideProfile, pane.sideIntegrated, pane.sideMarks, pane.deltaProfile, pane.deltaIntegrated, pane.profileOrder, pane.footprint, pane.sideWidth, pane.symbol, pane.interval, layerStyles, sideColorsNow]);
 
   // Perfil de volume lateral: tela própria colada à direita da área do preço, por cima de tudo, com o cálculo da
   // ferramenta Faixa Fixa sobre as velas e a faixa de preço visíveis. Redesenha só quando muda algo (velas, janela
@@ -1383,15 +1568,15 @@ export function ChartPane({
       const from = Math.max(0, range.from);
       const to = Math.min(data.length - 1, range.to - 1);
       const colors = sideColors.current;
-      const key = [deltaOn.current ? deltaWidth.current : 0, size.left, size.top, size.width, W, H, lo, hi, data.length, last?.timestamp, last?.close, from, to, colors?.buy, colors?.sell, sideIntegratedRef.current].join("|");
+      const key = [JSON.stringify(layoutNow.current(sideWidth.current, deltaWidth.current)), deltaOn.current ? deltaWidth.current : 0, size.left, size.top, size.width, W, H, lo, hi, data.length, last?.timestamp, last?.close, from, to, colors?.buy, colors?.sell, sideIntegratedRef.current].join("|");
       if (key === lastKey) return;
       lastKey = key;
-      const dEff = deltaOn.current ? deltaWidth.current : 0;
-      const left = size.left + size.width - dEff - W;
+      const lay = layoutNow.current(W, deltaWidth.current);
+      const left = size.left + size.width - lay.vp - W;
       sideBox.current = { left, top: size.top };
       const dh = deltaHandle.current;
       if (dh) {
-        dh.style.left = `${size.left + size.width - dEff - 4}px`;
+        dh.style.left = `${size.left + size.width - lay.delta - deltaWidth.current - 4}px`;
         dh.style.top = `${size.top}px`;
         dh.style.height = `${H}px`;
       }
@@ -1894,7 +2079,7 @@ export function ChartPane({
           if (dh) {
             setTip(null);
             setSideSelected(null);
-            const left = area.left + area.width - deltaWidth.current;
+            const left = area.left + area.width - layoutNow.current(sideWidth.current, deltaWidth.current).delta - deltaWidth.current;
             setDeltaSelected({ open: null, left, top: area.top, width: deltaWidth.current, height: area.height, right: r.width - left + 8 });
             return;
           }
@@ -2018,6 +2203,20 @@ export function ChartPane({
             >
               {pane.sideIntegrated ? <ChevronRight /> : <ChevronLeft />}
             </button>
+            {pane.deltaProfile && (
+              <button
+                type="button"
+                aria-label={pane.profileOrder === "delta-vp" ? "Mover para a esquerda do Delta Horizontal" : "Mover para a direita do Delta Horizontal"}
+                title={pane.profileOrder === "delta-vp" ? "Mover para a esquerda do Delta Horizontal" : "Mover para a direita do Delta Horizontal"}
+                onClick={() => {
+                  cb.current.onProfileOrderChange?.(pane.profileOrder === "delta-vp" ? "vp-delta" : "delta-vp");
+                  setSideSelected(null);
+                }}
+                className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-4"
+              >
+                {pane.profileOrder === "delta-vp" ? <ArrowLeftToLine /> : <ArrowRightToLine />}
+              </button>
+            )}
             <button type="button" aria-label="Fechar" title="Fechar" onClick={() => setSideSelected(null)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
               ×
             </button>
@@ -2113,6 +2312,21 @@ export function ChartPane({
             >
               {pane.deltaIntegrated ? <ChevronRight /> : <ChevronLeft />}
             </button>
+            {pane.sideProfile && (
+              // Ordem entre os dois perfis (independente de integrar/separar).
+              <button
+                type="button"
+                aria-label={pane.profileOrder === "delta-vp" ? "Mover para a direita do perfil de volume" : "Mover para a esquerda do perfil de volume"}
+                title={pane.profileOrder === "delta-vp" ? "Mover para a direita do perfil de volume" : "Mover para a esquerda do perfil de volume"}
+                onClick={() => {
+                  cb.current.onProfileOrderChange?.(pane.profileOrder === "delta-vp" ? "vp-delta" : "delta-vp");
+                  setDeltaSelected(null);
+                }}
+                className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-4"
+              >
+                {pane.profileOrder === "delta-vp" ? <ArrowRightToLine /> : <ArrowLeftToLine />}
+              </button>
+            )}
             <button type="button" aria-label="Fechar" title="Fechar" onClick={() => setDeltaSelected(null)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
               ×
             </button>

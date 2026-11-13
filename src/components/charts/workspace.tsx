@@ -104,7 +104,8 @@ import {
   WidthMenu,
 } from "./object-ui";
 import { COMPARE_COLORS } from "@/lib/charts/colors";
-import { FavoritesBar, IntervalBar, ToolGroups } from "./toolbar";
+import { FavoritesBar, FloatingFavorites, IntervalBar, ToolGroups } from "./toolbar";
+import { confirmAction } from "@/components/confirm-dialog";
 
 // O gráfico usa o canvas do navegador: carregado só no cliente.
 const ChartPane = dynamic(
@@ -309,7 +310,7 @@ export function ChartWorkspace({
   );
 
   const tab = tabs.find((t) => t.id === activeId) ?? tabs[0];
-  const paneIndex = Math.min(activePane, tab.state.panes.length - 1);
+  const paneIndex = Math.min(activePane, tab.state.layout - 1, tab.state.panes.length - 1);
   const pane = tab.state.panes[paneIndex];
 
   function flushSave(id: number) {
@@ -620,6 +621,13 @@ export function ChartWorkspace({
 
   async function closeTab(t: ChartTab) {
     if (tabs.length <= 1) return toast.error("Mantenha pelo menos uma aba");
+    // Confirmação antes de fechar (a aba é identificada pelo id; cancelar não muda nada).
+    const ok = await confirmAction({
+      title: "Fechar gráfico?",
+      message: `Tem certeza de que deseja fechar a aba ${tabTitle(t).label}?`,
+      confirmLabel: "Fechar gráfico",
+    });
+    if (!ok) return;
     const r = await safeAction(() => deleteChartTabAction(t.id));
     if (!r.ok) return toast.error(r.error);
     const rest = tabs.filter((x) => x.id !== t.id);
@@ -630,7 +638,8 @@ export function ChartWorkspace({
   function setLayout(layout: ChartLayout) {
     const panes = [...tab.state.panes];
     while (panes.length < layout) panes.push(newPane(pane.symbol));
-    updateTab({ layout, panes: panes.slice(0, layout) });
+    // Gráficos além do layout ficam guardados (voltam iguais ao aumentar o layout de novo).
+    updateTab({ layout, panes });
     if (activePane >= layout) setActivePane(0);
     setSelected(null);
   }
@@ -832,6 +841,16 @@ export function ChartWorkspace({
     });
     tabRects.current.clear();
   }, [dragOrderKey]);
+  // Área dos gráficos (a barra flutuante de favoritos fica dentro dela, mesmo quando a janela muda de tamanho).
+  const chartsArea = useRef<HTMLDivElement>(null);
+  const [chartsSize, setChartsSize] = useState({ width: 1200, height: 600 });
+  useEffect(() => {
+    const el = chartsArea.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setChartsSize({ width: el.clientWidth, height: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // Configurações das camadas de volume e fluxo (clique direito nos botões).
   const [layerSettings, setLayerSettings] = useState<LayerKind | null>(null);
   // Pares favoritos: preferência da conta, a mesma para todos os gráficos (só a lista muda; nenhum gráfico troca de par).
@@ -935,17 +954,26 @@ export function ChartWorkspace({
             </button>
           </div>
         ))}
-        {tabs.length < LIMITS.tabs && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => void addTab()}
-            aria-label="Nova aba"
-          >
-            <Plus /> Aba
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void addTab()}
+          aria-label="Nova aba"
+          disabled={tabs.length >= LIMITS.tabs}
+          title={
+            tabs.length >= LIMITS.tabs
+              ? `Limite de ${LIMITS.tabs} abas gráficas atingido.`
+              : "Nova aba"
+          }
+        >
+          <Plus /> Aba
+        </Button>
         <span className="ml-auto text-xs text-muted-foreground">
+          {tabs.length >= LIMITS.tabs && (
+            <span role="status" className="mr-2 text-amber-400/80">
+              Limite de {LIMITS.tabs} abas gráficas atingido.
+            </span>
+          )}
           {tabs.length}/{LIMITS.tabs} abas
         </span>
       </div>
@@ -1014,7 +1042,22 @@ export function ChartWorkspace({
         >
           Comparar ({pane.compares.length})
         </Button>
-        <FavoritesBar prefs={tools} activeTool={activeTool} onDraw={draw} />
+        <FavoritesBar
+          prefs={tools}
+          activeTool={activeTool}
+          onDraw={draw}
+          floatingOn={!!tools.floatingFavorites?.on}
+          onToggleFloating={() =>
+            changePrefs({
+              ...tools,
+              floatingFavorites: {
+                x: tools.floatingFavorites?.x ?? 60,
+                y: tools.floatingFavorites?.y ?? 12,
+                on: !tools.floatingFavorites?.on,
+              },
+            })
+          }
+        />
         <div className="ml-auto flex items-center gap-1.5">
           {/* Mapa de liquidações e perfil lateral de liquidez (independentes; valem para o gráfico selecionado). */}
           {/* Volume e fluxo, nesta ordem (independentes): perfil lateral, marcações POC/VAH/VAL, mapa de liquidações,
@@ -1196,8 +1239,14 @@ export function ChartWorkspace({
             type="button"
             title="Apagar os desenhos do gráfico selecionado"
             aria-label="Apagar desenhos"
-            onClick={() => {
-              if (!window.confirm("Apagar todos os desenhos deste gráfico?"))
+            onClick={async () => {
+              if (
+                !(await confirmAction({
+                  title: "Apagar desenhos?",
+                  message: "Apagar todos os desenhos deste gráfico?",
+                  confirmLabel: "Apagar desenhos",
+                }))
+              )
                 return;
               handles.current[paneIndex]?.clearDrawings();
               setSelected(null);
@@ -1219,12 +1268,28 @@ export function ChartWorkspace({
 
         {/* Gráficos */}
         <div
+          ref={chartsArea}
           className={cn(
-            "grid h-[calc(100vh-15rem)] min-h-[420px] flex-1 gap-2",
+            "relative grid h-[calc(100vh-15rem)] min-h-[420px] flex-1 gap-2",
             GRID[tab.state.layout],
           )}
         >
-          {tab.state.panes.map((p, i) => (
+          {tools.floatingFavorites?.on && (
+            <FloatingFavorites
+              prefs={tools}
+              activeTool={activeTool}
+              onDraw={draw}
+              pos={tools.floatingFavorites}
+              bounds={chartsSize}
+              onMove={(p) =>
+                changePrefs({
+                  ...tools,
+                  floatingFavorites: { on: true, ...p },
+                })
+              }
+            />
+          )}
+          {tab.state.panes.slice(0, tab.state.layout).map((p, i) => (
             <ChartPane
               key={`${tab.id}-${i}`}
               pane={p}
@@ -1259,6 +1324,9 @@ export function ChartWorkspace({
               }
               onDeltaIntegratedChange={(deltaIntegrated) =>
                 updatePaneOf(tab.id, i, { deltaIntegrated })
+              }
+              onProfileOrderChange={(profileOrder) =>
+                updatePaneOf(tab.id, i, { profileOrder })
               }
               onSideIntegratedChange={(sideIntegrated) =>
                 updatePaneOf(tab.id, i, { sideIntegrated })
@@ -1539,7 +1607,7 @@ function LayerToggle({
       </button>
       <span
         role="tooltip"
-        className="pointer-events-none absolute top-full left-1/2 z-40 mt-1.5 hidden -translate-x-1/2 rounded-md border border-border bg-zinc-800/95 px-2 py-1 text-xs whitespace-nowrap text-zinc-100 shadow-lg group-focus-within:block group-hover:block"
+        className="pointer-events-none absolute top-full left-1/2 z-40 mt-1.5 hidden -translate-x-1/2 rounded-md border border-border bg-zinc-800/95 px-2 py-1 text-xs whitespace-nowrap text-zinc-100 shadow-lg group-hover:block group-has-[:focus-visible]:block"
       >
         {label}
         {onSettings && (
