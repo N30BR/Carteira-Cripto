@@ -223,3 +223,23 @@ export async function fetchOpenInterest(symbol: string, period: string): Promise
     .map((o) => [Number(o.timestamp), Number(o.sumOpenInterest)] as [number, number])
     .filter(([t, v]) => Number.isFinite(t) && Number.isFinite(v));
 }
+
+/**
+ * Velas diárias de um par desde `startTime` (ms), em páginas de 1000: [abertura (00:00 UTC), fechamento, volume na
+ * moeda de cotação]. Ex.: BTCUSDT → volume em USDT negociado NA BINANCE (não é o volume de todo o mercado).
+ */
+export async function fetchDailyBars(pair: string, startTime: number, maxPages = 4): Promise<[number, number, number][]> {
+  const out: [number, number, number][] = [];
+  let from = startTime;
+  for (let page = 0; page < maxPages; page++) {
+    const body = await get<unknown[][]>("/api/v3/klines", { symbol: pair, interval: "1d", startTime: String(from), limit: "1000" });
+    if (!Array.isArray(body)) throw new Error(`Binance: sem histórico para ${pair}`);
+    for (const k of body) {
+      const row: [number, number, number] = [Number(k[0]), Number(k[4]), Number(k[7])];
+      if (row.every(Number.isFinite)) out.push(row);
+    }
+    if (body.length < 1000) break;
+    from = Number(body[body.length - 1][0]) + 86_400_000;
+  }
+  return out;
+}

@@ -14,6 +14,7 @@ import { MiniArea, SeriesChart } from "@/components/market/series-chart";
 import { cn } from "@/lib/utils";
 import { ACCENT, BTC_ORANGE, Badge, Card, Chips, Delta, InfoTip, Meter, Panel, Unavailable, num, pct, usd } from "./ui";
 import { EtfSection } from "./etf-section";
+import { FearGreedSection } from "./fear-greed-section";
 import { AltseasonSection, AltseasonIndexPanel } from "./altseason-section";
 
 import { GLOBAL_PERIODS, PERIOD_COOKIE, PERIOD_DAYS, type GlobalPeriod } from "@/lib/market/prefs";
@@ -155,6 +156,9 @@ export function CriptoView({ data, timeZone, initialPeriod }: { data: CryptoOver
           <AltseasonIndexPanel data={data} compact />
         </div>
       </Panel>
+
+      {/* Fear and Greed (CoinMarketCap): logo abaixo da visão geral, largura total */}
+      <FearGreedSection data={data.fearGreed} now={data.now} timeZone={timeZone} />
 
       <OnchainCards items={chain.items} period={period} days={days} consolidated={chain.consolidated} now={data.now} />
       <OnchainDeep data={data} />

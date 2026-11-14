@@ -36,6 +36,8 @@ import {
   parseLlamaStables,
 } from "./parse";
 import { type EtfReading, type FundSummary, readFlows, summarizeFund } from "./etf";
+import { type BtcDay, type FgLatest, type FgPoint, mergeFgHistory, parseFgHistory, parseFgLatest } from "./fear-greed";
+import { fetchDailyBars } from "@/lib/prices/binance";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -411,8 +413,64 @@ async function etf(db: Db, now: Date): Promise<Part<EtfData> & { configured: boo
 
 // ---------- página ----------
 
+// ---------- CMC Crypto Fear and Greed Index ----------
+// Endpoints documentados (sem chave na API pública; com CMC_API_KEY, a mesma rota na API com chave):
+// /v3/fear-and-greed/latest (valor atual) e /v3/fear-and-greed/historical (diário, páginas de até 500: start/limit).
+// A fonte atualiza o valor algumas vezes ao dia e o histórico uma vez por dia: atual a cada 30 min, histórico a
+// cada 6 h; em falha fica o último dado válido, marcado como desatualizado. Preço e volume do BTC: Binance (BTC/USDT,
+// diário, volume em USDT da Binance), a cada 1 h.
+export type FearGreedData = { latest: Part<FgLatest>; history: Part<FgPoint[]>; btc: Part<BtcDay[]> };
+
+const fgLatest = (db: Db, now: Date) =>
+  part<FgLatest>(db, "market:cmc:fg:latest:v1", 30 * MIN, async () => parseFgLatest(await cmcGet("/v3/fear-and-greed/latest", 50_000)), now, "Índice Fear and Greed indisponível no momento");
+
+const fgHistory = (db: Db, now: Date) =>
+  part<FgPoint[]>(
+    db,
+    "market:cmc:fg:hist:v1",
+    6 * HOUR,
+    async () => {
+      // Páginas em sequência (cota da API pública), até o fim do histórico (no máximo 20 páginas = ~27 anos).
+      const pages: FgPoint[][] = [];
+      for (let start = 1; pages.length < 20; start += 500) {
+        const page = parseFgHistory(await cmcGet(`/v3/fear-and-greed/historical?start=${start}&limit=500`, 300_000));
+        pages.push(page);
+        if (page.length < 500) break;
+      }
+      const all = mergeFgHistory(pages);
+      if (!all.length) throw new Error("sem dados");
+      return all;
+    },
+    now,
+    "Histórico do Fear and Greed indisponível no momento",
+  );
+
+const btcDaily = (db: Db, from: number, now: Date) =>
+  part<BtcDay[]>(
+    db,
+    "market:bn:btcusdt:1d:v1",
+    HOUR,
+    async () => {
+      const rows = await fetchDailyBars("BTCUSDT", from);
+      if (!rows.length) throw new Error("sem dados");
+      return rows.map(([t, close, volume]) => ({ t, close, volume }));
+    },
+    now,
+    "Preço e volume do BTC indisponíveis no momento",
+  );
+
+async function fearGreed(db: Db, now: Date): Promise<FearGreedData> {
+  // Em sequência com as outras chamadas à CoinMarketCap (cota da API pública).
+  const latest = await fgLatest(db, now);
+  const history = await fgHistory(db, now);
+  const first = history.ok && history.data.length ? history.data[0].t : now.getTime() - 3 * 365 * DAY;
+  const btc = await btcDaily(db, first, now);
+  return { latest, history, btc };
+}
+
 export type CryptoOverview = {
   now: number;
+  fearGreed: FearGreedData;
   market: Part<MarketData>;
   altseason: Part<AltseasonData>;
   coins: Part<{ top: CoinRow[]; btc: CoinRow | null; usdt: CoinRow | null }>;
@@ -423,6 +481,7 @@ export type CryptoOverview = {
 export async function getCryptoOverview(db: Db, now = new Date()): Promise<CryptoOverview> {
   const [parts, chain, etfs] = await Promise.all([marketParts(db, now), onchain(db, now), etf(db, now)]);
   const market = assembleMarket(db, parts, now);
+  const fg = await fearGreed(db, now);
   const store = readStore(db);
   const asiHist = mergeDaily(fromStore(store, "ASI"), parts.h.ok ? parts.h.data.index : []);
   const altseason: Part<AltseasonData> =
@@ -437,5 +496,5 @@ export async function getCryptoOverview(db: Db, now = new Date()): Promise<Crypt
   const coins: CryptoOverview["coins"] = parts.l.ok
     ? { ok: true, stale: parts.l.stale, at: parts.l.at, data: { top: topEligible(parts.l.data, 100), btc: parts.l.data.find((c) => c.symbol === "BTC") ?? null, usdt: parts.l.data.find((c) => c.symbol === "USDT") ?? null } }
     : parts.l;
-  return { now: now.getTime(), market, altseason, coins, onchain: chain, etf: etfs };
+  return { now: now.getTime(), fearGreed: fg, market, altseason, coins, onchain: chain, etf: etfs };
 }
