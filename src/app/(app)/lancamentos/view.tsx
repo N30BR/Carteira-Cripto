@@ -499,9 +499,8 @@ export function LaunchesView({
           </>
         }
         confirmLabel="Excluir todas"
-        typeToConfirm="EXCLUIR"
         onConfirm={async () => {
-          const res = await safeAction(() => deleteAllExpensesAction("EXCLUIR"));
+          const res = await safeAction(() => deleteAllExpensesAction());
           if (!res.ok) throw new Error(res.error);
           setInvoicePage(0);
           toast.success("Todas as faturas foram excluídas com sucesso.");

@@ -224,12 +224,11 @@ export async function setCardClosingDayAction(id: number, day: number | null): P
 }
 
 /**
- * Exclui todas as faturas da conta logada (não só o mês ou os filtros da tela). Exige a palavra "EXCLUIR"
- * também aqui no servidor, além da janela de confirmação.
+ * Exclui todas as faturas da conta logada (não só o mês ou os filtros da tela). Chamado só depois do clique em
+ * "Excluir todas" na janela de confirmação.
  */
-export async function deleteAllExpensesAction(confirmWord: string): Promise<Result & { expenses?: number; installments?: number }> {
+export async function deleteAllExpensesAction(): Promise<Result & { expenses?: number; installments?: number }> {
   const user = await requireModule("invoices");
-  if (confirmWord !== "EXCLUIR") return { ok: false, error: "Confirmação inválida" };
   if (!allowFiatChange(user.id)) return TOO_MANY;
   if (countAllExpenses(getDb(), user.id).expenses === 0) return { ok: false, error: "Não há faturas para excluir" };
   try {

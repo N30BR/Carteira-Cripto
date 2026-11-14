@@ -607,3 +607,45 @@ export function heatRgb(t: number): [number, number, number] {
   const k = (x - p0) / (p1 - p0 || 1);
   return [0, 1, 2].map((j) => Math.round(c0[j] + (c1[j] - c0[j]) * k)) as [number, number, number];
 }
+
+/**
+ * FAJ Dogepack (FiatEaterJens): RSI de Wilder no fechamento e EMA do RSI, como no Pine Script.
+ * - up/down = RMA(max(±variação, 0), período), começando pela média simples (ta.rma);
+ * - RSI = down = 0 → 100; up = 0 → 0; senão 100 − 100 / (1 + up/down) (mesma ordem de casos de ta.rsi);
+ * - EMA do RSI (ta.ema): começa na média simples dos primeiros `emaLen` RSIs válidos;
+ * - rising[i] = EMA[i] ≥ EMA[i−1] (null sem duas EMAs seguidas): cor da EMA e do fundo naquela vela.
+ * Sem deslocamento: cada valor fica na vela em que é calculado.
+ */
+export function fajDogepack(closes: number[], rsiLen: number, emaLen: number): { rsi: N[]; ema: N[]; rising: (boolean | null)[] } {
+  const n = closes.length;
+  const p = Math.max(1, Math.round(rsiLen));
+  const q = Math.max(1, Math.round(emaLen));
+  const rsiOut: N[] = Array(n).fill(null);
+  if (n > p) {
+    let up = 0;
+    let down = 0;
+    for (let i = 1; i <= p; i++) {
+      const d = closes[i] - closes[i - 1];
+      up += Math.max(d, 0);
+      down += Math.max(-d, 0);
+    }
+    up /= p;
+    down /= p;
+    const value = () => (down === 0 ? 100 : up === 0 ? 0 : 100 - 100 / (1 + up / down));
+    rsiOut[p] = value();
+    for (let i = p + 1; i < n; i++) {
+      const d = closes[i] - closes[i - 1];
+      up = (up * (p - 1) + Math.max(d, 0)) / p;
+      down = (down * (p - 1) + Math.max(-d, 0)) / p;
+      rsiOut[i] = value();
+    }
+  }
+  const first = rsiOut.findIndex((v) => v !== null);
+  const emaOut: N[] = Array(n).fill(null);
+  if (first >= 0) {
+    const tail = ema(rsiOut.slice(first) as number[], q);
+    tail.forEach((v, j) => (emaOut[first + j] = v));
+  }
+  const rising = emaOut.map((v, i) => (v === null || i === 0 || emaOut[i - 1] === null ? null : v >= (emaOut[i - 1] as number)));
+  return { rsi: rsiOut, ema: emaOut, rising };
+}

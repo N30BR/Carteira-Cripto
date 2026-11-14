@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { fgColor, fgReferences, fgWindow, fgYearRange, labelPt, mergeFgHistory, parseFgHistory, parseFgLatest, type FgPoint } from "@/lib/market/fear-greed";
+import { FG_RANGES, fgColor, fgReferences, fgWindow, fgYearRange, labelPt, mergeFgHistory, parseFgHistory, parseFgLatest, type FgPoint } from "@/lib/market/fear-greed";
 
 const DAY = 86_400_000;
 const d = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
@@ -68,9 +68,13 @@ describe("Fear and Greed: referências e extremos", () => {
     expect([r.max.value, r.min.value]).toEqual([80, 10]);
     expect(fgYearRange([])).toBeNull();
   });
-  test("janelas 30D, 1A e Tudo", () => {
+  test("janelas 1S, 1M, 3M, 6M, 1A e Tudo", () => {
     const last = hist.at(-1)!.t;
-    expect(fgWindow(hist, "30D", last)).toHaveLength(30);
+    expect(FG_RANGES).toEqual(["1S", "1M", "3M", "6M", "1A", "Tudo"]);
+    expect(fgWindow(hist, "1S", last)).toHaveLength(7);
+    expect(fgWindow(hist, "1M", last)).toHaveLength(30);
+    expect(fgWindow(hist, "3M", last)).toHaveLength(90);
+    expect(fgWindow(hist, "6M", last)).toHaveLength(182);
     expect(fgWindow(hist, "1A", last)).toHaveLength(365);
     expect(fgWindow(hist, "Tudo", last)).toHaveLength(400);
   });

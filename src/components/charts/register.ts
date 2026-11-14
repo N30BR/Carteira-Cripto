@@ -6,6 +6,7 @@ import { registerIndicator, registerOverlay, type KLineData } from "klinecharts"
 import {
   atr,
   deltaSeries,
+  fajDogepack,
   ichimoku,
   liquidationLevels,
   mfi,
@@ -36,6 +37,7 @@ const lines = (keys: string[], titles?: string[]) =>
   keys.map((key, i) => ({ key, title: `${titles?.[i] ?? key.toUpperCase()}: `, type: "line" }));
 
 import { COMPARE_COLORS } from "@/lib/charts/colors";
+import { FAJ_EMA_DOWN, FAJ_EMA_UP, FAJ_FILL_DOWN, FAJ_FILL_UP, FAJ_LEVELS } from "@/lib/charts/faj";
 export { COMPARE_COLORS };
 export type CompareData = { label: string; points: Point[]; color: string };
 
@@ -371,6 +373,66 @@ export function registerChartExtensions(): void {
     maxValue: 100,
     figures: lines(["mfi"], ["MFI"]),
     calc: (data, ind) => mfi(bars(data), ind.calcParams[0]).map((v) => ({ mfi: v })),
+  });
+
+  // FAJ Dogepack (FiatEaterJens): RSI de Wilder + EMA do RSI (verde-lima subindo, vermelha descendo), 5 níveis fixos
+  // e fundo por vela (ciano com a EMA subindo, violeta descendo). Os níveis são linhas do próprio indicador (cor,
+  // espessura, traço, opacidade e visibilidade de cada um nas configurações). Nenhum sinal de compra/venda.
+  registerIndicator<Row, number, { upColor?: string; downColor?: string; fillUp?: string; fillDown?: string; fillUpOff?: boolean; fillDownOff?: boolean }>({
+    name: "FAJ_DOGEPACK",
+    shortName: "FAJ Dogepack",
+    calcParams: [14, 9],
+    precision: 2,
+    minValue: 0,
+    maxValue: 100,
+    figures: [
+      { key: "rsi", title: "RSI: ", type: "line" },
+      {
+        key: "ema",
+        title: "EMA RSI: ",
+        type: "line",
+        // Cor do trecho que termina na vela seguinte: a direção da EMA naquela vela (EMA atual ≥ anterior = alta).
+        styles: ({ data, indicator }) => {
+          const r = (data.next as Row | undefined)?.rising;
+          if (r === null || r === undefined) return {};
+          const e = indicator.extendData as { upColor?: string; downColor?: string } | undefined;
+          return { color: r === 1 ? (e?.upColor ?? FAJ_EMA_UP) : (e?.downColor ?? FAJ_EMA_DOWN) };
+        },
+      },
+      ...FAJ_LEVELS.map(([key, title]) => ({ key, title, type: "line" })),
+    ],
+    calc: (data, ind) => {
+      const r = fajDogepack(
+        data.map((b) => b.close),
+        ind.calcParams[0],
+        ind.calcParams[1],
+      );
+      return data.map((_, i) => ({ rsi: r.rsi[i], ema: r.ema[i], rising: r.rising[i] === null ? null : r.rising[i] ? 1 : 0, ...Object.fromEntries(FAJ_LEVELS.map(([k, , v]) => [k, v])) }));
+    },
+    draw: ({ ctx, chart, indicator, bounding, xAxis }) => {
+      if (!indicator.visible) return false;
+      const e = indicator.extendData;
+      const up = e?.fillUpOff ? null : (e?.fillUp ?? FAJ_FILL_UP);
+      const down = e?.fillDownOff ? null : (e?.fillDown ?? FAJ_FILL_DOWN);
+      if (!up && !down) return false;
+      const rows = indicator.result as Row[];
+      const r = chart.getVisibleRange();
+      const w = chart.getBarSpace().bar;
+      // Fundo da vela inteira (largura de uma vela), na altura toda do painel; as linhas vêm por cima depois.
+      ctx.save();
+      for (let i = Math.max(0, r.from - 1); i < Math.min(rows.length, r.to + 1); i++) {
+        const rising = rows[i]?.rising;
+        const color = rising === 1 ? up : rising === 0 ? down : null;
+        if (!color) continue;
+        const x = xAxis.convertToPixel(i);
+        ctx.fillStyle = color;
+        // Bordas arredondadas da mesma forma nas duas velas vizinhas: faixas encostadas, sem sobrepor (sem listras).
+        const l = Math.round(x - w / 2);
+        ctx.fillRect(l, 0, Math.round(x + w / 2) - l, bounding.height);
+      }
+      ctx.restore();
+      return false;
+    },
   });
 
   const divMemo = new Map<string, { key: string; divs: ReturnType<typeof rsiDivergences> }>();

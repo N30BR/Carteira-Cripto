@@ -8,6 +8,9 @@ import {
   defaultTab,
   sanitizePrefs,
   sanitizeTabState,
+  factoryIndicatorVisual,
+  indicatorVisual,
+  withIndicatorVisual,
 } from "@/lib/charts/workspace";
 
 describe("estado de uma aba de gráficos", () => {
@@ -253,5 +256,27 @@ describe("gráficos guardados além do layout", () => {
     expect(back.ok && back.value.panes.map((p) => p.interval)).toEqual(["1w", "1d"]);
     // Gráficos guardados também são validados.
     expect(sanitizeTabState({ layout: 1, panes: [two[0], { ...two[1], interval: "7x" }] }).ok).toBe(false);
+  });
+});
+
+describe("FAJ Dogepack: opções salvas", () => {
+  const tab = (options: unknown) => ({
+    layout: 1,
+    panes: [{ ...defaultPane(), indicators: [{ id: "i1", name: "FAJ_DOGEPACK", params: [14, 9], pane: "sub", options }] }],
+  });
+  test("cores e visibilidade do fundo e cores da EMA são aceitas e validadas", () => {
+    const ok = sanitizeTabState(tab({ upColor: "#00E676", downColor: "#FF5252", fillUp: "#00F4FF40", fillDown: "#7E57C233", fillDownOff: true }));
+    expect(ok.ok && ok.value.panes[0].indicators[0].options).toEqual({ upColor: "#00E676", downColor: "#FF5252", fillUp: "#00F4FF40", fillDown: "#7E57C233", fillDownOff: true });
+    expect(sanitizeTabState(tab({ fillUp: "url(x)" })).ok).toBe(false);
+    expect(sanitizeTabState(tab({ fillUpOff: "sim" })).ok).toBe(false);
+  });
+  test("padrão personalizado leva as cores do fundo; ↶ Padrão as remove (mantém visibilidade)", () => {
+    const ind = { id: "i1", name: "FAJ_DOGEPACK", params: [14, 9], pane: "sub" as const, options: { fillUp: "#11223344", fillUpOff: true }, styles: { l50: { color: "#ff0000", visible: false } } };
+    expect(indicatorVisual(ind)).toEqual({ styles: { l50: { color: "#ff0000" } }, fillUp: "#11223344" });
+    const fresh = withIndicatorVisual({ id: "i2", name: "FAJ_DOGEPACK", params: [14, 9], pane: "sub" }, indicatorVisual(ind));
+    expect(fresh.options?.fillUp).toBe("#11223344");
+    const factory = factoryIndicatorVisual(ind);
+    expect(factory.options).toEqual({ fillUpOff: true });
+    expect(factory.styles).toEqual({ l50: { visible: false } });
   });
 });

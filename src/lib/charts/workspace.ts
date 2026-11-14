@@ -50,6 +50,7 @@ export const CHART_INDICATORS: { name: string; label: string; pane: "main" | "su
   { name: "MACD", label: "MACD", pane: "sub", params: [12, 26, 9] },
   { name: "RSI", label: "RSI", pane: "sub", params: [6, 12, 24] },
   { name: "RSI_DIV", label: "RSI com divergências", pane: "sub", params: [14] },
+  { name: "FAJ_DOGEPACK", label: "FAJ Dogepack (RSI + EMA do RSI, por FiatEaterJens)", pane: "sub", params: [14, 9] },
   { name: "STOCH_RSI", label: "Estocástico RSI", pane: "sub", params: [14, 14, 3, 3] },
   { name: "KDJ", label: "KDJ (estocástico)", pane: "sub", params: [9, 3, 3] },
   { name: "ATR", label: "ATR", pane: "sub", params: [14] },
@@ -158,7 +159,19 @@ export type IndicatorState = {
   /** O que mostrar na legenda (falso = escondido). O cálculo continua. */
   legend?: { name?: boolean; params?: boolean; values?: boolean };
   /** Opções além dos períodos (ex.: tipo de cada média do MA ribbon). */
-  options?: { types?: MaType[]; levels?: number[]; source?: PriceSource; upColor?: string; downColor?: string; mode?: DeltaMode };
+  options?: {
+    types?: MaType[];
+    levels?: number[];
+    source?: PriceSource;
+    upColor?: string;
+    downColor?: string;
+    mode?: DeltaMode;
+    /** Fundo do painel por direção (FAJ Dogepack): cores com opacidade e visibilidade de cada um. */
+    fillUp?: string;
+    fillDown?: string;
+    fillUpOff?: boolean;
+    fillDownOff?: boolean;
+  };
 };
 export type FibLevel = { value: number; color: string; visible: boolean };
 export type OverlayStyleState = {
@@ -417,7 +430,14 @@ export function factoryVisualStyles(st: OverlayStyleState, defaultLevels: FibLev
 }
 
 /** Visual de um indicador: cor/espessura/traço de cada série e cores de alta/baixa (períodos e opções de cálculo, não). */
-export type IndicatorVisual = { styles?: Record<string, { color?: string; size?: number; style?: LineStyleName }>; upColor?: string; downColor?: string };
+export type IndicatorVisual = {
+  styles?: Record<string, { color?: string; size?: number; style?: LineStyleName }>;
+  upColor?: string;
+  downColor?: string;
+  fillUp?: string;
+  fillDown?: string;
+};
+const VISUAL_COLORS = ["upColor", "downColor", "fillUp", "fillDown"] as const;
 
 export function indicatorVisual(ind: Pick<IndicatorState, "styles" | "options">): IndicatorVisual {
   const styles: Record<string, { color?: string; size?: number; style?: LineStyleName }> = {};
@@ -427,18 +447,18 @@ export function indicatorVisual(ind: Pick<IndicatorState, "styles" | "options">)
   }
   return {
     ...(Object.keys(styles).length ? { styles } : {}),
-    ...(ind.options?.upColor ? { upColor: ind.options.upColor } : {}),
-    ...(ind.options?.downColor ? { downColor: ind.options.downColor } : {}),
+    ...Object.fromEntries(VISUAL_COLORS.flatMap((k) => (ind.options?.[k] ? [[k, ind.options[k]]] : []))),
   };
 }
 
 /** Indicador novo com o padrão visual do tipo (as séries guardam a própria visibilidade). */
 export function withIndicatorVisual(ind: IndicatorState, v: IndicatorVisual | undefined): IndicatorState {
-  if (!v || (!v.styles && !v.upColor && !v.downColor)) return ind;
+  const colors = Object.fromEntries(VISUAL_COLORS.flatMap((k) => (v?.[k] ? [[k, v[k]]] : [])));
+  if (!v || (!v.styles && !Object.keys(colors).length)) return ind;
   return {
     ...ind,
     ...(v.styles ? { styles: Object.fromEntries(Object.entries(v.styles).map(([k, line]) => [k, { ...line, ...(ind.styles?.[k]?.visible === undefined ? {} : { visible: ind.styles[k].visible }) }])) } : {}),
-    ...(v.upColor || v.downColor ? { options: { ...ind.options, ...(v.upColor ? { upColor: v.upColor } : {}), ...(v.downColor ? { downColor: v.downColor } : {}) } } : {}),
+    ...(Object.keys(colors).length ? { options: { ...ind.options, ...colors } } : {}),
   };
 }
 
@@ -446,8 +466,7 @@ export function withIndicatorVisual(ind: IndicatorState, v: IndicatorVisual | un
 export function factoryIndicatorVisual(ind: IndicatorState): IndicatorState {
   const styles = Object.fromEntries(Object.entries(ind.styles ?? {}).flatMap(([k, v]) => (v.visible === undefined ? [] : [[k, { visible: v.visible }]])));
   const options = { ...ind.options };
-  delete options.upColor;
-  delete options.downColor;
+  for (const k of VISUAL_COLORS) delete options[k];
   const out: IndicatorState = { ...ind };
   if (Object.keys(styles).length) out.styles = styles;
   else delete out.styles;
@@ -489,7 +508,7 @@ function sanitizeIndicatorDefaults(v: unknown): Record<string, IndicatorVisual> 
       }
       if (Object.keys(styles).length) item.styles = styles;
     }
-    for (const k of ["upColor", "downColor"] as const) if (typeof raw[k] === "string" && COLOR.test(raw[k] as string)) item[k] = raw[k] as string;
+    for (const k of VISUAL_COLORS) if (typeof raw[k] === "string" && COLOR.test(raw[k] as string)) item[k] = raw[k] as string;
     if (Object.keys(item).length) out[name] = item;
   }
   return Object.keys(out).length ? out : undefined;
@@ -675,10 +694,11 @@ function sanitizeIndicatorExtras(v: Record<string, unknown>, out: IndicatorState
     // Níveis de referência (ex.: RSI 30/50/70): de 0 a 100, no máximo 5.
     const lv = v.options.levels;
     if (lv !== undefined && (!Array.isArray(lv) || lv.length > 5 || !lv.every((x) => isNum(x) && x >= 0 && x <= 100))) return "Opções do indicador inválidas";
-    const { source, upColor, downColor, mode } = v.options;
+    const { source, upColor, downColor, mode, fillUp, fillDown, fillUpOff, fillDownOff } = v.options;
     if (source !== undefined && !oneOf(PRICE_SOURCES, source)) return "Opções do indicador inválidas";
     if (mode !== undefined && !oneOf(DELTA_MODES, mode)) return "Opções do indicador inválidas";
-    for (const c of [upColor, downColor]) if (c !== undefined && (typeof c !== "string" || !COLOR.test(c))) return "Opções do indicador inválidas";
+    for (const c of [upColor, downColor, fillUp, fillDown]) if (c !== undefined && (typeof c !== "string" || !COLOR.test(c))) return "Opções do indicador inválidas";
+    for (const b of [fillUpOff, fillDownOff]) if (b !== undefined && !isBool(b)) return "Opções do indicador inválidas";
     out.options = {
       ...(t === undefined ? {} : { types: t as MaType[] }),
       ...(lv === undefined ? {} : { levels: lv as number[] }),
@@ -686,6 +706,10 @@ function sanitizeIndicatorExtras(v: Record<string, unknown>, out: IndicatorState
       ...(upColor === undefined ? {} : { upColor: upColor as string }),
       ...(downColor === undefined ? {} : { downColor: downColor as string }),
       ...(mode === undefined ? {} : { mode: mode as DeltaMode }),
+      ...(fillUp === undefined ? {} : { fillUp: fillUp as string }),
+      ...(fillDown === undefined ? {} : { fillDown: fillDown as string }),
+      ...(fillUpOff === undefined ? {} : { fillUpOff: fillUpOff as boolean }),
+      ...(fillDownOff === undefined ? {} : { fillDownOff: fillDownOff as boolean }),
     };
   }
   return null;

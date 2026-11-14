@@ -30,6 +30,7 @@ import {
 } from "@/lib/charts/workspace";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { FAJ_EMA_DOWN, FAJ_EMA_UP, FAJ_FILL_DOWN, FAJ_FILL_UP } from "@/lib/charts/faj";
 import { ColorPicker, NumberInput, SETTINGS_BODY, SETTINGS_DIALOG, StyleMenu, WidthMenu } from "./object-ui";
 
 export const indicatorLabel = (name: string) => CHART_INDICATORS.find((c) => c.name === name)?.label ?? name;
@@ -52,6 +53,7 @@ const PARAM_LABELS: Record<string, string[]> = {
   MACD: ["Rápida", "Lenta", "Sinal"],
   RSI: ["RSI 1 — período", "RSI 2 — período", "RSI 3 — período"],
   RSI_DIV: ["Período do RSI"],
+  FAJ_DOGEPACK: ["RSI Length", "RSI EMA Length"],
   STOCH_RSI: ["Período do RSI", "Período do estocástico", "Suavização %K", "Suavização %D"],
   KDJ: ["Período", "Suavização K", "Suavização D"],
   ATR: ["Período"],
@@ -88,7 +90,13 @@ const SIDE_COLORS: Record<string, { up: string; down: string; upLabel: string; d
   VOLUME_PROFILE: { up: "#22c55e", down: "#ef4444", upLabel: "Compras", downLabel: "Vendas" },
   // Preenchimento entre as médias: EMA acima da SMA (alta) / abaixo (baixa). Cor e opacidade de cada área.
   BMSB: { up: "#4ade802e", down: "#f871712e", upLabel: "Área de alta (EMA > SMA)", downLabel: "Área de baixa (EMA < SMA)" },
+  // FAJ Dogepack: cor da EMA do RSI subindo (ou igual) e descendo.
+  FAJ_DOGEPACK: { up: FAJ_EMA_UP, down: FAJ_EMA_DOWN, upLabel: "EMA RSI — alta", downLabel: "EMA RSI — baixa" },
 };
+/** Séries cuja cor vem da direção (não do seletor de cor da linha). */
+const DYNAMIC_COLOR: Record<string, string[]> = { FAJ_DOGEPACK: ["ema"] };
+/** Parâmetros inteiros de no mínimo 1 (períodos). */
+const INTEGER_PARAMS = new Set(["FAJ_DOGEPACK"]);
 export type MenuTarget = { index: number; x: number; y: number };
 
 export function IndicatorMenu({
@@ -342,7 +350,14 @@ function IndicatorSettingsForm({
                   ))}
                 </select>
               )}
-              <NumberInput label={labels[i] ?? `Parâmetro ${i + 1}`} value={p} min={0.01} max={10_000} step="any" onChange={(v) => setParam(i, v)} />
+              <NumberInput
+                label={labels[i] ?? `Parâmetro ${i + 1}`}
+                value={p}
+                min={INTEGER_PARAMS.has(draft.name) ? 1 : 0.01}
+                max={10_000}
+                step={INTEGER_PARAMS.has(draft.name) ? 1 : "any"}
+                onChange={(v) => setParam(i, INTEGER_PARAMS.has(draft.name) ? Math.max(1, Math.round(v)) : v)}
+              />
             </div>
           ))}
         {current === "style" && (
@@ -350,6 +365,7 @@ function IndicatorSettingsForm({
             {sides && (
               <div className="flex flex-col gap-2">
                 {draft.name === "BMSB" && <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Preenchimento entre médias</p>}
+                {draft.name === "FAJ_DOGEPACK" && <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">EMA do RSI (cor pela direção)</p>}
                 <div className="flex items-center gap-2">
                   <span className="w-28 shrink-0">{sides.upLabel}</span>
                   <ColorPicker label={`Cor: ${sides.upLabel}`} value={draft.options?.upColor ?? sides.up} onChange={(upColor) => setOption({ upColor })} />
@@ -388,13 +404,38 @@ function IndicatorSettingsForm({
                 )}
               </div>
             )}
+            {draft.name === "FAJ_DOGEPACK" && (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Preenchimento do fundo</p>
+                {(
+                  [
+                    ["fillUp", "fillUpOff", "Fundo de alta", FAJ_FILL_UP],
+                    ["fillDown", "fillDownOff", "Fundo de baixa", FAJ_FILL_DOWN],
+                  ] as const
+                ).map(([key, off, label, def]) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <input type="checkbox" aria-label={`Mostrar ${label}`} checked={!draft.options?.[off]} onChange={(e) => setOption({ [off]: !e.target.checked })} />
+                    <span className="w-28 shrink-0">{label}</span>
+                    <ColorPicker label={`Cor: ${label}`} value={draft.options?.[key] ?? def} onChange={(color) => setOption({ [key]: color })} />
+                  </div>
+                ))}
+                <p className="mt-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Linhas e níveis</p>
+              </div>
+            )}
             {lines.map((f) => {
               const st = draft.styles?.[f.key] ?? {};
+              const dynamic = DYNAMIC_COLOR[draft.name]?.includes(f.key);
               return (
                 <div key={f.key} className="flex items-center gap-2">
                   <input type="checkbox" aria-label={`Mostrar ${f.title || f.key}`} checked={st.visible !== false} onChange={(e) => setSeries(f.key, { visible: e.target.checked })} />
                   <span className="w-28 shrink-0 truncate">{f.title || f.key}</span>
-                  <ColorPicker label={`Cor de ${f.title || f.key}`} value={st.color ?? f.color} onChange={(color) => setSeries(f.key, { color })} />
+                  {dynamic ? (
+                    <span className="w-8 shrink-0 text-center text-xs text-muted-foreground" title="Cor pela direção (acima)">
+                      ↕
+                    </span>
+                  ) : (
+                    <ColorPicker label={`Cor de ${f.title || f.key}`} value={st.color ?? f.color} onChange={(color) => setSeries(f.key, { color })} />
+                  )}
                   <WidthMenu value={st.size ?? f.size ?? 1} onChange={(size) => setSeries(f.key, { size })} />
                   <StyleMenu value={st.style ?? f.style ?? "solid"} onChange={(style) => setSeries(f.key, { style })} />
                 </div>

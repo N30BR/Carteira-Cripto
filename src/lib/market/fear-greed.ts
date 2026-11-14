@@ -113,11 +113,13 @@ export function fgYearRange(history: FgPoint[]): { max: FgPoint; min: FgPoint } 
   return max && min ? { max, min } : null;
 }
 
-export const FG_RANGES = ["30D", "1A", "Tudo"] as const;
+export const FG_RANGES = ["1S", "1M", "3M", "6M", "1A", "Tudo"] as const;
 export type FgRange = (typeof FG_RANGES)[number];
+/** Dias de cada período (1M = os mesmos 30 dias do antigo "30D"). */
+export const FG_RANGE_DAYS: Record<Exclude<FgRange, "Tudo">, number> = { "1S": 7, "1M": 30, "3M": 90, "6M": 182, "1A": 365 };
 /** Janela do gráfico, contada a partir da observação mais recente. */
 export function fgWindow<T extends { t: number }>(points: T[], range: FgRange, lastT: number): T[] {
   if (range === "Tudo") return points;
-  const days = range === "30D" ? 30 : 365;
+  const days = FG_RANGE_DAYS[range];
   return points.filter((p) => p.t > lastT - days * DAY);
 }

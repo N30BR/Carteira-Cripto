@@ -9,6 +9,7 @@ import { OVERLAY_VISUAL_KEYS, visualStyles } from "@/lib/charts/workspace";
 import { AXIS_RANGE_KEYS } from "@/lib/charts/workspace";
 import { NEO_COLORS } from "@/lib/charts/drawing";
 import { candleChange } from "@/lib/charts/candle-change";
+import { FAJ_EMA_DOWN, FAJ_EMA_UP, FAJ_LEVELS, FAJ_RSI_COLOR, isFajLevel } from "@/lib/charts/faj";
 import { ELLIOTT_LABELS } from "@/lib/charts/workspace";
 import { MACRO_SERIES } from "@/lib/charts/macro-ids";
 import { onchainInfo } from "@/lib/charts/onchain-ids";
@@ -86,6 +87,12 @@ export const DEFAULT_SERIES: Record<string, SeriesStyle[]> = {
     ...NEO_COLORS.slice(0, 6).map((color) => ({ color, size: 1, style: "solid" as const })),
     { color: NEO_COLORS[6], size: 1.5, style: "dashed" },
     { color: NEO_COLORS[7], size: 1.5, style: "dotted" },
+  ],
+  // FAJ Dogepack: RSI amarelo 2 px, EMA 2 px (cor pela direção) e os 5 níveis de 1 px nas cores do script.
+  FAJ_DOGEPACK: [
+    { color: FAJ_RSI_COLOR, size: 2, style: "solid" },
+    { color: FAJ_EMA_UP, size: 2, style: "solid" },
+    ...FAJ_LEVELS.map(([, , , color]) => ({ color, size: 1, style: "solid" as const })),
   ],
 };
 const dashOf = (style: string | undefined) => (style === "dashed" ? [6, 4] : style === "dotted" ? [1.5, 3] : [2, 2]);
@@ -330,6 +337,10 @@ function indicatorExtend(ind: IndicatorState): Record<string, unknown> | undefin
   if (o.upColor) out.upColor = o.upColor;
   if (o.downColor) out.downColor = o.downColor;
   if (o.mode) out.mode = o.mode;
+  if (o.fillUp) out.fillUp = o.fillUp;
+  if (o.fillDown) out.fillDown = o.fillDown;
+  if (o.fillUpOff) out.fillUpOff = true;
+  if (o.fillDownOff) out.fillDownOff = true;
   if (LEVEL_DEFAULTS[ind.name]) out.levels = o.levels ?? LEVEL_DEFAULTS[ind.name];
   return Object.keys(out).length ? out : undefined;
 }
@@ -1675,6 +1686,10 @@ export function ChartPane({
                     const isLine = (f.type ?? "line") === "line";
                     if (isLine) lineIndex++;
                     if (!f.title || ind.styles?.[f.key]?.visible === false) return [];
+                    // FAJ Dogepack: os níveis fixos não entram na legenda; a EMA usa a cor da direção na vela.
+                    if (ind.name === "FAJ_DOGEPACK" && isFajLevel(f.key)) return [];
+                    if (ind.name === "FAJ_DOGEPACK" && f.key === "ema" && (row.rising === 0 || row.rising === 1))
+                      return [{ title: { text: f.title, color: "#a1a1aa" }, value: { text: formatValue(row.ema, indicator.precision, false), color: row.rising === 1 ? (ind.options?.upColor ?? FAJ_EMA_UP) : (ind.options?.downColor ?? FAJ_EMA_DOWN) } }];
                     // Volume Delta: só a representação escolhida (colunas ou linha) aparece na legenda.
                     if (ind.name === "DELTA" && (f.key === "deltaLine") !== (ind.options?.mode === "line")) return [];
                     const color = isLine ? (lineColors[lineIndex] ?? DEFAULT_LINE_COLORS[lineIndex % DEFAULT_LINE_COLORS.length]) : "#a1a1aa";
